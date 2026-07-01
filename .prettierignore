@@ -1,0 +1,9 @@
+node_modules
+.claude
+dist
+build
+coverage
+.amplify
+amplify_outputs.json
+*.pdf
+package-lock.json
