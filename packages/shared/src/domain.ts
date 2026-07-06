@@ -146,3 +146,147 @@ export const Urgency = {
 } as const;
 
 export type Urgency = (typeof Urgency)[keyof typeof Urgency];
+
+/* -------------------------------------------------------------------------- */
+/* Location precision — design doc §2.4, §5.4 (geocoding confidence)           */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * How precisely a report's location is known after geocoding. Set by the
+ * geocode worker (CRIS-10); drives how a marker is rendered on the map.
+ */
+export const LocationPrecision = {
+  /** Exact coordinates supplied (GPS or map pin). */
+  EXACT: 'EXACT',
+  /** Geocoded from text to an approximate point. */
+  APPROXIMATE: 'APPROXIMATE',
+  /** Only the containing region is known. */
+  REGION_ONLY: 'REGION_ONLY',
+  /** Location could not be resolved. */
+  UNKNOWN: 'UNKNOWN',
+} as const;
+
+export type LocationPrecision = (typeof LocationPrecision)[keyof typeof LocationPrecision];
+
+/* -------------------------------------------------------------------------- */
+/* Verification — design doc §2.5, §2.6 (human-in-the-loop review)             */
+/* -------------------------------------------------------------------------- */
+
+/** Outcome of a single verification signal on a report (§2.6). */
+export const VerificationStatus = {
+  PENDING: 'PENDING',
+  CONFIRMED: 'CONFIRMED',
+  REJECTED: 'REJECTED',
+  INCONCLUSIVE: 'INCONCLUSIVE',
+} as const;
+
+export type VerificationStatus = (typeof VerificationStatus)[keyof typeof VerificationStatus];
+
+/* -------------------------------------------------------------------------- */
+/* Assignment & teams — design doc §2.5, §5.1 (dispatch lifecycle)             */
+/* -------------------------------------------------------------------------- */
+
+/** Lifecycle of a team assignment to a report (§5.1 dispatch). */
+export const AssignmentStatus = {
+  PROPOSED: 'PROPOSED',
+  ACCEPTED: 'ACCEPTED',
+  EN_ROUTE: 'EN_ROUTE',
+  ON_SCENE: 'ON_SCENE',
+  COMPLETED: 'COMPLETED',
+  CANCELLED: 'CANCELLED',
+} as const;
+
+export type AssignmentStatus = (typeof AssignmentStatus)[keyof typeof AssignmentStatus];
+
+/** Availability of a response team. */
+export const TeamStatus = {
+  AVAILABLE: 'AVAILABLE',
+  BUSY: 'BUSY',
+  OFFLINE: 'OFFLINE',
+} as const;
+
+export type TeamStatus = (typeof TeamStatus)[keyof typeof TeamStatus];
+
+/* -------------------------------------------------------------------------- */
+/* Alerts — design doc §2.7, §3 (proximity alerts via SNS)                     */
+/* -------------------------------------------------------------------------- */
+
+/** Channel a proximity alert is delivered over (§3 SNS SMS/email/push). */
+export const AlertChannel = {
+  SMS: 'SMS',
+  EMAIL: 'EMAIL',
+  PUSH: 'PUSH',
+} as const;
+
+export type AlertChannel = (typeof AlertChannel)[keyof typeof AlertChannel];
+
+/** Lifecycle of an alert subscription (§2.7). */
+export const SubscriptionStatus = {
+  ACTIVE: 'ACTIVE',
+  PAUSED: 'PAUSED',
+  UNSUBSCRIBED: 'UNSUBSCRIBED',
+} as const;
+
+export type SubscriptionStatus = (typeof SubscriptionStatus)[keyof typeof SubscriptionStatus];
+
+/** Delivery state of a single alert send attempt (§5.4.4 resilience). */
+export const DeliveryStatus = {
+  QUEUED: 'QUEUED',
+  SENT: 'SENT',
+  DELIVERED: 'DELIVERED',
+  FAILED: 'FAILED',
+  SUPPRESSED: 'SUPPRESSED',
+} as const;
+
+export type DeliveryStatus = (typeof DeliveryStatus)[keyof typeof DeliveryStatus];
+
+/* -------------------------------------------------------------------------- */
+/* Audit & duplicates — design doc §5.1 (immutable events), §5.4.3            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Type of an immutable audit event appended to a report's history (§5.1).
+ * Every mutating operation records one of these.
+ */
+export const ReportEventType = {
+  SUBMITTED: 'SUBMITTED',
+  STATUS_CHANGED: 'STATUS_CHANGED',
+  CLASSIFIED: 'CLASSIFIED',
+  SCORED: 'SCORED',
+  GEOCODED: 'GEOCODED',
+  DEDUPED: 'DEDUPED',
+  ASSIGNED: 'ASSIGNED',
+  VERIFIED: 'VERIFIED',
+  ALERT_SENT: 'ALERT_SENT',
+  NOTE_ADDED: 'NOTE_ADDED',
+} as const;
+
+export type ReportEventType = (typeof ReportEventType)[keyof typeof ReportEventType];
+
+/** Lifecycle of a duplicate group (§5.4.3 — grouped, never auto-deleted). */
+export const DuplicateGroupStatus = {
+  OPEN: 'OPEN',
+  MERGED: 'MERGED',
+  DISMISSED: 'DISMISSED',
+} as const;
+
+export type DuplicateGroupStatus = (typeof DuplicateGroupStatus)[keyof typeof DuplicateGroupStatus];
+
+/* -------------------------------------------------------------------------- */
+/* PII boundary — design doc §5.3, §5.6 (redacted public projection)          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Reporter identity/contact and internal-only fields that MUST NEVER appear in
+ * public/guest views (§5.6). The separate `PublicReport` projection omits these
+ * physically; this list is the single authority shared by the projection/
+ * redaction logic (CRIS-9) and by tests that guard the boundary.
+ */
+export const REDACTED_REPORT_FIELDS = [
+  'reporterUserId',
+  'reporterName',
+  'reporterContact',
+  'internalNotes',
+] as const;
+
+export type RedactedReportField = (typeof REDACTED_REPORT_FIELDS)[number];
