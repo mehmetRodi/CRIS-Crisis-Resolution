@@ -134,125 +134,79 @@ describe('supporting enums (§2.4–§2.7, §5.1)', () => {
 
 /**
  * Drift guard (conventions.md §"Domain vocabulary"): `a.enum()` needs literal
- * arrays, so every enum is duplicated as an inlined array in
- * `apps/web/amplify/data/resource.ts`. These snapshots are the contract that
- * file MUST mirror — if you change an enum here, this test fails until you
- * update BOTH the snapshot below AND the inlined `a.enum([...])` in the schema.
+ * arrays, so every enum below is duplicated as an inlined `a.enum([...])` in
+ * `apps/web/amplify/data/resource.ts`. The expected arrays here are the contract
+ * that file MUST mirror — if you change an enum in domain.ts, this test fails
+ * until you update BOTH this expectation AND the inlined array in the schema.
  */
 describe('schema enum sync guard', () => {
-  const EXPECTED_INLINED_ENUMS: Record<string, readonly string[]> = {
-    ReportStatus: Object.values(ReportStatus),
-    Category: Object.values(Category),
-    Urgency: Object.values(Urgency),
-    PriorityBand: Object.values(PriorityBand),
-    LocationPrecision: Object.values(LocationPrecision),
-    VerificationStatus: Object.values(VerificationStatus),
-    AssignmentStatus: Object.values(AssignmentStatus),
-    TeamStatus: Object.values(TeamStatus),
-    AlertChannel: Object.values(AlertChannel),
-    SubscriptionStatus: Object.values(SubscriptionStatus),
-    DeliveryStatus: Object.values(DeliveryStatus),
-    ReportEventType: Object.values(ReportEventType),
-    DuplicateGroupStatus: Object.values(DuplicateGroupStatus),
-  };
-
-  it('snapshots the enum arrays that must stay in sync with the Amplify schema', () => {
-    expect(EXPECTED_INLINED_ENUMS).toMatchInlineSnapshot(`
-      {
-        "AlertChannel": [
-          "SMS",
-          "EMAIL",
-          "PUSH",
-        ],
-        "AssignmentStatus": [
-          "PROPOSED",
-          "ACCEPTED",
-          "EN_ROUTE",
-          "ON_SCENE",
-          "COMPLETED",
-          "CANCELLED",
-        ],
-        "Category": [
-          "MEDICAL",
-          "RESCUE",
-          "STRUCTURAL_DAMAGE",
-          "FIRE",
-          "FLOOD",
-          "HAZMAT",
-          "BLOCKED_ROAD",
-          "SHELTER",
-          "UTILITY",
-          "OTHER",
-        ],
-        "DeliveryStatus": [
-          "QUEUED",
-          "SENT",
-          "DELIVERED",
-          "FAILED",
-          "SUPPRESSED",
-        ],
-        "DuplicateGroupStatus": [
-          "OPEN",
-          "MERGED",
-          "DISMISSED",
-        ],
-        "LocationPrecision": [
-          "EXACT",
-          "APPROXIMATE",
-          "REGION_ONLY",
-          "UNKNOWN",
-        ],
-        "PriorityBand": [
-          "P0",
-          "P1",
-          "P2",
-          "P3",
-        ],
-        "ReportEventType": [
-          "SUBMITTED",
-          "STATUS_CHANGED",
-          "CLASSIFIED",
-          "SCORED",
-          "GEOCODED",
-          "DEDUPED",
-          "ASSIGNED",
-          "VERIFIED",
-          "ALERT_SENT",
-          "NOTE_ADDED",
-        ],
-        "ReportStatus": [
-          "NEW",
-          "PROCESSING",
-          "AI_CLASSIFIED",
-          "NEEDS_VERIFICATION",
-          "VERIFIED",
-          "IN_PROGRESS",
-          "RESOLVED",
-          "REJECTED",
-        ],
-        "SubscriptionStatus": [
-          "ACTIVE",
-          "PAUSED",
-          "UNSUBSCRIBED",
-        ],
-        "TeamStatus": [
-          "AVAILABLE",
-          "BUSY",
-          "OFFLINE",
-        ],
-        "Urgency": [
-          "CRITICAL",
-          "HIGH",
-          "MEDIUM",
-          "LOW",
-        ],
-        "VerificationStatus": [
-          "PENDING",
-          "CONFIRMED",
-          "REJECTED",
-          "INCONCLUSIVE",
-        ],
-      }
-    `);
+  it('pins the enum arrays that must stay identical to the Amplify schema', () => {
+    expect(Object.values(ReportStatus)).toEqual([
+      'NEW',
+      'PROCESSING',
+      'AI_CLASSIFIED',
+      'NEEDS_VERIFICATION',
+      'VERIFIED',
+      'IN_PROGRESS',
+      'RESOLVED',
+      'REJECTED',
+    ]);
+    expect(Object.values(Category)).toEqual([
+      'MEDICAL',
+      'RESCUE',
+      'STRUCTURAL_DAMAGE',
+      'FIRE',
+      'FLOOD',
+      'HAZMAT',
+      'BLOCKED_ROAD',
+      'SHELTER',
+      'UTILITY',
+      'OTHER',
+    ]);
+    expect(Object.values(Urgency)).toEqual(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']);
+    expect(Object.values(PriorityBand)).toEqual(['P0', 'P1', 'P2', 'P3']);
+    expect(Object.values(LocationPrecision)).toEqual([
+      'EXACT',
+      'APPROXIMATE',
+      'REGION_ONLY',
+      'UNKNOWN',
+    ]);
+    expect(Object.values(VerificationStatus)).toEqual([
+      'PENDING',
+      'CONFIRMED',
+      'REJECTED',
+      'INCONCLUSIVE',
+    ]);
+    expect(Object.values(AssignmentStatus)).toEqual([
+      'PROPOSED',
+      'ACCEPTED',
+      'EN_ROUTE',
+      'ON_SCENE',
+      'COMPLETED',
+      'CANCELLED',
+    ]);
+    expect(Object.values(TeamStatus)).toEqual(['AVAILABLE', 'BUSY', 'OFFLINE']);
+    expect(Object.values(AlertChannel)).toEqual(['SMS', 'EMAIL', 'PUSH']);
+    expect(Object.values(SubscriptionStatus)).toEqual(['ACTIVE', 'PAUSED', 'UNSUBSCRIBED']);
+    expect(Object.values(DeliveryStatus)).toEqual([
+      'QUEUED',
+      'SENT',
+      'DELIVERED',
+      'FAILED',
+      'SUPPRESSED',
+    ]);
+    expect(Object.values(ReportEventType)).toEqual([
+      'SUBMITTED',
+      'STATUS_CHANGED',
+      'CLASSIFIED',
+      'SCORED',
+      'GEOCODED',
+      'DEDUPED',
+      'ASSIGNED',
+      'VERIFIED',
+      'ALERT_SENT',
+      'NOTE_ADDED',
+    ]);
+    expect(Object.values(DuplicateGroupStatus)).toEqual(['OPEN', 'MERGED', 'DISMISSED']);
   });
 });
