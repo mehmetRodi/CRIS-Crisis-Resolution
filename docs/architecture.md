@@ -82,11 +82,11 @@ NEW → PROCESSING → AI_CLASSIFIED → VERIFIED → IN_PROGRESS → RESOLVED
 | -------------------------------- | --------------------------------------------------------------------- |
 | React SPA client                 | `apps/web` — placeholder shell, real surfaces per CRIS-6/12/13        |
 | Cognito auth                     | `apps/web/amplify/auth` — stub, 5 groups (CRIS-7 for anonymous/roles) |
-| AppSync + DynamoDB               | `apps/web/amplify/data` — one minimal `Report` model (CRIS-8/9)       |
+| AppSync + DynamoDB               | `apps/web/amplify/data` — full MVP model: Report + 10 entities, 6 GSIs, `PublicReport` projection (CRIS-8 ✓); mutations/sync-writer CRIS-9 |
 | S3 media                         | `apps/web/amplify/storage` — stub bucket                              |
 | Streams→SQS→Lambda→Bedrock→SNS   | **not built** — CDK escape hatch on `backend`, CRIS-10                |
 | MapLibre + Amazon Location       | not built — CRIS-13                                                   |
-| Shared domain vocabulary         | `packages/shared` — statuses, roles, bands, categories                |
+| Shared domain vocabulary         | `packages/shared` — statuses, roles, bands, categories + verification/assignment/team/alert/audit enums (CRIS-8) |
 | CI                               | `.github/workflows/ci.yml` — CRIS-15                                  |
 | Observability (CloudWatch/X-Ray) | conventions only (docs/conventions.md); wired with Lambdas            |
 
