@@ -1,10 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import {
+  AlertChannel,
+  AssignmentStatus,
   canTransition,
+  Category,
+  DeliveryStatus,
+  DuplicateGroupStatus,
+  LocationPrecision,
   priorityBandForScore,
   PriorityBand,
+  REDACTED_REPORT_FIELDS,
+  ReportEventType,
   ReportStatus,
   STATUS_TRANSITIONS,
+  SubscriptionStatus,
+  TeamStatus,
+  Urgency,
+  VerificationStatus,
 } from './domain';
 
 describe('report state machine', () => {
