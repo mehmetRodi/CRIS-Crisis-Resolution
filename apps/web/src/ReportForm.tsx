@@ -13,6 +13,8 @@ export function ReportForm() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [photo, setPhoto] = useState<File | null>(null);
+  const isFormValid =   text.trim().length > 10 &&   category !== '' &&   urgency !== '';
+  const report = {text: text.trim(),category, urgency, photo,};
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -21,8 +23,12 @@ export function ReportForm() {
 
     try {
       await new Promise((resolve) => setTimeout(resolve, 1000));
-      console.log('Submitting:', { text, category, urgency });
+      console.log('Submitting report:', report);
       setSubmitted(true);
+      setText('');
+      setCategory('');
+      setUrgency('');
+      setPhoto(null);
     } catch {
       setError('Something went wrong. Please try again.');
     } finally {
@@ -31,7 +37,15 @@ export function ReportForm() {
   }
 
   if (submitted) {
-    return <p className="rounded-md bg-green-50 p-4 text-green-800">Report submitted. Thank you.</p>;
+    return <div className="rounded-lg border border-green-200 bg-green-50 p-4">
+    <h3 className="font-semibold text-green-800">
+        Report Submitted
+    </h3>
+
+    <p className="mt-1 text-sm text-green-700">
+        Thank you for your report. Emergency coordinators will review it shortly.
+    </p>
+    </div>
   }
 
   return (
@@ -39,11 +53,15 @@ export function ReportForm() {
       <label className="flex flex-col gap-1">
         <span className="text-sm font-medium text-gray-900">Description</span>
         <textarea
+          placeholder="Describe what happened, where it happened, and whether anyone is injured..."
           value={text}
           onChange={(e) => setText(e.target.value)}
           rows={4}
           className="rounded-md border border-gray-300 p-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
+        <p className="text-right text-xs text-slate-500">
+        {text.length}/1000 characters
+        </p>
       </label>
 
       <label className="flex flex-col gap-1">
@@ -89,6 +107,7 @@ export function ReportForm() {
         <input
             type="file"
             accept="image/*"
+            className="rounded border border-slate-300 p-2"
             onChange={(e) => setPhoto(e.target.files?.[0] ?? null)}
         />
       </label>
@@ -96,7 +115,7 @@ export function ReportForm() {
 {photo && <p className="text-xs text-gray-500">Selected: {photo.name}</p>}
       <button
         type="submit"
-        disabled={submitting || !text || !category || !urgency}
+        disabled={submitting || !isFormValid}
         className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
       >
         {submitting ? 'Submitting…' : 'Submit Report'}
