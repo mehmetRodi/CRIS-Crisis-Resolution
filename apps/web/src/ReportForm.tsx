@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import type { FormEvent } from 'react';
 import { Category, Urgency } from '@crisismap/shared';
+
 
 const CATEGORY_OPTIONS = Object.values(Category);
 const URGENCY_OPTIONS = Object.values(Urgency);
@@ -15,6 +16,28 @@ export function ReportForm() {
   const [photo, setPhoto] = useState<File | null>(null);
   const isFormValid =   text.trim().length > 10 &&   category !== '' &&   urgency !== '';
   const report = {text: text.trim(),category, urgency, photo,};
+  const [location, setLocation] = useState<{lat: number, lng: number} | null>(null);
+  const [locationError, setLocationError] = useState<string | null>(null);
+ 
+
+  // Get user's location on mount
+useEffect(() => {
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLocation({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude
+        });
+      },
+      (error) => {
+        setLocationError('Unable to get location. Please enter manually in description.');
+      }
+    );
+  }else {
+      setLocationError('Geolocation is not supported by your browser.');
+    }
+}, []);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -22,6 +45,8 @@ export function ReportForm() {
     setError(null);
 
     try {
+        //TODO replace this with actual API call to submit the report
+
       await new Promise((resolve) => setTimeout(resolve, 1000));
       console.log('Submitting report:', report);
       setSubmitted(true);
@@ -113,6 +138,17 @@ export function ReportForm() {
       </label>
 
 {photo && <p className="text-xs text-gray-500">Selected: {photo.name}</p>}
+
+<div className="text-xs"> 
+{location ? (
+  <p className="text-xs text-green-600">📍 Location captured: {location.lat.toFixed(4)}, {location.lng.toFixed(4)}</p>
+) : locationError ? (
+          <p className="text-amber-600">⚠️ {locationError}</p>
+        ) : (
+          <p className="text-amber-600">⏳ Detecting your location...</p>
+        )}
+</div>
+
       <button
         type="submit"
         disabled={submitting || !isFormValid}
