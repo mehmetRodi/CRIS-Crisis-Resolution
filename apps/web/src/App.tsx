@@ -1,5 +1,5 @@
 import { ReportStatus, UserRole } from '@crisismap/shared';
-
+import CitizenReportPage from './CitizenReportPage';
 /**
  * Placeholder application shell.
  *
@@ -100,6 +100,9 @@ function App() {
             ))}
           </ul>
         </section>
+        <hr className="my-12 border-slate-300" />
+
+        <CitizenReportPage />
       </div>
     </main>
   );
