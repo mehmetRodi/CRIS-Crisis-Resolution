@@ -1,26 +1,39 @@
 import { defineBackend } from '@aws-amplify/backend';
+import { Duration } from 'aws-cdk-lib';
+import { StreamViewType } from 'aws-cdk-lib/aws-dynamodb';
+import { PolicyStatement, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
+import { SqsEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
+import { CfnPipe } from 'aws-cdk-lib/aws-pipes';
+import { Queue } from 'aws-cdk-lib/aws-sqs';
 import { auth } from './auth/resource';
 import { data } from './data/resource';
 import { storage } from './storage/resource';
 import { submitReport } from './functions/submit-report/resource';
 import { transitionReport } from './functions/transition-report/resource';
 import { publishReportUpdate } from './functions/publish-report-update/resource';
+import { classifyReport } from './functions/classify-report/resource';
 
 /**
  * CrisisMap AI backend (Amplify Gen 2).
  *
- * Wires the managed auth/data/storage resources plus the custom resolvers that
- * back the E2 API surface (CRIS-9/18/19). Table names and IAM grants for those
- * functions are set here rather than in each function's `resource.ts`, because
- * the DynamoDB tables don't exist until the data schema is synthesized.
+ * Wires the managed auth/data/storage resources, the custom resolvers that back
+ * the E2 API surface (CRIS-9/18/19), and the custom asynchronous AI-triage
+ * pipeline from the design doc (§3, §5.4), added via CDK escape hatches
+ * (ADR-0003, ADR-0013):
  *
- * The custom asynchronous pipeline from the design doc (§3, §5.4) — DynamoDB
- * Streams → SQS → Lambda classification workers → Bedrock → SNS alerts — is
- * still NOT defined here; it is added via CDK escape hatches under CRIS-10.
+ *   Report DynamoDB stream → EventBridge Pipe → SQS (+DLQ) → classify-report Lambda
+ *
+ * Table names and IAM grants for the resolver/worker functions are set here
+ * rather than in each function's `resource.ts`, because the DynamoDB tables
+ * don't exist until the data schema is synthesized. The worker classifies
+ * (Bedrock), scores, and writes results back durably (direct-to-DynamoDB, §5.3);
+ * fanning the redacted update out to subscribers via `publishReportUpdate`
+ * (CRIS-19) and SNS proximity alerts remain deferred seams.
  *
  * Nothing here is deployed by the scaffold. Run `npx ampx sandbox` from
- * `apps/web` (with AWS credentials configured) to stand up a personal dev
- * environment. See docs/architecture.md and ADR 0003.
+ * `apps/web` (with AWS credentials + Bedrock model access) to stand up a
+ * personal dev environment. NOTE: enabling the stream changes the table's
+ * custom-resource update path — deploy on a fresh sandbox first (ADR-0013).
  */
 const backend = defineBackend({
   auth,
@@ -29,13 +42,15 @@ const backend = defineBackend({
   submitReport,
   transitionReport,
   publishReportUpdate,
+  classifyReport,
 });
+
+const tables = backend.data.resources.tables;
 
 /* -------------------------------------------------------------------------- */
 /* submitReport (CRIS-9) — grant table access + inject table names            */
 /* -------------------------------------------------------------------------- */
 
-const tables = backend.data.resources.tables;
 const submitFn = backend.submitReport.resources.lambda;
 
 // The resolver writes the report + its opening audit event and reads back the
@@ -64,3 +79,127 @@ tables['ReportEvent'].grantWriteData(transitionFn);
 
 backend.transitionReport.addEnvironment('REPORT_TABLE_NAME', tables['Report'].tableName);
 backend.transitionReport.addEnvironment('REPORT_EVENT_TABLE_NAME', tables['ReportEvent'].tableName);
+
+/* -------------------------------------------------------------------------- */
+/* classify-report pipeline (CRIS-10) — Streams → Pipe → SQS → Lambda          */
+/* -------------------------------------------------------------------------- */
+
+const worker = backend.classifyReport.resources.lambda;
+const cfnTables = backend.data.resources.cfnResources.amplifyDynamoDbTables;
+
+/* -------------------------------------------------------------------------- */
+/* Table mutations — enable the stream + TTL BEFORE building the pipe          */
+/* (the pipe source is the stream ARN, which only exists once the stream is on) */
+/* -------------------------------------------------------------------------- */
+
+// Amplify models are `Custom::AmplifyDynamoDBTable`; stream/TTL are set on the
+// wrapper (keyed by model name), not on the L2 ITable (ADR-0013).
+cfnTables['Report'].streamSpecification = {
+  streamViewType: StreamViewType.NEW_AND_OLD_IMAGES,
+};
+cfnTables['IdempotencyRecord'].timeToLiveAttribute = {
+  enabled: true,
+  attributeName: 'expiresAt', // a.integer() = epoch seconds, as TTL requires
+};
+
+/* -------------------------------------------------------------------------- */
+/* Pipeline stack — isolated from Amplify's managed nested stacks              */
+/* -------------------------------------------------------------------------- */
+
+const pipelineStack = backend.createStack('pipeline');
+
+// Standard queues (reports are independent; idempotency is enforced in-app).
+const classificationDlq = new Queue(pipelineStack, 'ClassificationDlq', {
+  retentionPeriod: Duration.days(14),
+});
+const classificationQueue = new Queue(pipelineStack, 'ClassificationQueue', {
+  // visibilityTimeout must be ≥ the Lambda timeout; 6× (360s) absorbs retries.
+  visibilityTimeout: Duration.seconds(360),
+  deadLetterQueue: { queue: classificationDlq, maxReceiveCount: 3 },
+});
+
+/* -------------------------------------------------------------------------- */
+/* EventBridge Pipe: Report stream → classification queue                      */
+/* -------------------------------------------------------------------------- */
+
+const reportTable = tables['Report'];
+const streamArn = reportTable.tableStreamArn;
+if (!streamArn) {
+  throw new Error('Report table stream ARN is undefined — stream not enabled?');
+}
+
+const pipeRole = new Role(pipelineStack, 'StreamToSqsPipeRole', {
+  assumedBy: new ServicePrincipal('pipes.amazonaws.com'),
+});
+reportTable.grantStreamRead(pipeRole);
+classificationQueue.grantSendMessages(pipeRole);
+
+new CfnPipe(pipelineStack, 'ReportStreamToClassificationQueue', {
+  roleArn: pipeRole.roleArn,
+  source: streamArn,
+  target: classificationQueue.queueArn,
+  sourceParameters: {
+    dynamoDbStreamParameters: {
+      startingPosition: 'LATEST', // don't replay historical NEW reports on deploy
+      batchSize: 10,
+      maximumBatchingWindowInSeconds: 1,
+    },
+    // Only INSERTs of reports that still need classification. `pattern` is a
+    // JSON string (L1 CfnPipe quirk).
+    filterCriteria: {
+      filters: [
+        {
+          pattern: JSON.stringify({
+            eventName: ['INSERT'],
+            dynamodb: { NewImage: { status: { S: ['NEW'] } } },
+          }),
+        },
+      ],
+    },
+  },
+  targetParameters: {
+    // Ship ONLY IDs + trace metadata to SQS — no PII (text/reporter*) ever
+    // leaves the table into the queue (§5.6). The worker re-reads the full item
+    // from DynamoDB under IAM.
+    inputTemplate: JSON.stringify({
+      reportId: '<$.dynamodb.Keys.id.S>',
+      version: '<$.dynamodb.NewImage.version.N>',
+      streamEventId: '<$.eventID>',
+    }),
+  },
+});
+
+/* -------------------------------------------------------------------------- */
+/* Lambda wiring — SQS event source, IAM, environment                          */
+/* -------------------------------------------------------------------------- */
+
+worker.addEventSource(
+  new SqsEventSource(classificationQueue, {
+    batchSize: 5,
+    maxBatchingWindow: Duration.seconds(5),
+    reportBatchItemFailures: true, // pairs with the handler's SQSBatchResponse
+  }),
+);
+
+// SQS consume (receive/delete/getAttributes).
+classificationQueue.grantConsumeMessages(worker);
+
+// Durable direct-to-DynamoDB writes (§5.3): read+write Report, append audit
+// events. The redacted public projection is fanned out via publishReportUpdate
+// (CRIS-19), not written to a table here.
+reportTable.grantReadWriteData(worker);
+tables['ReportEvent'].grantWriteData(worker);
+
+// Bedrock — scoped to the Claude foundation-model family in this region (no
+// cross-provider access). Kept a family wildcard so switching BEDROCK_MODEL_ID
+// across Claude tiers needs no IAM change (ADR-0013).
+worker.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['bedrock:InvokeModel'],
+    resources: [`arn:aws:bedrock:${backend.stack.region}::foundation-model/anthropic.claude-*`],
+  }),
+);
+
+// Table names the worker resolves at runtime (no secrets/PII).
+backend.classifyReport.addEnvironment('REPORT_TABLE_NAME', reportTable.tableName);
+backend.classifyReport.addEnvironment('REPORT_EVENT_TABLE_NAME', tables['ReportEvent'].tableName);

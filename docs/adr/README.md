@@ -28,3 +28,5 @@ behind the code — essential when refactoring or extending the system.
 | [0010](0010-classification-contract-and-scoring.md)        | AI classification contract + scoring | Accepted |
 | [0011](0011-custom-resolver-conventions-amplify-gen2.md)   | Custom AppSync resolver conventions  | Accepted |
 | [0012](0012-amplify-outputs-in-ci.md)                      | Amplify outputs handling in CI       | Accepted |
+| [0013](0013-async-classification-pipeline.md)              | Async classification pipeline        | Accepted |
+| [0014](0014-rollup-native-binary-in-ci.md)                 | Rollup native binary for CI          | Accepted |
