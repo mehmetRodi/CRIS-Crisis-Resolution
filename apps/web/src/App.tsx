@@ -1,5 +1,7 @@
 import { ReportStatus, UserRole } from '@crisismap/shared';
 import CitizenReportPage from './CitizenReportPage';
+import { useNavigate } from 'react-router-dom';
+
 /**
  * Placeholder application shell.
  *
@@ -17,6 +19,7 @@ interface Surface {
   role: string;
   ticket: string;
   description: string;
+  path?: string; 
 }
 
 const SURFACES: Surface[] = [
@@ -25,6 +28,7 @@ const SURFACES: Surface[] = [
     role: UserRole.CITIZEN,
     ticket: 'CRIS-6',
     description: 'Fast free-text emergency report with optional location, media, and anonymity.',
+    path: '/citizen',
   },
   {
     title: 'Coordinator dashboard',
@@ -49,6 +53,14 @@ const SURFACES: Surface[] = [
 const LIFECYCLE = Object.values(ReportStatus);
 
 function App() {
+  const navigate = useNavigate();
+
+  const handleCardClick = (path?: string) => {
+    if (path) {
+      navigate(path);
+    }
+  };
+
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900">
       <div className="mx-auto max-w-4xl px-6 py-12">
@@ -86,7 +98,10 @@ function App() {
             {SURFACES.map((surface) => (
               <li
                 key={surface.title}
-                className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
+                onClick={() => handleCardClick(surface.path)}
+                className={`rounded-lg border border-slate-200 bg-white p-4 shadow-sm ${
+  surface.path ? 'cursor-pointer hover:border-blue-400 hover:shadow-md transition-all' : ''
+}`}
               >
                 <div className="flex items-center justify-between">
                   <h3 className="font-semibold">{surface.title}</h3>
@@ -100,9 +115,9 @@ function App() {
             ))}
           </ul>
         </section>
-        <hr className="my-12 border-slate-300" />
+        {/* <hr className="my-12 border-slate-300" />
 
-        <CitizenReportPage />
+        <CitizenReportPage /> */}
       </div>
     </main>
   );
