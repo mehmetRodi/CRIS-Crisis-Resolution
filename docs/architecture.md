@@ -87,6 +87,7 @@ NEW → PROCESSING → AI_CLASSIFIED → VERIFIED → IN_PROGRESS → RESOLVED
 | Streams→SQS→Lambda→Bedrock→SNS   | **not built** — CDK escape hatch on `backend`, CRIS-10                                                                                     |
 | MapLibre + Amazon Location       | not built — CRIS-13                                                                                                                        |
 | Shared domain vocabulary         | `packages/shared` — statuses, roles, bands, categories + verification/assignment/team/alert/audit enums (CRIS-8)                           |
+| AI classification contract + scoring | `packages/shared/src/classification.ts` — versioned JSON contract + deterministic [0,10] scoring & `ScoreBreakdown` (CRIS-11 ✓, ADR-0007); Bedrock call + pipeline wiring CRIS-10 |
 | CI                               | `.github/workflows/ci.yml` — CRIS-15                                                                                                       |
 | Observability (CloudWatch/X-Ray) | conventions only (docs/conventions.md); wired with Lambdas                                                                                 |
 
