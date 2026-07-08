@@ -39,11 +39,36 @@ Shared conventions for CrisisMap AI. Keep this current; it is the reference for 
 - Alarms/metrics (submission latency, classification latency, DLQ depth) are defined when the
   pipeline lands (CRIS-10/14). Until then this section is the contract.
 
+## Backend custom resolvers (Amplify Gen 2)
+
+Hand-written AppSync resolver Lambdas bypass everything Amplify's generated resolvers do for
+you. Every custom resolver that writes to DynamoDB **must** follow this checklist (full
+rationale in ADR-0011):
+
+- **Strip `null`/`undefined` before writing.** DynamoDB rejects a `NULL` value on any index
+  key. Use `forDynamoItem(...)`; do not rely on `removeUndefinedValues` (it keeps `null`).
+  An unset indexed attribute must be _absent_, not `null`.
+- **Set the Amplify-managed timestamps yourself.** Every model has a non-nullable `updatedAt`
+  (and an implicit `createdAt` unless declared). Populate them on every written item or the
+  GraphQL response fails to serialize. On create, `updatedAt == createdAt`; an update bumps
+  `updatedAt`.
+- **Handle idempotent replays on both signals.** A retried write surfaces as
+  `TransactionCanceledException` _or_ `IdempotentParameterMismatchException` — treat both as
+  "already processed" and return the original record.
+- **Put resolver+table functions in the data stack.** If a `defineFunction` is both a schema
+  resolver and granted table access in `backend.ts`, set `resourceGroupName: 'data'` to avoid
+  a nested-stack circular dependency.
+- **Custom subscriptions need a `.handler()`**, not just an auth rule (an AppSync JS resolver
+  that sets the filter).
+
 ## Testing
 
 - **Vitest** for unit tests, co-located as `*.test.ts(x)` next to the code.
 - Every workspace exposes a `test` script; CI runs `npm test` across all workspaces.
 - Domain logic (state machine, scoring) must have unit tests — it's the safety-critical core.
+- **Unit tests assert in-memory shapes and will not catch DynamoDB/GraphQL contract breaks**
+  (see ADR-0011). Before a write path is "done", smoke-test it end-to-end against a sandbox
+  (`npx ampx sandbox` → sign in → call the mutation → assert the returned record).
 
 ## Commits & branches
 

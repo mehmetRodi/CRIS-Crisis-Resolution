@@ -11,4 +11,7 @@ export const publishReportUpdate = defineFunction({
   entry: './handler.ts',
   timeoutSeconds: 10,
   memoryMB: 128,
+  // AppSync data resolver → keep in the data stack alongside the other
+  // resolvers (Amplify Gen 2 prescribed fix for nested-stack cycles).
+  resourceGroupName: 'data',
 });

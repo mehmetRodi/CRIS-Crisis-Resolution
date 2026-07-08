@@ -26,3 +26,5 @@ behind the code — essential when refactoring or extending the system.
 | [0008](0008-report-transition-engine.md)                   | Report transition engine             | Accepted |
 | [0009](0009-public-projection-and-realtime-publish.md)     | Public projection + real-time        | Accepted |
 | [0010](0010-classification-contract-and-scoring.md)        | AI classification contract + scoring | Accepted |
+| [0011](0011-custom-resolver-conventions-amplify-gen2.md)   | Custom AppSync resolver conventions  | Accepted |
+| [0012](0012-amplify-outputs-in-ci.md)                      | Amplify outputs handling in CI       | Accepted |
