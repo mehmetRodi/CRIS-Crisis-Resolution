@@ -56,7 +56,7 @@ describe('validateClassification (§5.4.1 JSON contract)', () => {
 
   it('rejects an empty or missing summary', () => {
     expect(validateClassification({ ...valid, summary: '   ' }).ok).toBe(false);
-    const { summary: _omit, ...noSummary } = valid;
+    const noSummary = { ...valid, summary: undefined };
     expect(validateClassification(noSummary).ok).toBe(false);
   });
 
