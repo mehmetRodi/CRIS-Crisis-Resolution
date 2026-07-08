@@ -43,7 +43,7 @@ node — npm never records the cross-platform variants for a transitive optional
 - **Post-install repair step in CI** (`npm install @rollup/rollup-linux-x64-gnu` after
   `npm ci`). Works but adds an unpinned, out-of-lockfile fetch and hides the coupling in
   the workflow YAML rather than the manifest. Rejected.
-- **Declare the runner's binary as a root `optionalDependency` (chosen).** A *direct*
+- **Declare the runner's binary as a root `optionalDependency` (chosen).** A _direct_
   optional dependency is recorded in the lockfile with `resolved` + `integrity` **even when
   it does not match the host platform** (marked `optional: true`, `os: ["linux"]`). This
   gives `npm ci` on Linux an installable entry while remaining a skipped no-op on macOS.
