@@ -99,11 +99,11 @@ export const MIN_PRIORITY_SCORE = 0;
 export const MAX_PRIORITY_SCORE = 10;
 
 /**
- * Maps a [0, 10] priority score to a band.
- *
- * TENTATIVE thresholds — the authoritative scoring formula and band cutoffs are
- * owned by the deterministic scoring work (design doc §5.4.2 / CRIS-11). Kept
- * here so the UI has something to render against during scaffolding.
+ * Maps a [0, 10] priority score to a band (§5.4.2). These cutoffs are the
+ * authoritative band boundaries, finalized by the deterministic scoring work
+ * (CRIS-11); the formula that produces the score lives in
+ * `classification.ts` (`scoreReport`). Change cutoffs here and bump
+ * `SCORE_VERSION` so scores stay comparable across formula versions.
  */
 export function priorityBandForScore(score: number): PriorityBand {
   if (score >= 8) return PriorityBand.P0;
