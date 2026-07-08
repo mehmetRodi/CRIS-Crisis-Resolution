@@ -84,7 +84,7 @@ NEW → PROCESSING → AI_CLASSIFIED → VERIFIED → IN_PROGRESS → RESOLVED
 | Cognito auth                     | `apps/web/amplify/auth` — stub, 5 groups (CRIS-7 for anonymous/roles)                                                                      |
 | AppSync + DynamoDB               | `apps/web/amplify/data` — full MVP model: Report + 10 entities, 6 GSIs, `PublicReport` projection (CRIS-8 ✓); mutations/sync-writer CRIS-9 |
 | S3 media                         | `apps/web/amplify/storage` — stub bucket                                                                                                   |
-| Streams→SQS→Lambda→Bedrock→SNS   | **not built** — CDK escape hatch on `backend`, CRIS-10                                                                                     |
+| Streams→SQS→Lambda→Bedrock→SNS   | Streams→Pipe→SQS(+DLQ)→classify-report Lambda + real Bedrock classification (CRIS-8/10 ✓, ADR-0007). Seams: scoring (CRIS-11), `publishReportUpdate` (CRIS-9), geocoding (CRIS-13), dedupe, SNS alerts |
 | MapLibre + Amazon Location       | not built — CRIS-13                                                                                                                        |
 | Shared domain vocabulary         | `packages/shared` — statuses, roles, bands, categories + verification/assignment/team/alert/audit enums (CRIS-8)                           |
 | CI                               | `.github/workflows/ci.yml` — CRIS-15                                                                                                       |
