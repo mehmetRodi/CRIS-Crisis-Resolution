@@ -19,7 +19,7 @@ interface Surface {
   role: string;
   ticket: string;
   description: string;
-  path?: string; 
+  path?: string;
 }
 
 const SURFACES: Surface[] = [
@@ -100,8 +100,10 @@ function App() {
                 key={surface.title}
                 onClick={() => handleCardClick(surface.path)}
                 className={`rounded-lg border border-slate-200 bg-white p-4 shadow-sm ${
-  surface.path ? 'cursor-pointer hover:border-blue-400 hover:shadow-md transition-all' : ''
-}`}
+                  surface.path
+                    ? 'cursor-pointer hover:border-blue-400 hover:shadow-md transition-all'
+                    : ''
+                }`}
               >
                 <div className="flex items-center justify-between">
                   <h3 className="font-semibold">{surface.title}</h3>

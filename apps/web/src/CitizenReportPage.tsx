@@ -12,13 +12,18 @@ function CitizenReportPage() {
           onClick={() => navigate('/')}
           className="group mb-6 flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-600 shadow-sm transition-all hover:border-slate-300 hover:bg-slate-50 hover:shadow-md hover:text-slate-900"
         >
-          <svg 
-            className="h-4 w-4 transition-transform group-hover:-translate-x-1" 
-            fill="none" 
-            stroke="currentColor" 
+          <svg
+            className="h-4 w-4 transition-transform group-hover:-translate-x-1"
+            fill="none"
+            stroke="currentColor"
             viewBox="0 0 24 24"
           >
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M10 19l-7-7m0 0l7-7m-7 7h18"
+            />
           </svg>
           Back to Dashboard
         </button>
@@ -31,9 +36,7 @@ function CitizenReportPage() {
               Emergency Reporting
             </span>
           </div>
-          <h1 className="text-3xl font-bold text-slate-900 sm:text-4xl">
-            CrisisMap AI
-          </h1>
+          <h1 className="text-3xl font-bold text-slate-900 sm:text-4xl">CrisisMap AI</h1>
           <p className="mt-2 text-slate-500">
             Submit an emergency report to help responders act quickly
           </p>
@@ -48,7 +51,6 @@ function CitizenReportPage() {
                 Fill in the details below. All information is secure and encrypted.
               </p>
             </div>
-  
           </div>
           <ReportForm />
         </div>

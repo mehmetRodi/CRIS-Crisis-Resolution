@@ -56,7 +56,12 @@ export function ReportForm() {
     return (
       <div className="rounded-lg border border-green-200 bg-green-50 p-6 text-center">
         <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
-          <svg className="h-8 w-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg
+            className="h-8 w-8 text-green-600"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
           </svg>
         </div>
@@ -151,7 +156,9 @@ export function ReportForm() {
             <div className="text-center">
               <div className="text-3xl">📷</div>
               <p className="mt-1 text-sm font-medium text-gray-700">Tap to add a photo</p>
-              <p className="text-xs text-gray-400">Images help responders understand the situation</p>
+              <p className="text-xs text-gray-400">
+                Images help responders understand the situation
+              </p>
             </div>
           )}
         </div>
@@ -224,9 +231,7 @@ export function ReportForm() {
       </button>
 
       {/* Footer */}
-      <p className="text-center text-xs text-gray-400">
-        All reports are secure and encrypted
-      </p>
+      <p className="text-center text-xs text-gray-400">All reports are secure and encrypted</p>
     </form>
   );
 }
