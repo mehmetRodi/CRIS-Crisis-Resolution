@@ -1,10 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import {
+  canActorTransition,
   canTransition,
+  Category,
+  isTerminalStatus,
   priorityBandForScore,
   PriorityBand,
+  PUBLIC_REPORT_FIELDS,
   ReportStatus,
+  rolesForTransition,
   STATUS_TRANSITIONS,
+  toPublicReport,
+  TRANSITION_ROLES,
+  Urgency,
+  UserRole,
+  type RedactableReport,
 } from './domain';
 
 describe('report state machine', () => {
@@ -25,6 +35,103 @@ describe('report state machine', () => {
     expect(canTransition(ReportStatus.NEW, ReportStatus.RESOLVED)).toBe(false);
     expect(canTransition(ReportStatus.NEW, ReportStatus.VERIFIED)).toBe(false);
     expect(STATUS_TRANSITIONS.REJECTED).toHaveLength(0);
+  });
+
+  it('identifies terminal states (only REJECTED today)', () => {
+    expect(isTerminalStatus(ReportStatus.REJECTED)).toBe(true);
+    expect(isTerminalStatus(ReportStatus.RESOLVED)).toBe(false); // can reopen
+    expect(isTerminalStatus(ReportStatus.NEW)).toBe(false);
+  });
+});
+
+describe('transition authorization (§5.6)', () => {
+  it('keeps TRANSITION_ROLES a subset of the structural state machine', () => {
+    for (const from of Object.keys(TRANSITION_ROLES) as ReportStatus[]) {
+      for (const to of Object.keys(TRANSITION_ROLES[from]) as ReportStatus[]) {
+        expect(canTransition(from, to)).toBe(true);
+      }
+    }
+  });
+
+  it('reserves classification transitions for the pipeline (SYSTEM)', () => {
+    expect(rolesForTransition(ReportStatus.NEW, ReportStatus.PROCESSING)).toEqual(['SYSTEM']);
+    expect(canActorTransition('SYSTEM', ReportStatus.PROCESSING, ReportStatus.AI_CLASSIFIED)).toBe(
+      true,
+    );
+    expect(
+      canActorTransition(UserRole.COORDINATOR, ReportStatus.NEW, ReportStatus.PROCESSING),
+    ).toBe(false);
+  });
+
+  it('gates rejection and reopen to coordinators', () => {
+    expect(
+      canActorTransition(UserRole.RESPONDER, ReportStatus.VERIFIED, ReportStatus.REJECTED),
+    ).toBe(false);
+    expect(
+      canActorTransition(UserRole.COORDINATOR, ReportStatus.VERIFIED, ReportStatus.REJECTED),
+    ).toBe(true);
+    expect(
+      canActorTransition(UserRole.RESPONDER, ReportStatus.RESOLVED, ReportStatus.IN_PROGRESS),
+    ).toBe(false);
+  });
+
+  it('lets responders confirm and progress, and ADMIN do any legal move', () => {
+    expect(
+      canActorTransition(UserRole.RESPONDER, ReportStatus.VERIFIED, ReportStatus.IN_PROGRESS),
+    ).toBe(true);
+    expect(canActorTransition(UserRole.ADMIN, ReportStatus.NEW, ReportStatus.PROCESSING)).toBe(
+      true,
+    );
+    // ADMIN still cannot make a structurally illegal jump.
+    expect(canActorTransition(UserRole.ADMIN, ReportStatus.NEW, ReportStatus.RESOLVED)).toBe(false);
+  });
+});
+
+describe('public projection (§5.3, §5.6)', () => {
+  const internal: RedactableReport = {
+    id: 'rpt-1',
+    status: ReportStatus.VERIFIED,
+    category: Category.MEDICAL,
+    urgency: Urgency.CRITICAL,
+    priorityScore: 9.2,
+    priorityBand: PriorityBand.P0,
+    summary: 'Multiple casualties reported near the market.',
+    lat: 40.1,
+    lng: -73.9,
+    geohash: 'dr5regw',
+    geohashPrefix: 'dr5re',
+    regionId: 'region-7',
+    createdAt: '2026-07-06T12:00:00.000Z',
+    updatedAt: '2026-07-06T12:05:00.000Z',
+    // Sensitive — must never appear on the projection.
+    text: 'My name is Jane Doe, call me at 555-0100',
+    reporterId: 'user-123',
+    reporterContact: 'jane@example.com',
+    notes: 'internal: reporter is off-duty EMT',
+  };
+
+  it('copies only the allow-listed public fields', () => {
+    const publicReport = toPublicReport(internal);
+    expect(Object.keys(publicReport).sort()).toEqual([...PUBLIC_REPORT_FIELDS].sort());
+  });
+
+  it('never leaks identity, contact, raw text, or internal notes', () => {
+    const serialized = JSON.stringify(toPublicReport(internal));
+    expect(serialized).not.toContain('Jane Doe');
+    expect(serialized).not.toContain('jane@example.com');
+    expect(serialized).not.toContain('user-123');
+    expect(serialized).not.toContain('off-duty');
+    for (const forbidden of ['text', 'reporterId', 'reporterContact', 'notes']) {
+      expect(toPublicReport(internal)).not.toHaveProperty(forbidden);
+    }
+  });
+
+  it('preserves the safe operational fields the map needs', () => {
+    const publicReport = toPublicReport(internal);
+    expect(publicReport.reportId).toBe('rpt-1');
+    expect(publicReport.priorityBand).toBe(PriorityBand.P0);
+    expect(publicReport.summary).toContain('casualties');
+    expect(publicReport.geohash).toBe('dr5regw');
   });
 });
 

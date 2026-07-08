@@ -82,7 +82,10 @@ NEW → PROCESSING → AI_CLASSIFIED → VERIFIED → IN_PROGRESS → RESOLVED
 | -------------------------------- | --------------------------------------------------------------------- |
 | React SPA client                 | `apps/web` — placeholder shell, real surfaces per CRIS-6/12/13        |
 | Cognito auth                     | `apps/web/amplify/auth` — stub, 5 groups (CRIS-7 for anonymous/roles) |
-| AppSync + DynamoDB               | `apps/web/amplify/data` — one minimal `Report` model (CRIS-8/9)       |
+| AppSync + DynamoDB               | `apps/web/amplify/data` — MVP model: 11 entities, 6 GSIs (CRIS-8)     |
+| Write path (`submitReport`)      | `amplify/functions/submit-report` — durable NEW + idempotency (CRIS-9)|
+| State machine mutations          | `amplify/functions/transition-report` — guarded transitions (CRIS-18) |
+| Public projection + real-time    | `PublicReport` + `publishReportUpdate` + subscriptions (CRIS-19)      |
 | S3 media                         | `apps/web/amplify/storage` — stub bucket                              |
 | Streams→SQS→Lambda→Bedrock→SNS   | **not built** — CDK escape hatch on `backend`, CRIS-10                |
 | MapLibre + Amazon Location       | not built — CRIS-13                                                   |

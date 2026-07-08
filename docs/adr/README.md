@@ -21,3 +21,7 @@ behind the code — essential when refactoring or extending the system.
 | [0003](0003-backend-amplify-gen2-with-cdk-escape-hatch.md) | Backend/IaC: Amplify Gen 2 + CDK  | Accepted |
 | [0004](0004-shared-domain-package.md)                      | Source-only shared domain package | Accepted |
 | [0005](0005-ci-and-observability-baseline.md)              | CI + observability baseline       | Accepted |
+| [0006](0006-dynamodb-mvp-data-model.md)                    | DynamoDB MVP data model           | Accepted |
+| [0007](0007-submit-report-write-path.md)                   | submitReport write path           | Accepted |
+| [0008](0008-report-transition-engine.md)                   | Report transition engine          | Accepted |
+| [0009](0009-public-projection-and-realtime-publish.md)     | Public projection + real-time     | Accepted |
