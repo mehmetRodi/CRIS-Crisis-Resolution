@@ -15,7 +15,7 @@ import type { AppSyncIdentityCognito, AppSyncResolverHandler } from 'aws-lambda'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
 import { ulid } from 'ulid';
-import { buildSubmitPlan, type ReportRecord, type SubmitReportInput } from './core';
+import { buildSubmitPlan, forDynamoItem, type ReportRecord, type SubmitReportInput } from './core';
 
 const REPORT_TABLE = requireEnv('REPORT_TABLE_NAME');
 const REPORT_EVENT_TABLE = requireEnv('REPORT_EVENT_TABLE_NAME');
@@ -45,21 +45,21 @@ export const handler: AppSyncResolverHandler<SubmitReportArgs, ReportRecord> = a
           {
             Put: {
               TableName: IDEMPOTENCY_TABLE,
-              Item: plan.idempotency,
+              Item: forDynamoItem(plan.idempotency),
               ConditionExpression: 'attribute_not_exists(idempotencyKey)',
             },
           },
           {
             Put: {
               TableName: REPORT_TABLE,
-              Item: plan.report,
+              Item: forDynamoItem(plan.report),
               ConditionExpression: 'attribute_not_exists(id)',
             },
           },
           {
             Put: {
               TableName: REPORT_EVENT_TABLE,
-              Item: plan.event,
+              Item: forDynamoItem(plan.event),
               ConditionExpression: 'attribute_not_exists(id)',
             },
           },
@@ -78,20 +78,31 @@ export const handler: AppSyncResolverHandler<SubmitReportArgs, ReportRecord> = a
   }
 };
 
-/** A retried submission surfaces as the idempotency-guard condition failing. */
+/**
+ * A retried submission (same `clientRequestId`) surfaces one of two ways:
+ *   - `TransactionCanceledException` — the `attribute_not_exists` idempotency
+ *     guard rejected the duplicate write (the general case, and the only case
+ *     once DynamoDB's transaction idempotency window has elapsed);
+ *   - `IdempotentParameterMismatchException` — within that window, the reused
+ *     `ClientRequestToken` (= clientRequestId) clashes with the freshly
+ *     generated reportId/timestamps of this invocation.
+ * Both mean "this request was already processed" → return the original report.
+ */
 function isIdempotentReplay(err: unknown): boolean {
+  if (typeof err !== 'object' || err === null || !('name' in err)) return false;
+  const name = (err as { name: string }).name;
   return (
-    typeof err === 'object' &&
-    err !== null &&
-    'name' in err &&
-    (err as { name: string }).name === 'TransactionCanceledException'
+    name === 'TransactionCanceledException' || name === 'IdempotentParameterMismatchException'
   );
 }
 
 /** Resolve the report a prior submission with this key already created. */
 async function loadExistingReport(idempotencyKey: string): Promise<ReportRecord | null> {
+  // The IdempotencyRecord table's primary key is `id`, which is set to the client
+  // request id (== idempotencyKey) at write time — so look it up by `id`, not by
+  // the (GSI-only) `idempotencyKey` attribute.
   const record = await docClient.send(
-    new GetCommand({ TableName: IDEMPOTENCY_TABLE, Key: { idempotencyKey } }),
+    new GetCommand({ TableName: IDEMPOTENCY_TABLE, Key: { id: idempotencyKey } }),
   );
   const reportId = record.Item?.reportId as string | undefined;
   if (!reportId) return null;

@@ -485,29 +485,41 @@ const schema = a.schema({
     .handler(a.handler.function(publishReportUpdateFn))
     .authorization((allow) => [allow.groups(['ADMIN'])]),
 
-  /**
-   * Live map: every redacted update. Authenticated for now; TODO(CRIS-13/CRIS-7):
-   * extend to guests for the public map once the publish mutation also allows the
-   * IAM/public auth mode (kept aligned to avoid a subscription/mutation mismatch).
+  /*
+   * TODO(CRIS-19): Real-time subscriptions temporarily disabled to unblock the
+   * backend deploy. Amplify Gen 2 requires every custom subscription to declare a
+   * `.handler()` (an AppSync JS resolver that sets the subscription filter via
+   * `util.transform.toSubscriptionFilter`) in addition to its auth rule — these
+   * had auth rules but no handler, so synthesis failed with InvalidSchemaError.
+   *
+   * Re-enable as part of CRIS-19 by adding `.handler(a.handler.custom({ entry }))`
+   * to each, implementing the filter resolvers, and adding `@aws-appsync/utils`
+   * for resolver types. The `publishReportUpdate` mutation + `PublicReport` type
+   * above remain valid and stay enabled.
+   *
+   *   // Live map: every redacted update. TODO(CRIS-13/CRIS-7): extend to guests.
+   *   onReportUpdate: a
+   *     .subscription()
+   *     .for(a.ref('publishReportUpdate'))
+   *     .handler(a.handler.custom({ entry: './subscriptions/on-report-update.js' }))
+   *     .authorization((allow) => [allow.authenticated()]),
+   *
+   *   // Region dashboard: updates filtered to one region.
+   *   onReportUpdateByRegion: a
+   *     .subscription()
+   *     .for(a.ref('publishReportUpdate'))
+   *     .arguments({ regionId: a.id().required() })
+   *     .handler(a.handler.custom({ entry: './subscriptions/by-region.js' }))
+   *     .authorization((allow) => [allow.authenticated()]),
+   *
+   *   // Status work-queues: updates filtered to one lifecycle state.
+   *   onReportUpdateByStatus: a
+   *     .subscription()
+   *     .for(a.ref('publishReportUpdate'))
+   *     .arguments({ status: a.string().required() })
+   *     .handler(a.handler.custom({ entry: './subscriptions/by-status.js' }))
+   *     .authorization((allow) => [allow.authenticated()]),
    */
-  onReportUpdate: a
-    .subscription()
-    .for(a.ref('publishReportUpdate'))
-    .authorization((allow) => [allow.authenticated()]),
-
-  /** Region dashboard: updates filtered to one region. */
-  onReportUpdateByRegion: a
-    .subscription()
-    .for(a.ref('publishReportUpdate'))
-    .arguments({ regionId: a.id().required() })
-    .authorization((allow) => [allow.authenticated()]),
-
-  /** Status work-queues: updates filtered to one lifecycle state. */
-  onReportUpdateByStatus: a
-    .subscription()
-    .for(a.ref('publishReportUpdate'))
-    .arguments({ status: a.string().required() })
-    .authorization((allow) => [allow.authenticated()]),
 });
 
 export type Schema = ClientSchema<typeof schema>;
