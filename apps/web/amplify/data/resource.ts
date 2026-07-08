@@ -1,324 +1,345 @@
 import { a, defineData, type ClientSchema } from '@aws-amplify/backend';
+import { submitReport as submitReportFn } from '../functions/submit-report/resource';
+import { transitionReport as transitionReportFn } from '../functions/transition-report/resource';
+import { publishReportUpdate as publishReportUpdateFn } from '../functions/publish-report-update/resource';
 
 /**
- * GraphQL data model (AppSync + DynamoDB) — design doc §5.1–5.3, §5.6.
+ * GraphQL data model (AppSync + DynamoDB) — design doc §5.1, §5.2, §5.3.
  *
- * CRIS-8 delivers the MVP data model: the Report system-of-record plus its
- * supporting entities, the six Report GSIs, geohash location fields, and a
- * SEPARATE `PublicReport` projection that guarantees reporter identity/contact
- * and internal notes can never leak to guest/public queries (§5.6, ADR-0006).
+ * CRIS-8 — the MVP DynamoDB data model. DynamoDB is the system of record, one
+ * table per entity (each `a.model()` below maps to its own on-demand table),
+ * built to burst with disaster traffic (§5.2).
  *
- * SCOPE (what this file does NOT do):
- *   TODO(CRIS-9): `submitReport` / `publishReportUpdate` custom mutations,
- *     optimistic-lock (expectedVersion) conditional writes, and the writer that
- *     keeps `PublicReport` in sync with `Report`.
- *   TODO(CRIS-10): DynamoDB Streams → SQS → Lambda pipeline that populates the
- *     derived fields (category/urgency/priority/geohash/statusUpdatedAt), plus
- *     `allow.resource(...)` IAM grants for those workers and the TTL on
- *     IdempotencyRecord.expiresAt.
- *   TODO(CRIS-11): classification JSON contract + deterministic scoring formula.
- *   TODO(CRIS-7): fine-grained `allow.owner()` ownership scoping and guest
- *     identity-pool wiring (guest rules below are inert until then).
+ * The central `Report` table is keyed by a `reportId` ULID (Amplify's `id`),
+ * carries an optimistic-lock `version`, the normalized classification, the
+ * derived `priorityScore`/`priorityBand`, and the resolved location
+ * (lat/long + precision-7 `geohash` + `regionId`). Six GSIs serve the main
+ * access patterns (§5.2): region dashboard by priority, category filter, status
+ * work-queues, map-viewport by geohash, duplicate-group lookup, and team task
+ * board.
  *
- * ENUM SYNC: `a.enum()` requires literal arrays, so enum values are duplicated
- * from `@crisismap/shared` (the source of truth). They MUST stay identical — the
- * "schema enum sync guard" test in packages/shared/src/domain.test.ts fails if
- * they drift. When you change an enum, update BOTH places.
+ * What is intentionally NOT here yet (owned by later E2 tickets):
+ * TODO(CRIS-9):  `submitReport` mutation + optimistic-lock conditional create,
+ *   with client-request-id idempotency (`IdempotencyRecord`).
+ * TODO(CRIS-18): state-machine mutations (`updateReportStatus`, `verifyReport`,
+ *   `assignReport`, `resolveReport`) — role + `expectedVersion` conditional
+ *   writes that append an immutable `ReportEvent` per transition (§5.1).
+ * TODO(CRIS-19): the redacted `PublicReport` projection and the IAM-only
+ *   `publishReportUpdate` mutation that drives subscriptions (§5.3).
  *
- * DERIVED KEY FIELDS: `geohashPrefix` (coarse geohash bucket) and
- * `statusUpdatedAt` exist only to satisfy DynamoDB GSI key constraints; they are
- * written by CRIS-9/CRIS-10 resolvers. Reports are absent from a GSI until its
- * key is populated (sparse index) — expected, not a bug (see ADR-0006).
+ * ENUM SYNC: `a.enum()` requires literal arrays, so the members below are
+ * duplicated from `@crisismap/shared` (the source of truth). When you change an
+ * enum there, update the matching `a.enum([...])` here in the same PR
+ * (docs/conventions.md → Domain vocabulary).
+ *
+ * AUTH: model-level rules below are coarse role gates for the data model. The
+ * resolver-layer guarantees the design depends on — ownership/region/version
+ * checks, prompt-safe redaction, and the public projection — are enforced by the
+ * custom resolvers in CRIS-9/18/19, not by these rules alone.
  */
 const schema = a.schema({
   /* ---------------------------------------------------------------------- */
-  /* Embedded value objects                                                 */
-  /* ---------------------------------------------------------------------- */
-
-  /**
-   * Explainable priority breakdown (§5.4.2) — the factors behind priorityScore
-   * so the UI can show "why" a report ranked where it did. Embedded on Report;
-   * inherits Report's authorization. Populated by CRIS-11 scoring.
-   *
-   * SYNC: these fields mirror `ScoreBreakdown` in `@crisismap/shared`
-   * (packages/shared/src/classification.ts) — the source of truth and the
-   * `scoreReport` output shape. Add/rename a factor in BOTH; the "score
-   * breakdown sync guard" test in classification.test.ts fails on drift.
-   */
-  ScoreBreakdown: a.customType({
-    urgencyWeight: a.float(),
-    categoryWeight: a.float(),
-    recencyWeight: a.float(),
-    corroborationWeight: a.float(),
-    manualAdjustment: a.float(),
-    notes: a.string(),
-  }),
-
-  /* ---------------------------------------------------------------------- */
   /* Report — system of record (§5.1, §5.2)                                  */
   /* ---------------------------------------------------------------------- */
-
   Report: a
     .model({
-      // Identity & optimistic lock (§5.2). ULID is client-supplied by CRIS-9.
-      id: a.id().required(),
-      version: a.integer().required(),
+      // Free-text citizen/field report. Treated as UNTRUSTED in prompts (§5.6).
+      text: a.string().required(),
 
-      // Raw citizen/field input. Treated as UNTRUSTED in prompts (§5.6).
-      rawText: a.string().required(),
+      // Lifecycle state (§5.1). Transitions are guarded in CRIS-18, never here.
+      status: a.enum([
+        'NEW',
+        'PROCESSING',
+        'AI_CLASSIFIED',
+        'NEEDS_VERIFICATION',
+        'VERIFIED',
+        'IN_PROGRESS',
+        'RESOLVED',
+        'REJECTED',
+      ]),
 
-      // Normalized classification (§2.2) — null until classified (CRIS-10/11).
-      // `category` is stored as a string GSI key (see reportsByCategoryByPriority);
-      // its allowed values are `@crisismap/shared` Category.
-      category: a.string(),
+      // --- Normalized classification (§5.4.1). Null until AI_CLASSIFIED. -----
+      category: a.enum([
+        'MEDICAL',
+        'RESCUE',
+        'STRUCTURAL_DAMAGE',
+        'FIRE',
+        'FLOOD',
+        'HAZMAT',
+        'BLOCKED_ROAD',
+        'SHELTER',
+        'UTILITY',
+        'OTHER',
+      ]),
       urgency: a.enum(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']),
-      classificationConfidence: a.float(),
+      /** Model confidence in [0,1]. Low confidence routes to NEEDS_VERIFICATION. */
+      confidence: a.float(),
 
-      // Derived priority (§5.4.2) — written by CRIS-11.
+      // --- Deterministic priority (§5.4.2). Never raw model output. ----------
       priorityScore: a.float(),
       priorityBand: a.enum(['P0', 'P1', 'P2', 'P3']),
+      /** Version of the scoring formula used, so scores stay explainable. */
       scoreVersion: a.integer(),
-      scoreBreakdown: a.ref('ScoreBreakdown'),
+      /** Per-factor breakdown (U,C,A,V,R,D,S) the UI shows to justify the rank. */
+      scoreBreakdown: a.json(),
 
-      // Resolved location (§2.4, §5.2) — written by CRIS-10 geocode worker.
-      latitude: a.float(),
-      longitude: a.float(),
-      geohash: a.string(), // precision-7 (~150 m)
-      geohashPrefix: a.string(), // derived coarse bucket (~40 km), GSI partition key
-      locationPrecision: a.enum(['EXACT', 'APPROXIMATE', 'REGION_ONLY', 'UNKNOWN']),
-      regionId: a.id(),
-
-      // Workflow (§5.1). `status` is a string GSI key; values are ReportStatus.
-      status: a.string(),
-      statusUpdatedAt: a.datetime(), // derived sort key for the status work-queue GSI
-      duplicateGroupId: a.id(),
-      assignedTeamId: a.id(),
-      lastProcessedEventId: a.string(), // idempotency (§5.4.4)
-
-      // PROTECTED reporter identity/contact + internal notes (§5.6). Field-level
-      // authorization limits these to COORDINATOR/ADMIN; the PublicReport
-      // projection omits them physically. reporterContact is KMS-encrypted
-      // app-side and never placed in prompts or public views.
-      reporterUserId: a.string().authorization((allow) => [allow.groups(['COORDINATOR', 'ADMIN'])]),
-      reporterName: a.string().authorization((allow) => [allow.groups(['COORDINATOR', 'ADMIN'])]),
-      reporterContact: a
-        .string()
-        .authorization((allow) => [allow.groups(['COORDINATOR', 'ADMIN'])]),
-      internalNotes: a.string().authorization((allow) => [allow.groups(['COORDINATOR', 'ADMIN'])]),
-
-      // Relations
-      verifications: a.hasMany('Verification', 'reportId'),
-      assignments: a.hasMany('Assignment', 'reportId'),
-      events: a.hasMany('ReportEvent', 'reportId'),
-      region: a.belongsTo('Region', 'regionId'),
-      duplicateGroup: a.belongsTo('DuplicateGroup', 'duplicateGroupId'),
-      assignedTeam: a.belongsTo('Team', 'assignedTeamId'),
-    })
-    .identifier(['id'])
-    // Six GSIs for the §5.2 access patterns. Every partition/sort key must be a
-    // top-level string/number field (enum/id/json/boolean are not index keys).
-    .secondaryIndexes((index) => [
-      index('regionId').sortKeys(['priorityScore']).name('reportsByRegionByPriority'),
-      index('category').sortKeys(['priorityScore']).name('reportsByCategoryByPriority'),
-      index('status').sortKeys(['statusUpdatedAt']).name('reportsByStatusByUpdated'),
-      index('geohashPrefix').sortKeys(['geohash']).name('reportsByGeohashPrefix'),
-      index('duplicateGroupId').sortKeys(['priorityScore']).name('reportsByDuplicateGroup'),
-      index('assignedTeamId').sortKeys(['priorityScore']).name('reportsByTeam'),
-    ])
-    .authorization((allow) => [
-      allow.groups(['RESPONDER', 'COORDINATOR', 'ADMIN']),
-      allow.group('VOLUNTEER').to(['read']),
-      allow.group('CITIZEN').to(['create']),
-      // Anonymous submission (§2.1): guests may CREATE but never READ Report —
-      // PII stays server-side; public map reads go through PublicReport.
-      allow.guest().to(['create']),
-      // TODO(CRIS-7): allow.owner() so a citizen sees only their own report.
-      // TODO(CRIS-9): direct create is superseded by the submitReport mutation.
-    ]),
-
-  /* ---------------------------------------------------------------------- */
-  /* PublicReport — redacted projection for guests/public (§5.3, §5.6)       */
-  /* ---------------------------------------------------------------------- */
-
-  /**
-   * SEPARATE table holding only non-sensitive fields (ADR-0006). Guests read
-   * this; the sensitive `Report` table has no guest read at all, so reporter
-   * identity/contact/internal notes cannot leak — they physically do not exist
-   * here. Kept in sync with Report by CRIS-9 (submit) + CRIS-10 (pipeline);
-   * dual-write drift is the documented, accepted MVP risk (ADR-0006).
-   */
-  PublicReport: a
-    .model({
-      id: a.id().required(), // mirrors the source reportId
-      category: a.string(),
-      urgency: a.enum(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']),
-      priorityScore: a.float(),
-      priorityBand: a.enum(['P0', 'P1', 'P2', 'P3']),
-      status: a.string(),
-      latitude: a.float(),
-      longitude: a.float(),
+      // --- Resolved location (§5.2). Set by the geocode step. ----------------
+      lat: a.float(),
+      lng: a.float(),
+      /** Precision-7 geohash (~153 m cell). Sort key of the map-viewport GSI. */
       geohash: a.string(),
+      /** Coarser prefix (precision-5) partitioning viewport queries into cells. */
       geohashPrefix: a.string(),
       regionId: a.id(),
+
+      // --- Routing / dedup pointers ------------------------------------------
+      /** Set when a team is assigned; partition key of the team task-board GSI. */
+      assignedTeamId: a.id(),
+      /** Set when grouped with near-duplicates (§5.4.3). Never auto-deleted. */
       duplicateGroupId: a.id(),
-      // NOTE: no rawText, no reporter*, no internalNotes — by construction.
+
+      // --- Reporter & media (PII-sensitive; kept out of PublicReport) --------
+      /** Cognito sub of the reporter, or null for anonymous submissions (§2.1). */
+      reporterId: a.string(),
+      isAnonymous: a.boolean(),
+      /**
+       * Optional reporter contact. KMS-encrypted at rest, excluded from prompts
+       * and every public projection (§5.6). NEVER select this into PublicReport.
+       */
+      reporterContact: a.string(),
+      /** S3 object keys for uploaded media (§4 media storage). */
+      mediaKeys: a.string().array(),
+
+      // --- Concurrency & idempotency -----------------------------------------
+      /** Optimistic-lock version. Every mutation requires expectedVersion (§5.3). */
+      version: a.integer().required(),
+      /** Last classification event applied — idempotent reprocessing (§5.4.1). */
+      lastProcessedEventId: a.string(),
+
+      // Explicit timestamp so GSIs can sort by recency (Amplify's implicit
+      // createdAt is not index-eligible). System-managed; kept in sync on write.
+      createdAt: a.datetime(),
     })
-    .identifier(['id'])
     .secondaryIndexes((index) => [
-      index('geohashPrefix').sortKeys(['geohash']).name('publicReportsByGeohashPrefix'),
-      index('regionId').sortKeys(['priorityScore']).name('publicReportsByRegionByPriority'),
+      // 1) Region dashboard, highest priority first.
+      index('regionId').sortKeys(['priorityScore']).queryField('reportsByRegion'),
+      // 2) Category filter, newest first.
+      index('category').sortKeys(['createdAt']).queryField('reportsByCategory'),
+      // 3) Status work-queues (e.g. the NEEDS_VERIFICATION queue).
+      index('status').sortKeys(['createdAt']).queryField('reportsByStatus'),
+      // 4) Map-viewport: query the prefixes covering the viewport in parallel,
+      //    ordered within each cell by full geohash, then filter exactly (§5.2).
+      index('geohashPrefix').sortKeys(['geohash']).queryField('reportsByGeohash'),
+      // 5) Duplicate-group lookup.
+      index('duplicateGroupId').sortKeys(['createdAt']).queryField('reportsByDuplicateGroup'),
+      // 6) Team task board, highest priority first.
+      index('assignedTeamId').sortKeys(['priorityScore']).queryField('reportsByTeam'),
     ])
+    // Coarse role gate. Direct client writes are replaced by the guarded custom
+    // mutations in CRIS-9/18; reads are redacted via PublicReport in CRIS-19.
     .authorization((allow) => [
-      allow.guest().to(['read']),
+      allow.groups(['COORDINATOR', 'ADMIN']),
+      allow.groups(['RESPONDER', 'VOLUNTEER']).to(['read']),
       allow.authenticated().to(['read']),
-      allow.group('ADMIN'),
-      // TODO(CRIS-9/CRIS-10): pipeline writes via allow.resource(writerFn).
     ]),
 
   /* ---------------------------------------------------------------------- */
-  /* Supporting entities (§5.1) — one DynamoDB table each                    */
+  /* ReportEvent — immutable audit log (§5.1)                                */
   /* ---------------------------------------------------------------------- */
+  ReportEvent: a
+    .model({
+      reportId: a.id().required(),
+      type: a.enum([
+        'SUBMITTED',
+        'STATUS_CHANGED',
+        'CLASSIFIED',
+        'PRIORITY_SCORED',
+        'VERIFICATION_RECORDED',
+        'ASSIGNED',
+        'DUPLICATE_LINKED',
+        'ALERT_DISPATCHED',
+      ]),
+      fromStatus: a.string(),
+      toStatus: a.string(),
+      /** Actor userId, or 'SYSTEM' for pipeline-driven events. */
+      actorId: a.string(),
+      actorRole: a.enum(['CITIZEN', 'VOLUNTEER', 'RESPONDER', 'COORDINATOR', 'ADMIN']),
+      /** Report version AFTER this event — pairs the audit log to the lock. */
+      version: a.integer(),
+      /** Immutable event id; dedups retried appends (§5.4.4). */
+      eventId: a.string().required(),
+      detail: a.json(),
+      /** Explicit timestamp so the audit log GSI sorts chronologically. */
+      createdAt: a.datetime(),
+    })
+    .secondaryIndexes((index) => [
+      index('reportId').sortKeys(['createdAt']).queryField('eventsByReport'),
+    ])
+    // Append-only: coordinators/admins read; nobody updates or deletes. Writes
+    // come from the guarded resolvers (CRIS-18), tightened to IAM there.
+    .authorization((allow) => [
+      allow.groups(['COORDINATOR', 'ADMIN']).to(['read', 'create']),
+      allow.groups(['RESPONDER']).to(['read']),
+    ]),
 
-  /** Independent verification signal on a report (§2.5, §2.6). */
+  /* ---------------------------------------------------------------------- */
+  /* Verification — evidence behind leaving NEEDS_VERIFICATION (§5.1)        */
+  /* ---------------------------------------------------------------------- */
   Verification: a
     .model({
       reportId: a.id().required(),
-      report: a.belongsTo('Report', 'reportId'),
-      verifierUserId: a.string(),
-      status: a.enum(['PENDING', 'CONFIRMED', 'REJECTED', 'INCONCLUSIVE']),
+      outcome: a.enum(['CONFIRMED', 'REJECTED', 'INCONCLUSIVE']),
+      /** Verification confidence in [0,1]. */
+      confidence: a.float(),
+      /** 'HUMAN' or 'AGENT'. Critical reports always require HUMAN (§5.5). */
       method: a.string(),
-      note: a.string(),
+      verifiedById: a.string(),
+      /** Internal reviewer notes — excluded from public projections (§5.6). */
+      notes: a.string(),
+      /** Explicit timestamp so verifications list newest-first per report. */
+      createdAt: a.datetime(),
     })
+    .secondaryIndexes((index) => [
+      index('reportId').sortKeys(['createdAt']).queryField('verificationsByReport'),
+    ])
     .authorization((allow) => [
-      allow.groups(['RESPONDER', 'COORDINATOR', 'ADMIN']),
-      // TODO(CRIS-7): owner scoping so a verifier manages their own signals.
+      allow.groups(['COORDINATOR', 'ADMIN']),
+      allow.groups(['RESPONDER']).to(['read', 'create']),
     ]),
 
-  /** Group of reports believed to describe the same incident (§5.4.3). */
+  /* ---------------------------------------------------------------------- */
+  /* DuplicateGroup — reports grouped, never deleted (§5.4.3)                */
+  /* ---------------------------------------------------------------------- */
   DuplicateGroup: a
     .model({
-      canonicalReportId: a.id(),
-      status: a.enum(['OPEN', 'MERGED', 'DISMISSED']),
-      memberCount: a.integer(),
-      similarityNote: a.string(),
-      reports: a.hasMany('Report', 'duplicateGroupId'),
+      /** The representative report for the group. */
+      primaryReportId: a.id().required(),
+      memberReportIds: a.id().array(),
+      linkType: a.enum(['STRONG', 'SUGGESTED']),
+      /** Aggregate similarity (§5.4.3). ≥0.80 STRONG, 0.65–0.79 SUGGESTED. */
+      similarityScore: a.float(),
+      /** Coordinator review state, e.g. OPEN | MERGED | DISMISSED. */
+      reviewState: a.string(),
     })
     .authorization((allow) => [
       allow.groups(['COORDINATOR', 'ADMIN']),
       allow.groups(['RESPONDER', 'VOLUNTEER']).to(['read']),
-      // TODO(CRIS-10): dedupe worker writes via allow.resource(dedupeFn).
     ]),
 
-  /** Assignment of a response team to a report (§2.5, §5.1 dispatch). */
+  /* ---------------------------------------------------------------------- */
+  /* Assignment — Team ↔ Report link and responder workflow (§5.1, §6.3)     */
+  /* ---------------------------------------------------------------------- */
   Assignment: a
     .model({
       reportId: a.id().required(),
       teamId: a.id().required(),
-      report: a.belongsTo('Report', 'reportId'),
-      team: a.belongsTo('Team', 'teamId'),
-      status: a.enum(['PROPOSED', 'ACCEPTED', 'EN_ROUTE', 'ON_SCENE', 'COMPLETED', 'CANCELLED']),
-      assignedByUserId: a.string(),
-      note: a.string(),
+      status: a.enum([
+        'PROPOSED',
+        'ASSIGNED',
+        'ACCEPTED',
+        'EN_ROUTE',
+        'ON_SCENE',
+        'COMPLETED',
+        'CANCELLED',
+      ]),
+      assignedById: a.string(),
+      /** Optimistic-lock version for responder status updates (§5.3). */
+      version: a.integer().required(),
+      /** Explicit timestamp so a report's assignments list chronologically. */
+      createdAt: a.datetime(),
     })
+    .secondaryIndexes((index) => [
+      // Team task board: a team's active assignments by state.
+      index('teamId').sortKeys(['status']).queryField('assignmentsByTeam'),
+      index('reportId').sortKeys(['createdAt']).queryField('assignmentsByReport'),
+    ])
     .authorization((allow) => [
       allow.groups(['COORDINATOR', 'ADMIN']),
-      allow.groups(['RESPONDER', 'VOLUNTEER']).to(['read']),
-      // TODO(CRIS-7): team-member ownership scoping.
+      allow.groups(['RESPONDER', 'VOLUNTEER']).to(['read', 'update']),
     ]),
 
-  /** A response team (§2.5). */
+  /* ---------------------------------------------------------------------- */
+  /* Team — response teams (§5.1)                                            */
+  /* ---------------------------------------------------------------------- */
   Team: a
     .model({
       name: a.string().required(),
       regionId: a.id(),
-      status: a.enum(['AVAILABLE', 'BUSY', 'OFFLINE']),
-      region: a.belongsTo('Region', 'regionId'),
-      assignments: a.hasMany('Assignment', 'teamId'),
-      reports: a.hasMany('Report', 'assignedTeamId'),
+      /** Capability tags matched by the Dispatch Agent (§5.5). */
+      capabilities: a.string().array(),
+      /** Home base for nearest-team routing. */
+      baseLat: a.float(),
+      baseLng: a.float(),
+      active: a.boolean(),
     })
+    .secondaryIndexes((index) => [index('regionId').queryField('teamsByRegion')])
     .authorization((allow) => [
       allow.groups(['COORDINATOR', 'ADMIN']),
-      allow.authenticated().to(['read']),
+      allow.groups(['RESPONDER', 'VOLUNTEER']).to(['read']),
     ]),
 
-  /** A user's proximity-alert subscription (§2.7). */
+  /* ---------------------------------------------------------------------- */
+  /* AlertSubscription — who gets proximity alerts (§2.7)                    */
+  /* ---------------------------------------------------------------------- */
   AlertSubscription: a
     .model({
-      subscriberUserId: a.string(),
+      userId: a.string().required(),
       regionId: a.id(),
-      channel: a.enum(['SMS', 'EMAIL', 'PUSH']),
-      // Destination (phone/endpoint) is contact PII — kept out of public views.
-      destination: a.string(),
-      minPriorityBand: a.enum(['P0', 'P1', 'P2', 'P3']),
-      status: a.enum(['ACTIVE', 'PAUSED', 'UNSUBSCRIBED']),
-      deliveries: a.hasMany('AlertDelivery', 'subscriptionId'),
+      /** Category allow-list; empty means all categories. */
+      categories: a.string().array(),
+      /** Minimum urgency that triggers a notification. */
+      minUrgency: a.enum(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']),
+      channels: a.string().array(),
+      /** Geofence: center cell + radius for proximity matching (§2.7). */
+      centerGeohash: a.string(),
+      radiusMeters: a.integer(),
+      active: a.boolean(),
     })
+    .secondaryIndexes((index) => [
+      index('regionId').queryField('subscriptionsByRegion'),
+      index('userId').queryField('subscriptionsByUser'),
+    ])
+    // Owner-scoped: a user manages their own subscriptions; coordinators audit.
     .authorization((allow) => [
-      allow.group('ADMIN'),
-      // TODO(CRIS-7): allow.owner() — this is the primary owner-scoped model;
-      // a subscriber manages only their own subscriptions.
+      allow.ownerDefinedIn('userId'),
+      allow.groups(['COORDINATOR', 'ADMIN']).to(['read']),
     ]),
 
-  /** Record of a single alert send attempt (§5.4.4). */
+  /* ---------------------------------------------------------------------- */
+  /* AlertDelivery — one durable record per recipient per channel (Fig 10)   */
+  /* ---------------------------------------------------------------------- */
   AlertDelivery: a
     .model({
-      subscriptionId: a.id().required(),
-      subscription: a.belongsTo('AlertSubscription', 'subscriptionId'),
-      reportId: a.id(),
-      channel: a.enum(['SMS', 'EMAIL', 'PUSH']),
-      status: a.enum(['QUEUED', 'SENT', 'DELIVERED', 'FAILED', 'SUPPRESSED']),
-      providerMessageId: a.string(),
-      attemptedAt: a.datetime(),
-    })
-    .authorization((allow) => [
-      allow.group('ADMIN').to(['read']),
-      // TODO(CRIS-10): alert Lambda writes via allow.resource(alertFn) (IAM-only).
-    ]),
-
-  /** Immutable audit event appended on every report transition (§5.1). */
-  ReportEvent: a
-    .model({
       reportId: a.id().required(),
-      report: a.belongsTo('Report', 'reportId'),
-      eventType: a.enum([
-        'SUBMITTED',
-        'STATUS_CHANGED',
-        'CLASSIFIED',
-        'SCORED',
-        'GEOCODED',
-        'DEDUPED',
-        'ASSIGNED',
-        'VERIFIED',
-        'ALERT_SENT',
-        'NOTE_ADDED',
-      ]),
-      fromStatus: a.string(),
-      toStatus: a.string(),
-      actorUserId: a.string(),
-      payload: a.json(),
-      occurredAt: a.datetime(),
+      recipientId: a.string().required(),
+      channel: a.enum(['SMS', 'EMAIL', 'PUSH']),
+      status: a.enum(['PENDING', 'SENT', 'DELIVERED', 'FAILED']),
+      attempts: a.integer(),
+      lastAttemptAt: a.datetime(),
+      /** Explicit timestamp so a report's deliveries list chronologically. */
+      createdAt: a.datetime(),
     })
-    // Immutable: only read is granted to clients; no update/delete rules exist.
-    .authorization((allow) => [
-      allow.groups(['COORDINATOR', 'ADMIN']).to(['read']),
-      // TODO(CRIS-9/CRIS-10): appends via allow.resource(writerFn) (IAM-only).
-    ]),
+    .secondaryIndexes((index) => [
+      index('reportId').sortKeys(['createdAt']).queryField('deliveriesByReport'),
+    ])
+    .authorization((allow) => [allow.groups(['COORDINATOR', 'ADMIN']).to(['read'])]),
 
-  /** A geographic region reports/teams belong to (§5.2). */
+  /* ---------------------------------------------------------------------- */
+  /* Region — operational areas (§5.2 regionId)                              */
+  /* ---------------------------------------------------------------------- */
   Region: a
     .model({
       name: a.string().required(),
+      code: a.string(),
+      /** Geohash prefixes that make up the region, for viewport mapping. */
       geohashPrefixes: a.string().array(),
-      reports: a.hasMany('Report', 'regionId'),
-      teams: a.hasMany('Team', 'regionId'),
+      active: a.boolean(),
     })
-    .authorization((allow) => [
-      allow.guest().to(['read']),
-      allow.authenticated().to(['read']),
-      allow.group('ADMIN'),
-    ]),
+    .authorization((allow) => [allow.groups(['ADMIN']), allow.authenticated().to(['read'])]),
 
-  /** Per-category display + scoring configuration (§2.4, §5.4.2). */
+  /* ---------------------------------------------------------------------- */
+  /* CategoryConfig — tunable scoring weights per category (§5.4.2)          */
+  /* ---------------------------------------------------------------------- */
   CategoryConfig: a
     .model({
       category: a.enum([
@@ -333,32 +354,160 @@ const schema = a.schema({
         'UTILITY',
         'OTHER',
       ]),
-      displayName: a.string(),
-      defaultUrgency: a.enum(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']),
-      baseWeight: a.float(),
+      /** Impact-type weight fed into the deterministic priority score (§5.4.2). */
+      weight: a.float(),
       iconKey: a.string(),
-      enabled: a.boolean(),
+      color: a.string(),
+      active: a.boolean(),
     })
-    .authorization((allow) => [
-      allow.guest().to(['read']),
-      allow.authenticated().to(['read']),
-      allow.group('ADMIN'),
-    ]),
+    .authorization((allow) => [allow.groups(['ADMIN']), allow.authenticated().to(['read'])]),
 
-  /** End-to-end idempotency record for the async pipeline (§5.4.4). */
+  /* ---------------------------------------------------------------------- */
+  /* IdempotencyRecord — end-to-end idempotency boundary (§5.4.4)            */
+  /* ---------------------------------------------------------------------- */
   IdempotencyRecord: a
     .model({
+      /** Client request id (submitReport) or immutable event id (pipeline). */
+      idempotencyKey: a.string().required(),
       reportId: a.id(),
-      operation: a.string(),
-      result: a.json(),
-      // TTL attribute — TTL enablement is wired by CRIS-10 via CDK escape hatch.
-      expiresAt: a.timestamp(),
+      /** TTL attribute — DynamoDB expires stale keys automatically. */
+      expiresAt: a.integer(),
     })
-    // Internal only. ADMIN read for debugging; pipeline writes are IAM-only.
-    .authorization((allow) => [
-      allow.group('ADMIN').to(['read']),
-      // TODO(CRIS-10): pipeline writes via allow.resource(pipelineFn) (IAM-only).
-    ]),
+    .secondaryIndexes((index) => [index('idempotencyKey').queryField('idempotencyByKey')])
+    // System-internal only. Tightened to IAM/function access with CRIS-9.
+    .authorization((allow) => [allow.groups(['ADMIN']).to(['read'])]),
+
+  /* ---------------------------------------------------------------------- */
+  /* Custom operations (§5.3)                                               */
+  /* ---------------------------------------------------------------------- */
+
+  /**
+   * CRIS-9 — the guarded write path. Persists a durable `NEW` report with an
+   * optimistic-lock `version = 1` and a client-request-id idempotency guard,
+   * returning immediately (§3.2). Available to authenticated users and to
+   * guests for anonymous submissions (§2.1). Identity is resolved server-side
+   * from the request — reporterId is never a client argument.
+   */
+  submitReport: a
+    .mutation()
+    .arguments({
+      text: a.string().required(),
+      clientRequestId: a.string().required(),
+      lat: a.float(),
+      lng: a.float(),
+      regionId: a.id(),
+      isAnonymous: a.boolean(),
+      reporterContact: a.string(),
+      mediaKeys: a.string().array(),
+    })
+    .returns(a.ref('Report'))
+    .handler(a.handler.function(submitReportFn))
+    .authorization((allow) => [allow.authenticated(), allow.guest()]),
+
+  /**
+   * CRIS-18 — the guarded state-machine engine. Applies a single report
+   * transition with a role check, an `expectedVersion` optimistic lock, and an
+   * appended `STATUS_CHANGED` audit event (§5.1). A stale version returns a
+   * `CONFLICT` error and the client refetches (§5.3). Human-only: the pipeline's
+   * classification transitions run on the internal path, not here. Coarse group
+   * gate here; the fine-grained per-transition role rules are enforced in the
+   * resolver via `TRANSITION_ROLES`.
+   */
+  updateReportStatus: a
+    .mutation()
+    .arguments({
+      reportId: a.id().required(),
+      toStatus: a.string().required(),
+      expectedVersion: a.integer().required(),
+      note: a.string(),
+    })
+    .returns(a.ref('Report'))
+    .handler(a.handler.function(transitionReportFn))
+    .authorization((allow) => [allow.groups(['RESPONDER', 'COORDINATOR', 'ADMIN'])]),
+
+  /* ---------------------------------------------------------------------- */
+  /* Public projection + real-time (CRIS-19, §5.3, §5.6)                     */
+  /* ---------------------------------------------------------------------- */
+
+  /**
+   * The redacted incident shape exposed to the live map and public queries.
+   * Mirrors `PublicReport` in `@crisismap/shared` (produced by `toPublicReport`).
+   * By construction it carries NO reporter identity/contact, internal notes, or
+   * raw report text — the map shows the AI `summary`, never the untrusted body.
+   */
+  PublicReport: a.customType({
+    reportId: a.id().required(),
+    status: a.string().required(),
+    category: a.string(),
+    urgency: a.string(),
+    priorityScore: a.float(),
+    priorityBand: a.string(),
+    summary: a.string(),
+    lat: a.float(),
+    lng: a.float(),
+    geohash: a.string(),
+    geohashPrefix: a.string(),
+    regionId: a.id(),
+    createdAt: a.datetime(),
+    updatedAt: a.datetime(),
+  }),
+
+  /**
+   * IAM-only internal mutation that drives subscriptions (§5.3). AppSync
+   * subscriptions fire on mutations, not on raw DynamoDB writes, so the async
+   * worker writes the report durably and then calls this to fan the redacted
+   * update out to subscribers — keeping the durable write independent of AppSync
+   * availability.
+   *
+   * Restricted to ADMIN at the client boundary today. TODO(CRIS-10): grant the
+   * classification worker's IAM role via a schema-level `allow.resource(worker)`
+   * so it becomes the real (internal-only) caller, and drop the ADMIN rule.
+   */
+  publishReportUpdate: a
+    .mutation()
+    .arguments({
+      reportId: a.id().required(),
+      status: a.string().required(),
+      category: a.string(),
+      urgency: a.string(),
+      priorityScore: a.float(),
+      priorityBand: a.string(),
+      summary: a.string(),
+      lat: a.float(),
+      lng: a.float(),
+      geohash: a.string(),
+      geohashPrefix: a.string(),
+      regionId: a.id(),
+      createdAt: a.datetime(),
+      updatedAt: a.datetime(),
+    })
+    .returns(a.ref('PublicReport'))
+    .handler(a.handler.function(publishReportUpdateFn))
+    .authorization((allow) => [allow.groups(['ADMIN'])]),
+
+  /**
+   * Live map: every redacted update. Authenticated for now; TODO(CRIS-13/CRIS-7):
+   * extend to guests for the public map once the publish mutation also allows the
+   * IAM/public auth mode (kept aligned to avoid a subscription/mutation mismatch).
+   */
+  onReportUpdate: a
+    .subscription()
+    .for(a.ref('publishReportUpdate'))
+    .authorization((allow) => [allow.authenticated()]),
+
+  /** Region dashboard: updates filtered to one region. */
+  onReportUpdateByRegion: a
+    .subscription()
+    .for(a.ref('publishReportUpdate'))
+    .arguments({ regionId: a.id().required() })
+    .authorization((allow) => [allow.authenticated()]),
+
+  /** Status work-queues: updates filtered to one lifecycle state. */
+  onReportUpdateByStatus: a
+    .subscription()
+    .for(a.ref('publishReportUpdate'))
+    .arguments({ status: a.string().required() })
+    .authorization((allow) => [allow.authenticated()]),
 });
 
 export type Schema = ClientSchema<typeof schema>;
@@ -366,9 +515,6 @@ export type Schema = ClientSchema<typeof schema>;
 export const data = defineData({
   schema,
   authorizationModes: {
-    // userPool for signed-in users; guest reads (PublicReport/Region/
-    // CategoryConfig) resolve via the identity pool's unauthenticated role,
-    // which CRIS-7 wires up. Pipeline (IAM) grants are added in CRIS-10.
     defaultAuthorizationMode: 'userPool',
   },
 });
