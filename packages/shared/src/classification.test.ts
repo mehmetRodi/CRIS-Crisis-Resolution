@@ -192,8 +192,8 @@ describe('deterministic priority scoring (§5.4.2)', () => {
 
   it('clamps a manual adjustment to ±MANUAL_ADJUSTMENT_LIMIT', () => {
     expect(
-      scoreReport({ urgency: Urgency.LOW, category: Category.OTHER, manualAdjustment: 99 }).breakdown
-        .manualAdjustment,
+      scoreReport({ urgency: Urgency.LOW, category: Category.OTHER, manualAdjustment: 99 })
+        .breakdown.manualAdjustment,
     ).toBe(MANUAL_ADJUSTMENT_LIMIT);
     expect(
       scoreReport({ urgency: Urgency.LOW, category: Category.OTHER, manualAdjustment: -99 })
@@ -202,7 +202,9 @@ describe('deterministic priority scoring (§5.4.2)', () => {
   });
 
   it('carries an optional note into the breakdown only when provided', () => {
-    expect(scoreReport({ urgency: Urgency.LOW, category: Category.OTHER }).breakdown.notes).toBeUndefined();
+    expect(
+      scoreReport({ urgency: Urgency.LOW, category: Category.OTHER }).breakdown.notes,
+    ).toBeUndefined();
     expect(
       scoreReport({ urgency: Urgency.LOW, category: Category.OTHER, notes: 'coordinator bump' })
         .breakdown.notes,

@@ -160,8 +160,15 @@ export function parseClassification(raw: unknown): ClassificationResult {
   if (typeof urgency !== 'string' || !URGENCY_VALUES.has(urgency)) {
     throw new ClassificationContractError(`invalid urgency: ${String(urgency)}`);
   }
-  if (typeof confidence !== 'number' || !Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
-    throw new ClassificationContractError(`confidence must be a number in [0, 1]: ${String(confidence)}`);
+  if (
+    typeof confidence !== 'number' ||
+    !Number.isFinite(confidence) ||
+    confidence < 0 ||
+    confidence > 1
+  ) {
+    throw new ClassificationContractError(
+      `confidence must be a number in [0, 1]: ${String(confidence)}`,
+    );
   }
   if (locationHint !== null && typeof locationHint !== 'string') {
     throw new ClassificationContractError('locationHint must be a string or null');
@@ -181,7 +188,8 @@ export function parseClassification(raw: unknown): ClassificationResult {
     category: category as Category,
     urgency: urgency as Urgency,
     confidence,
-    locationHint: locationHint === null ? null : locationHint.slice(0, CLASSIFICATION_MAX_LOCATION_HINT_CHARS),
+    locationHint:
+      locationHint === null ? null : locationHint.slice(0, CLASSIFICATION_MAX_LOCATION_HINT_CHARS),
     summary: summary.slice(0, CLASSIFICATION_MAX_SUMMARY_CHARS),
     rationale: rationale.slice(0, CLASSIFICATION_MAX_RATIONALE_CHARS),
     needsHumanReview,
@@ -327,7 +335,8 @@ export function scoreReport(input: ScoreInput): ScoringResult {
     MANUAL_ADJUSTMENT_LIMIT,
   );
 
-  const raw = urgencyWeight + categoryWeight + recencyWeight + corroborationWeight + manualAdjustment;
+  const raw =
+    urgencyWeight + categoryWeight + recencyWeight + corroborationWeight + manualAdjustment;
   const priorityScore = round2(clamp(raw, 0, 10));
 
   const breakdown: ScoreBreakdown = {
