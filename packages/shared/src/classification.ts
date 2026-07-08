@@ -75,8 +75,7 @@ export const CLASSIFICATION_JSON_SCHEMA = {
  * human-readable reasons (fed into the single repair prompt) on failure.
  */
 export type ClassificationValidation =
-  | { ok: true; value: ClassificationResult }
-  | { ok: false; errors: string[] };
+  { ok: true; value: ClassificationResult } | { ok: false; errors: string[] };
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -102,7 +101,12 @@ export function validateClassification(raw: unknown): ClassificationValidation {
   if (typeof urgency !== 'string' || !(CLASSIFICATION_URGENCIES as string[]).includes(urgency)) {
     errors.push(`urgency must be one of: ${CLASSIFICATION_URGENCIES.join(', ')}`);
   }
-  if (typeof confidence !== 'number' || Number.isNaN(confidence) || confidence < 0 || confidence > 1) {
+  if (
+    typeof confidence !== 'number' ||
+    Number.isNaN(confidence) ||
+    confidence < 0 ||
+    confidence > 1
+  ) {
     errors.push('confidence must be a number between 0 and 1');
   }
   if (!Array.isArray(entities) || !entities.every((e) => typeof e === 'string')) {

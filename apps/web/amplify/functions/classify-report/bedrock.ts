@@ -1,7 +1,4 @@
-import {
-  BedrockRuntimeClient,
-  InvokeModelCommand,
-} from '@aws-sdk/client-bedrock-runtime';
+import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 import {
   CLASSIFICATION_JSON_SCHEMA,
   validateClassification,

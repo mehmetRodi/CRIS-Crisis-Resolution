@@ -128,6 +128,10 @@ describe('processRecord', () => {
 
     expect(persisted).toHaveLength(0);
     expect(flagged).toHaveLength(1);
-    expect(flagged[0]).toMatchObject({ reportId: 'r1', claimedVersion: 4, reason: 'classification_failed' });
+    expect(flagged[0]).toMatchObject({
+      reportId: 'r1',
+      claimedVersion: 4,
+      reason: 'classification_failed',
+    });
   });
 });

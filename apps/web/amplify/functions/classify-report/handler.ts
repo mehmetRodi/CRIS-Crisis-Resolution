@@ -107,7 +107,10 @@ export async function processRecord(
   }
 
   // Only NEW reports are classifiable; anything else was already claimed/handled.
-  if (report.status !== ReportStatus.NEW || !canTransition(report.status, ReportStatus.PROCESSING)) {
+  if (
+    report.status !== ReportStatus.NEW ||
+    !canTransition(report.status, ReportStatus.PROCESSING)
+  ) {
     log({ event: 'classify.skip.status', reportId, status: report.status });
     return;
   }
@@ -120,7 +123,12 @@ export async function processRecord(
   }
   const claimedVersion = report.version + 1;
 
-  let result: { classification: ClassificationResult; score: number; band: string; location: LocationResult };
+  let result: {
+    classification: ClassificationResult;
+    score: number;
+    band: string;
+    location: LocationResult;
+  };
   try {
     const classification = await deps.classifier.classify(report.rawText);
     const { score, band } = provisionalScore(classification);
