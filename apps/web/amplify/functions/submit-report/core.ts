@@ -60,6 +60,12 @@ export interface ReportRecord {
   version: number;
   isAnonymous: boolean;
   createdAt: string;
+  /**
+   * Amplify auto-adds a non-nullable `updatedAt` to every model and populates it
+   * in its own resolvers. Our custom resolver bypasses that, so we set it
+   * explicitly — otherwise GraphQL can't serialize the returned/read item.
+   */
+  updatedAt: string;
   lat: number | null;
   lng: number | null;
   regionId: string | null;
@@ -79,6 +85,8 @@ export interface ReportEventRecord {
   actorRole: string | null;
   version: number;
   createdAt: string;
+  /** Non-nullable Amplify-managed field; set explicitly (see ReportRecord). */
+  updatedAt: string;
 }
 
 /** The idempotency guard item, keyed by the client request id (§5.4.4). */
@@ -88,6 +96,9 @@ export interface IdempotencyRecord {
   reportId: string;
   /** Unix-seconds TTL; DynamoDB expires stale keys automatically. */
   expiresAt: number;
+  /** Non-nullable Amplify-managed fields; set explicitly (see ReportRecord). */
+  createdAt: string;
+  updatedAt: string;
 }
 
 /** A fully-described, atomically-writable submission. */
@@ -153,6 +164,7 @@ export function buildInitialReport(input: SubmitReportInput, ctx: SubmitContext)
     version: 1,
     isAnonymous: anonymous,
     createdAt: ctx.now,
+    updatedAt: ctx.now,
     lat: input.lat ?? null,
     lng: input.lng ?? null,
     regionId: input.regionId ?? null,
@@ -174,6 +186,7 @@ export function buildSubmitEvent(report: ReportRecord, ctx: SubmitContext): Repo
     actorRole: report.reporterId ? UserRole.CITIZEN : null,
     version: report.version,
     createdAt: ctx.now,
+    updatedAt: ctx.now,
   };
 }
 
@@ -192,6 +205,26 @@ export function buildSubmitPlan(input: SubmitReportInput, ctx: SubmitContext): S
     idempotencyKey: input.clientRequestId,
     reportId: report.id,
     expiresAt: Math.floor(Date.parse(ctx.now) / 1000) + IDEMPOTENCY_TTL_SECONDS,
+    createdAt: ctx.now,
+    updatedAt: ctx.now,
   };
   return { report, event, idempotency };
+}
+
+/**
+ * Prepare a record for a DynamoDB write by dropping `null`/`undefined` attributes.
+ *
+ * DynamoDB rejects a NULL-typed value on any index key, and the `Report` table
+ * indexes several attributes (`regionId`, `category`, `geohashPrefix`,
+ * `priorityScore`, `geohash`, `duplicateGroupId`, `assignedTeamId`) that are
+ * genuinely unset at submit time — the geocode/classification pipeline fills them
+ * in later (§5.4). Omitting an attribute is the correct representation of "not set
+ * yet"; a later update adds it. This does NOT change the API contract: the
+ * mutation returns the full in-memory record (nulls included), only the persisted
+ * item is trimmed.
+ */
+export function forDynamoItem<T extends object>(item: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(item).filter(([, value]) => value !== null && value !== undefined),
+  ) as Partial<T>;
 }

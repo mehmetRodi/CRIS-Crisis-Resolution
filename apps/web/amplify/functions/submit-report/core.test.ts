@@ -4,6 +4,7 @@ import {
   buildInitialReport,
   buildSubmitEvent,
   buildSubmitPlan,
+  forDynamoItem,
   IDEMPOTENCY_TTL_SECONDS,
   MAX_TEXT_LENGTH,
   SubmitValidationError,
@@ -108,5 +109,29 @@ describe('buildSubmitPlan', () => {
 
   it('validates before building', () => {
     expect(() => buildSubmitPlan({ ...base, text: '' }, ctx)).toThrow(SubmitValidationError);
+  });
+});
+
+describe('forDynamoItem', () => {
+  it('drops null and undefined attributes (DynamoDB rejects NULL on index keys)', () => {
+    const report = buildInitialReport({ ...base, lat: 40.1, lng: -73.9 }, ctx);
+    const item = forDynamoItem(report);
+    // Unset indexed attributes must be absent, not null.
+    expect('regionId' in item).toBe(false);
+    expect('reporterContact' in item).toBe(false);
+    // Set attributes survive, including falsy-but-valid ones.
+    expect(item.id).toBe(ctx.reportId);
+    expect(item.version).toBe(1);
+    expect(item.isAnonymous).toBe(false);
+    expect(item.lat).toBe(40.1);
+    expect(item.mediaKeys).toEqual([]);
+  });
+
+  it('keeps empty strings and zeroes — only null/undefined are dropped', () => {
+    expect(forDynamoItem({ a: '', b: 0, c: false, d: null, e: undefined })).toEqual({
+      a: '',
+      b: 0,
+      c: false,
+    });
   });
 });
