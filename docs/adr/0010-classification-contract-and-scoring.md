@@ -1,4 +1,4 @@
-# ADR-0007: AI classification contract & deterministic priority scoring
+# ADR-0010: AI classification contract & deterministic priority scoring
 
 - **Status:** Accepted
 - **Date:** 2026-07-08
