@@ -12,4 +12,7 @@ export const transitionReport = defineFunction({
   entry: './handler.ts',
   timeoutSeconds: 10,
   memoryMB: 256,
+  // Data resolver + table grants in backend.ts → assign to the data stack to
+  // avoid a nested-stack circular dependency (Amplify Gen 2 prescribed fix).
+  resourceGroupName: 'data',
 });
