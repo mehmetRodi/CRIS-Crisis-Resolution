@@ -1,4 +1,5 @@
 import { a, defineData, type ClientSchema } from '@aws-amplify/backend';
+import { classifyReport } from '../functions/classify-report/resource';
 
 /**
  * GraphQL data model (AppSync + DynamoDB) — design doc §5.1–5.3, §5.6.
@@ -12,10 +13,13 @@ import { a, defineData, type ClientSchema } from '@aws-amplify/backend';
  *   TODO(CRIS-9): `submitReport` / `publishReportUpdate` custom mutations,
  *     optimistic-lock (expectedVersion) conditional writes, and the writer that
  *     keeps `PublicReport` in sync with `Report`.
- *   TODO(CRIS-10): DynamoDB Streams → SQS → Lambda pipeline that populates the
- *     derived fields (category/urgency/priority/geohash/statusUpdatedAt), plus
- *     `allow.resource(...)` IAM grants for those workers and the TTL on
- *     IdempotencyRecord.expiresAt.
+ *   CRIS-10 (done): DynamoDB Streams → SQS → Lambda pipeline populates the
+ *     derived classification/priority fields and statusUpdatedAt. The worker's
+ *     DURABLE write is direct-to-DynamoDB (§5.3, IAM granted in backend.ts); the
+ *     `allow.resource(classifyReport)` grants below authorize the AppSync path
+ *     used by the CRIS-9 `publishReportUpdate` notify mutation (ADR-0007). The
+ *     stream, EventBridge Pipe, SQS+DLQ, and the TTL on IdempotencyRecord.expiresAt
+ *     are wired in backend.ts.
  *   TODO(CRIS-11): classification JSON contract + deterministic scoring formula.
  *   TODO(CRIS-7): fine-grained `allow.owner()` ownership scoping and guest
  *     identity-pool wiring (guest rules below are inert until then).
@@ -127,6 +131,9 @@ const schema = a.schema({
       // Anonymous submission (§2.1): guests may CREATE but never READ Report —
       // PII stays server-side; public map reads go through PublicReport.
       allow.guest().to(['create']),
+      // CRIS-10: the classification worker reads the report and updates derived
+      // fields via the pipeline (ADR-0007).
+      allow.resource(classifyReport).to(['read', 'update']),
       // TODO(CRIS-7): allow.owner() so a citizen sees only their own report.
       // TODO(CRIS-9): direct create is superseded by the submitReport mutation.
     ]),
@@ -167,7 +174,9 @@ const schema = a.schema({
       allow.guest().to(['read']),
       allow.authenticated().to(['read']),
       allow.group('ADMIN'),
-      // TODO(CRIS-9/CRIS-10): pipeline writes via allow.resource(writerFn).
+      // CRIS-10: the pipeline mirrors non-sensitive fields into this projection.
+      allow.resource(classifyReport).to(['create', 'update']),
+      // TODO(CRIS-9): submit-path mirror write also uses allow.resource(...).
     ]),
 
   /* ---------------------------------------------------------------------- */
@@ -201,7 +210,9 @@ const schema = a.schema({
     .authorization((allow) => [
       allow.groups(['COORDINATOR', 'ADMIN']),
       allow.groups(['RESPONDER', 'VOLUNTEER']).to(['read']),
-      // TODO(CRIS-10): dedupe worker writes via allow.resource(dedupeFn).
+      // CRIS-10: the pipeline's dedupe step groups reports (dedupe logic itself
+      // is a deferred stub; the grant is in place for when it lands).
+      allow.resource(classifyReport).to(['create', 'update']),
     ]),
 
   /** Assignment of a response team to a report (§2.5, §5.1 dispatch). */
@@ -296,7 +307,9 @@ const schema = a.schema({
     // Immutable: only read is granted to clients; no update/delete rules exist.
     .authorization((allow) => [
       allow.groups(['COORDINATOR', 'ADMIN']).to(['read']),
-      // TODO(CRIS-9/CRIS-10): appends via allow.resource(writerFn) (IAM-only).
+      // CRIS-10: the pipeline appends immutable CLASSIFIED/SCORED events.
+      allow.resource(classifyReport).to(['create']),
+      // TODO(CRIS-9): submit-path SUBMITTED event also appends via allow.resource.
     ]),
 
   /** A geographic region reports/teams belong to (§5.2). */
@@ -352,7 +365,9 @@ const schema = a.schema({
     // Internal only. ADMIN read for debugging; pipeline writes are IAM-only.
     .authorization((allow) => [
       allow.group('ADMIN').to(['read']),
-      // TODO(CRIS-10): pipeline writes via allow.resource(pipelineFn) (IAM-only).
+      // CRIS-10: the pipeline reads/writes idempotency records (TTL on
+      // expiresAt is enabled in backend.ts).
+      allow.resource(classifyReport).to(['create', 'read', 'update']),
     ]),
 });
 
@@ -363,7 +378,14 @@ export const data = defineData({
   authorizationModes: {
     // userPool for signed-in users; guest reads (PublicReport/Region/
     // CategoryConfig) resolve via the identity pool's unauthenticated role,
-    // which CRIS-7 wires up. Pipeline (IAM) grants are added in CRIS-10.
+    // which CRIS-7 wires up. Pipeline (IAM) grants are wired via the
+    // `allow.resource(classifyReport)` rules above (CRIS-10).
     defaultAuthorizationMode: 'userPool',
+  },
+  // Registering the function here lets `allow.resource(classifyReport)` resolve
+  // the worker's IAM principal without a backend-level import cycle (the schema
+  // imports only the function factory, never `backend`). See ADR-0007.
+  functions: {
+    classifyReport,
   },
 });
