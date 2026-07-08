@@ -91,9 +91,7 @@ export const handler: AppSyncResolverHandler<SubmitReportArgs, ReportRecord> = a
 function isIdempotentReplay(err: unknown): boolean {
   if (typeof err !== 'object' || err === null || !('name' in err)) return false;
   const name = (err as { name: string }).name;
-  return (
-    name === 'TransactionCanceledException' || name === 'IdempotentParameterMismatchException'
-  );
+  return name === 'TransactionCanceledException' || name === 'IdempotentParameterMismatchException';
 }
 
 /** Resolve the report a prior submission with this key already created. */
