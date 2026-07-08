@@ -12,6 +12,9 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.1081.0",
+    "@aws-sdk/client-dynamodb": "^3.1081.0",
+    "@aws-sdk/lib-dynamodb": "^3.1081.0",
     "@crisismap/shared": "*",
     "aws-amplify": "^6.10.0",
 
