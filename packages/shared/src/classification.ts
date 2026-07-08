@@ -1,133 +1,357 @@
 /**
- * CrisisMap AI — AI classification JSON contract (design doc §5.4.1, §2.2).
+ * CrisisMap AI — AI triage contract & deterministic priority scoring (CRIS-11).
  *
- * The async classifier worker (CRIS-10) calls Bedrock (Claude) with a
- * **JSON-only contract** and validates the response against a JSON Schema plus
- * the `@crisismap/shared` enum allow-lists before trusting it. Invalid output
- * gets at most one repair attempt, then the report drops to
- * `NEEDS_VERIFICATION` (§5.4.1). This module is the single source of truth for
- * that contract — the Amplify data schema, the Lambda worker, and the incident
- * detail UI (Fig. 2 "AI Classification (JSON Preview)") all agree on it.
+ * This module is the single source of truth for two things the async pipeline
+ * (CRIS-10) depends on:
  *
- * Kept dependency-free on purpose: `validateClassification` is a hand-rolled
- * validator (no ajv) so `@crisismap/shared` stays a source-only, zero-dependency
- * package (ADR-0004) and the check runs identically in the browser, the Lambda,
- * and unit tests. The exported `CLASSIFICATION_JSON_SCHEMA` is what we hand to
- * Bedrock structured outputs; the runtime validator re-checks the enum
- * allow-lists as defense in depth (the model output is untrusted, §5.6).
+ *   1. The **classification JSON contract** (§2.2) — the exact, versioned shape
+ *      the Bedrock triage worker (Claude) must return. It doubles as a JSON
+ *      Schema for structured output / tool-use so the model is constrained to
+ *      valid enum values, and as a runtime validator so a malformed/hallucinated
+ *      response is rejected (routing the report to NEEDS_VERIFICATION) rather
+ *      than silently corrupting data.
  *
- * NOTE: this delivers the CRIS-11 classification contract. The deterministic
- * priority-scoring formula (§5.4.2) is a separate CRIS-11 concern; see
- * `priorityBandForScore` in `domain.ts` for the TENTATIVE band mapping.
+ *   2. The **deterministic scoring formula** (§5.4.2) — priority is a
+ *      deterministic, explainable score in [0, 10] mapped to bands P0–P3, NEVER
+ *      the raw model output. The model supplies `category`/`urgency`/signals;
+ *      this formula turns those into a reproducible score plus a `ScoreBreakdown`
+ *      so the UI can show *why* a report ranks where it does.
+ *
+ * SECURITY (§5.4.1, §5.6): the contract carries only classification metadata —
+ * never reporter identity/contact. Raw report text is UNTRUSTED input to the
+ * prompt; `summary`/`rationale`/`locationHint` are model-derived and must be
+ * treated as untrusted (and PII-free) before display.
+ *
+ * SCORE-BREAKDOWN SYNC: `ScoreBreakdown` mirrors the `ScoreBreakdown` custom type
+ * in `apps/web/amplify/data/resource.ts`. If you add/rename a factor, update BOTH
+ * (the "score breakdown sync guard" test in classification.test.ts fails on drift).
  */
 
-import { Category, Urgency } from './domain';
+import { Category, PriorityBand, priorityBandForScore, Urgency } from './domain';
+
+/* -------------------------------------------------------------------------- */
+/* Contract & scoring versions                                                */
+/* -------------------------------------------------------------------------- */
 
 /**
- * Normalized classification returned by the Triage Agent (§2.2, §5.4.1).
- *
- * - `category` / `urgency` are constrained to the shared enums.
- * - `confidence` is the model's self-reported confidence in [0, 1]; the report
- *   is escalated to human review below a threshold (§2.6) — that threshold is
- *   applied by the scoring/verification logic, not here.
- * - `entities` are salient extracted entities (locations, landmarks, hazards)
- *   for the incident detail view; never reporter PII (§5.6).
- * - `summary` is a short neutral summary of the situation.
+ * Version of the classification JSON contract. Persisted on the report so a
+ * later contract change is detectable and reprocessable. Bump on any
+ * breaking change to `ClassificationResult` / `CLASSIFICATION_JSON_SCHEMA`.
+ */
+export const CLASSIFICATION_CONTRACT_VERSION = 1;
+
+/**
+ * Version of the deterministic scoring formula (weights + band cutoffs).
+ * Written to `Report.scoreVersion` so scores computed under different formula
+ * versions are comparable/recomputable. Bump on any change to the weights,
+ * curves, or band cutoffs below.
+ */
+export const SCORE_VERSION = 1;
+
+/* -------------------------------------------------------------------------- */
+/* 1. Classification JSON contract (§2.2)                                     */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The structured result the Bedrock triage worker returns for one report.
+ * This is the contract boundary between the AI worker (CRIS-10) and the rest
+ * of the system — it is validated with {@link parseClassification} before any
+ * field is trusted.
  */
 export interface ClassificationResult {
+  /** Contract version the producer wrote against. */
+  contractVersion: number;
+  /** Incident category (drives category weight + map icon). */
   category: Category;
+  /** Assessed urgency (drives the dominant scoring term). */
   urgency: Urgency;
+  /** Model self-reported confidence in [0, 1]. Low → human review. */
   confidence: number;
-  entities: string[];
+  /**
+   * Free-text location description extracted from the report (e.g.
+   * "near the north bridge on Route 9"). NOT geocoded — the geocode worker
+   * (CRIS-10) resolves this to coordinates. `null` when no location is stated.
+   */
+  locationHint: string | null;
+  /** Short, PII-free summary for coordinator triage. */
   summary: string;
+  /** Brief PII-free justification for the category/urgency (explainability). */
+  rationale: string;
+  /**
+   * Model-flagged escalation — set when the report is ambiguous, conflicting,
+   * or possibly a hoax. Forces NEEDS_VERIFICATION regardless of `confidence`.
+   */
+  needsHumanReview: boolean;
 }
 
-/** Allowed `category` values, lifted from the shared enum (single source). */
-export const CLASSIFICATION_CATEGORIES = Object.values(Category);
+/**
+ * Minimum `confidence` at or above which a classification is auto-accepted.
+ * Below this the report is escalated to NEEDS_VERIFICATION (§2.6). Tunable;
+ * a change should be recorded (it shifts the human-review workload).
+ */
+export const CLASSIFICATION_CONFIDENCE_THRESHOLD = 0.6;
 
-/** Allowed `urgency` values, lifted from the shared enum (single source). */
-export const CLASSIFICATION_URGENCIES = Object.values(Urgency);
+/** Max character lengths for free-text fields (defense-in-depth vs. prompt-injection bloat). */
+export const CLASSIFICATION_MAX_SUMMARY_CHARS = 500;
+export const CLASSIFICATION_MAX_RATIONALE_CHARS = 500;
+export const CLASSIFICATION_MAX_LOCATION_HINT_CHARS = 300;
 
 /**
- * JSON Schema handed to Bedrock structured outputs (`output_config.format`).
- *
- * Structured-outputs constraints: every object sets `additionalProperties:
- * false` and lists `required`; numeric range/length constraints are NOT part of
- * the schema (unsupported by structured outputs) — `confidence` bounds and
- * non-empty `summary` are enforced by `validateClassification` instead.
+ * JSON Schema for the contract — usable directly as a Claude structured-output
+ * schema (`output_config.format`) or a tool `input_schema`. Enum arrays are
+ * derived from `@crisismap/shared` so the model can only emit valid values.
+ * `additionalProperties: false` + full `required` make it strict-mode ready.
  */
 export const CLASSIFICATION_JSON_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['category', 'urgency', 'confidence', 'entities', 'summary'],
   properties: {
-    category: { type: 'string', enum: [...CLASSIFICATION_CATEGORIES] },
-    urgency: { type: 'string', enum: [...CLASSIFICATION_URGENCIES] },
-    confidence: { type: 'number' },
-    entities: { type: 'array', items: { type: 'string' } },
-    summary: { type: 'string' },
+    category: { type: 'string', enum: Object.values(Category) },
+    urgency: { type: 'string', enum: Object.values(Urgency) },
+    confidence: { type: 'number', minimum: 0, maximum: 1 },
+    locationHint: { type: ['string', 'null'], maxLength: CLASSIFICATION_MAX_LOCATION_HINT_CHARS },
+    summary: { type: 'string', maxLength: CLASSIFICATION_MAX_SUMMARY_CHARS },
+    rationale: { type: 'string', maxLength: CLASSIFICATION_MAX_RATIONALE_CHARS },
+    needsHumanReview: { type: 'boolean' },
   },
+  required: [
+    'category',
+    'urgency',
+    'confidence',
+    'locationHint',
+    'summary',
+    'rationale',
+    'needsHumanReview',
+  ],
 } as const;
 
+/** Thrown when a model response violates the contract. Caller routes to NEEDS_VERIFICATION. */
+export class ClassificationContractError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ClassificationContractError';
+  }
+}
+
+const CATEGORY_VALUES = new Set<string>(Object.values(Category));
+const URGENCY_VALUES = new Set<string>(Object.values(Urgency));
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 /**
- * Result of validating an untrusted classification payload. Discriminated on
- * `ok` so callers get a typed `ClassificationResult` on success and a list of
- * human-readable reasons (fed into the single repair prompt) on failure.
+ * Validate and normalize a raw model response into a {@link ClassificationResult}.
+ * Enforces enum membership, `confidence ∈ [0, 1]`, field presence, and length
+ * caps. `contractVersion` is stamped by us (not trusted from the model).
+ *
+ * @throws {ClassificationContractError} if the response is not contract-valid.
  */
-export type ClassificationValidation =
-  { ok: true; value: ClassificationResult } | { ok: false; errors: string[] };
-
-const isRecord = (v: unknown): v is Record<string, unknown> =>
-  typeof v === 'object' && v !== null && !Array.isArray(v);
-
-/**
- * Validate an untrusted (model-produced) value against the classification
- * contract: shape, enum allow-lists, `confidence` ∈ [0, 1], non-empty `summary`,
- * and a string-array `entities`. Returns every problem found so the repair
- * prompt can be specific. Pure and dependency-free — safe in any runtime.
- */
-export function validateClassification(raw: unknown): ClassificationValidation {
-  const errors: string[] = [];
-
+export function parseClassification(raw: unknown): ClassificationResult {
   if (!isRecord(raw)) {
-    return { ok: false, errors: ['response is not a JSON object'] };
+    throw new ClassificationContractError('classification response is not an object');
   }
 
-  const { category, urgency, confidence, entities, summary } = raw;
+  const { category, urgency, confidence, locationHint, summary, rationale, needsHumanReview } = raw;
 
-  if (typeof category !== 'string' || !(CLASSIFICATION_CATEGORIES as string[]).includes(category)) {
-    errors.push(`category must be one of: ${CLASSIFICATION_CATEGORIES.join(', ')}`);
+  if (typeof category !== 'string' || !CATEGORY_VALUES.has(category)) {
+    throw new ClassificationContractError(`invalid category: ${String(category)}`);
   }
-  if (typeof urgency !== 'string' || !(CLASSIFICATION_URGENCIES as string[]).includes(urgency)) {
-    errors.push(`urgency must be one of: ${CLASSIFICATION_URGENCIES.join(', ')}`);
+  if (typeof urgency !== 'string' || !URGENCY_VALUES.has(urgency)) {
+    throw new ClassificationContractError(`invalid urgency: ${String(urgency)}`);
   }
   if (
     typeof confidence !== 'number' ||
-    Number.isNaN(confidence) ||
+    !Number.isFinite(confidence) ||
     confidence < 0 ||
     confidence > 1
   ) {
-    errors.push('confidence must be a number between 0 and 1');
+    throw new ClassificationContractError(
+      `confidence must be a number in [0, 1]: ${String(confidence)}`,
+    );
   }
-  if (!Array.isArray(entities) || !entities.every((e) => typeof e === 'string')) {
-    errors.push('entities must be an array of strings');
+  if (locationHint !== null && typeof locationHint !== 'string') {
+    throw new ClassificationContractError('locationHint must be a string or null');
   }
-  if (typeof summary !== 'string' || summary.trim().length === 0) {
-    errors.push('summary must be a non-empty string');
+  if (typeof summary !== 'string') {
+    throw new ClassificationContractError('summary must be a string');
   }
-
-  if (errors.length > 0) {
-    return { ok: false, errors };
+  if (typeof rationale !== 'string') {
+    throw new ClassificationContractError('rationale must be a string');
+  }
+  if (typeof needsHumanReview !== 'boolean') {
+    throw new ClassificationContractError('needsHumanReview must be a boolean');
   }
 
   return {
-    ok: true,
-    value: {
-      category: category as Category,
-      urgency: urgency as Urgency,
-      confidence: confidence as number,
-      entities: entities as string[],
-      summary: summary as string,
-    },
+    contractVersion: CLASSIFICATION_CONTRACT_VERSION,
+    category: category as Category,
+    urgency: urgency as Urgency,
+    confidence,
+    locationHint:
+      locationHint === null ? null : locationHint.slice(0, CLASSIFICATION_MAX_LOCATION_HINT_CHARS),
+    summary: summary.slice(0, CLASSIFICATION_MAX_SUMMARY_CHARS),
+    rationale: rationale.slice(0, CLASSIFICATION_MAX_RATIONALE_CHARS),
+    needsHumanReview,
+  };
+}
+
+/**
+ * Whether a valid classification should still be escalated to human review
+ * (§2.6): the model flagged it, or confidence is below the accept threshold.
+ */
+export function shouldEscalateToVerification(result: ClassificationResult): boolean {
+  return result.needsHumanReview || result.confidence < CLASSIFICATION_CONFIDENCE_THRESHOLD;
+}
+
+/* -------------------------------------------------------------------------- */
+/* 2. Deterministic priority scoring (§5.4.2)                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Additive priority factors, each expressed in final score-points so they sum
+ * (before clamping) to `priorityScore`. Mirrors the Amplify `ScoreBreakdown`
+ * custom type — keep the two in sync (guard test enforces this).
+ */
+export interface ScoreBreakdown {
+  /** Points from assessed urgency (dominant term). */
+  urgencyWeight: number;
+  /** Points from incident category. */
+  categoryWeight: number;
+  /** Points from recency (time-decayed). */
+  recencyWeight: number;
+  /** Points from corroborating reports/verifications. */
+  corroborationWeight: number;
+  /** Coordinator override applied on top (may be negative). */
+  manualAdjustment: number;
+  /** Optional human-readable note (e.g. reason for a manual adjustment). */
+  notes?: string;
+}
+
+/** Inputs to the scoring formula. Only `urgency` and `category` are required. */
+export interface ScoreInput {
+  urgency: Urgency;
+  category: Category;
+  /** Report age in minutes (now − submittedAt). Defaults to 0 (just submitted). */
+  ageMinutes?: number;
+  /** Count of OTHER reports believed to describe the same incident (§5.4.3). */
+  corroboratingReports?: number;
+  /** Count of CONFIRMED verification signals (§2.6). */
+  confirmedVerifications?: number;
+  /** Coordinator manual delta in score-points; clamped to ±{@link MANUAL_ADJUSTMENT_LIMIT}. */
+  manualAdjustment?: number;
+  /** Optional note carried into the breakdown. */
+  notes?: string;
+}
+
+/** Result of scoring: the score, its band, the formula version, and the explainable breakdown. */
+export interface ScoringResult {
+  priorityScore: number;
+  priorityBand: PriorityBand;
+  scoreVersion: number;
+  breakdown: ScoreBreakdown;
+}
+
+/** Max points contributed by urgency. CRITICAL saturates this term. */
+export const URGENCY_MAX_POINTS = 5;
+const URGENCY_POINTS: Record<Urgency, number> = {
+  CRITICAL: 5,
+  HIGH: 3.5,
+  MEDIUM: 2,
+  LOW: 0.8,
+};
+
+/** Max points contributed by category (category factor × this). */
+export const CATEGORY_MAX_POINTS = 3;
+/**
+ * Per-category weight in [0, 1] — life-threat categories rank highest.
+ * These are the shared defaults; a deployed `CategoryConfig.baseWeight` (CRIS-8
+ * model) can override at runtime, but this table keeps scoring deterministic
+ * offline and in tests.
+ */
+const CATEGORY_WEIGHT: Record<Category, number> = {
+  MEDICAL: 1.0,
+  RESCUE: 1.0,
+  FIRE: 0.95,
+  HAZMAT: 0.9,
+  STRUCTURAL_DAMAGE: 0.8,
+  FLOOD: 0.75,
+  SHELTER: 0.6,
+  UTILITY: 0.5,
+  BLOCKED_ROAD: 0.45,
+  OTHER: 0.3,
+};
+
+/** Max points contributed by recency; decays with a half-life. */
+export const RECENCY_MAX_POINTS = 1.5;
+/** Minutes for the recency contribution to halve (exponential decay). */
+export const RECENCY_HALF_LIFE_MINUTES = 45;
+
+/** Max points contributed by corroboration (saturating). */
+export const CORROBORATION_MAX_POINTS = 2;
+/** Signal count at which corroboration reaches half of its max (saturation midpoint). */
+export const CORROBORATION_HALF_SATURATION = 2;
+
+/** Absolute cap on a coordinator manual adjustment, in score-points. */
+export const MANUAL_ADJUSTMENT_LIMIT = 3;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+/** Round to 2 decimals — scores are display/comparison values, not currency. */
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+/**
+ * Compute a deterministic, explainable priority score in [0, 10] and its band.
+ *
+ * priorityScore = clamp(urgency + category + recency + corroboration + manual, 0, 10)
+ *
+ * Each term is bounded and independently explainable; the returned
+ * `breakdown` records every contribution so the UI can render the "why".
+ * Pure and deterministic — identical inputs always yield identical output.
+ */
+export function scoreReport(input: ScoreInput): ScoringResult {
+  const ageMinutes = Math.max(0, input.ageMinutes ?? 0);
+  const corroboratingReports = Math.max(0, input.corroboratingReports ?? 0);
+  const confirmedVerifications = Math.max(0, input.confirmedVerifications ?? 0);
+
+  const urgencyWeight = URGENCY_POINTS[input.urgency];
+  const categoryWeight = round2(CATEGORY_WEIGHT[input.category] * CATEGORY_MAX_POINTS);
+  const recencyWeight = round2(
+    RECENCY_MAX_POINTS * Math.pow(0.5, ageMinutes / RECENCY_HALF_LIFE_MINUTES),
+  );
+
+  const signals = corroboratingReports + confirmedVerifications;
+  const corroborationWeight = round2(
+    CORROBORATION_MAX_POINTS * (signals / (signals + CORROBORATION_HALF_SATURATION)),
+  );
+
+  const manualAdjustment = clamp(
+    input.manualAdjustment ?? 0,
+    -MANUAL_ADJUSTMENT_LIMIT,
+    MANUAL_ADJUSTMENT_LIMIT,
+  );
+
+  const raw =
+    urgencyWeight + categoryWeight + recencyWeight + corroborationWeight + manualAdjustment;
+  const priorityScore = round2(clamp(raw, 0, 10));
+
+  const breakdown: ScoreBreakdown = {
+    urgencyWeight,
+    categoryWeight,
+    recencyWeight,
+    corroborationWeight,
+    manualAdjustment,
+    ...(input.notes !== undefined ? { notes: input.notes } : {}),
+  };
+
+  return {
+    priorityScore,
+    priorityBand: priorityBandForScore(priorityScore),
+    scoreVersion: SCORE_VERSION,
+    breakdown,
   };
 }

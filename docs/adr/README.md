@@ -14,12 +14,18 @@ behind the code — essential when refactoring or extending the system.
 
 ## Index
 
-| ADR                                                        | Title                             | Status   |
-| ---------------------------------------------------------- | --------------------------------- | -------- |
-| [0001](0001-monorepo-npm-workspaces.md)                    | Monorepo with npm workspaces      | Accepted |
-| [0002](0002-frontend-vite-react-spa.md)                    | Frontend: Vite + React SPA        | Accepted |
-| [0003](0003-backend-amplify-gen2-with-cdk-escape-hatch.md) | Backend/IaC: Amplify Gen 2 + CDK  | Accepted |
-| [0004](0004-shared-domain-package.md)                      | Source-only shared domain package | Accepted |
-| [0005](0005-ci-and-observability-baseline.md)              | CI + observability baseline       | Accepted |
-| [0006](0006-dynamodb-mvp-data-model.md)                    | DynamoDB MVP data model           | Accepted |
-| [0007](0007-async-classification-pipeline.md)              | Async classification pipeline     | Accepted |
+| ADR                                                        | Title                                | Status   |
+| ---------------------------------------------------------- | ------------------------------------ | -------- |
+| [0001](0001-monorepo-npm-workspaces.md)                    | Monorepo with npm workspaces         | Accepted |
+| [0002](0002-frontend-vite-react-spa.md)                    | Frontend: Vite + React SPA           | Accepted |
+| [0003](0003-backend-amplify-gen2-with-cdk-escape-hatch.md) | Backend/IaC: Amplify Gen 2 + CDK     | Accepted |
+| [0004](0004-shared-domain-package.md)                      | Source-only shared domain package    | Accepted |
+| [0005](0005-ci-and-observability-baseline.md)              | CI + observability baseline          | Accepted |
+| [0006](0006-dynamodb-mvp-data-model.md)                    | DynamoDB MVP data model              | Accepted |
+| [0007](0007-submit-report-write-path.md)                   | submitReport write path              | Accepted |
+| [0008](0008-report-transition-engine.md)                   | Report transition engine             | Accepted |
+| [0009](0009-public-projection-and-realtime-publish.md)     | Public projection + real-time        | Accepted |
+| [0010](0010-classification-contract-and-scoring.md)        | AI classification contract + scoring | Accepted |
+| [0011](0011-custom-resolver-conventions-amplify-gen2.md)   | Custom AppSync resolver conventions  | Accepted |
+| [0012](0012-amplify-outputs-in-ci.md)                      | Amplify outputs handling in CI       | Accepted |
+| [0013](0013-async-classification-pipeline.md)              | Async classification pipeline        | Accepted |

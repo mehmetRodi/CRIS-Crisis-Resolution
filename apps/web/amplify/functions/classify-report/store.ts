@@ -6,17 +6,26 @@ import {
   PutCommand,
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
-import { ReportEventType, ReportStatus, type ClassificationResult } from '@crisismap/shared';
+import {
+  ReportEventType,
+  ReportStatus,
+  SYSTEM_ACTOR,
+  type ClassificationResult,
+  type ScoreBreakdown,
+} from '@crisismap/shared';
 
 /**
  * Durable persistence for the classification worker.
  *
  * Per design doc §5.3 the worker writes to DynamoDB **directly** (keeping the
- * durable write independent of AppSync availability) and, separately, calls the
- * IAM-only `publishReportUpdate` mutation to fan out to subscribers — that
- * notify step is owned by CRIS-9 and left as a seam in the handler. IAM for
- * these table writes is granted in `backend.ts` via `grantReadWriteData`; table
- * names arrive as environment variables. See ADR-0007.
+ * durable write independent of AppSync availability) and, separately, fans the
+ * redacted update out to subscribers via the IAM-only `publishReportUpdate`
+ * mutation — that notify step is owned by CRIS-19 and left as a seam in the
+ * handler. IAM for these table writes is granted in `backend.ts` via
+ * `grantReadWriteData`; table names arrive as environment variables. There is no
+ * separate `PublicReport` projection table in the current schema (it is a
+ * customType returned by `publishReportUpdate`), so the worker writes only the
+ * `Report` and its audit `ReportEvent`. See ADR-0013.
  *
  * Every mutation is version-checked (optimistic lock, §5.1/§5.2): a claim only
  * succeeds from `NEW` at the expected version, and the result write only lands
@@ -29,26 +38,29 @@ export interface ReportRecord {
   id: string;
   version: number;
   status: string;
-  rawText: string;
+  text: string;
   lastProcessedEventId?: string | null;
 }
 
+/** Resolved location, all optional — populated by the CRIS-13 geocode seam. */
 export interface LocationResult {
-  latitude?: number;
-  longitude?: number;
+  lat?: number;
+  lng?: number;
   geohash?: string;
   geohashPrefix?: string;
-  locationPrecision: string;
 }
 
 export interface PersistClassificationInput {
   reportId: string;
   /** Version the row is expected to be at (the post-claim version). */
   claimedVersion: number;
+  /** Terminal status for this pass: AI_CLASSIFIED, or NEEDS_VERIFICATION on escalation (§2.6). */
+  status: string;
   classification: ClassificationResult;
   priorityScore: number;
   priorityBand: string;
   scoreVersion: number;
+  scoreBreakdown: ScoreBreakdown;
   location: LocationResult;
   streamEventId: string;
 }
@@ -70,7 +82,6 @@ export interface ReportStore {
 
 export interface DynamoStoreTables {
   report: string;
-  publicReport: string;
   reportEvent: string;
 }
 
@@ -81,13 +92,18 @@ function isConditionalCheckFailed(err: unknown): boolean {
 
 /**
  * Real DynamoDB-backed {@link ReportStore}. The document client is built lazily
- * so importing this module in tests needs no AWS credentials.
+ * so importing this module in tests needs no AWS credentials. Undefined values
+ * are stripped so the optional location fields can be omitted cleanly.
  */
 export function createDynamoStore(
   tables: DynamoStoreTables,
   client?: DynamoDBDocumentClient,
 ): ReportStore {
-  const doc = client ?? DynamoDBDocumentClient.from(new DynamoDBClient({}));
+  const doc =
+    client ??
+    DynamoDBDocumentClient.from(new DynamoDBClient({}), {
+      marshallOptions: { removeUndefinedValues: true },
+    });
 
   return {
     async getReport(reportId) {
@@ -99,7 +115,7 @@ export function createDynamoStore(
         id: Item.id as string,
         version: Item.version as number,
         status: Item.status as string,
-        rawText: Item.rawText as string,
+        text: Item.text as string,
         lastProcessedEventId: (Item.lastProcessedEventId as string | undefined) ?? null,
       };
     },
@@ -130,100 +146,98 @@ export function createDynamoStore(
 
     async persistClassification(input) {
       const now = new Date().toISOString();
+      const nextVersion = input.claimedVersion + 1;
       const { classification, location } = input;
 
-      // 1. Conditional result write-back (still at the claimed version).
+      // 1. Conditional result write-back (still at the claimed version). Only
+      //    the location fields that were resolved are written (§5.2).
+      const sets = [
+        '#s = :status',
+        '#cat = :cat',
+        'urgency = :urg',
+        'confidence = :conf',
+        'priorityScore = :score',
+        'priorityBand = :band',
+        'scoreVersion = :sv',
+        'scoreBreakdown = :breakdown',
+        'lastProcessedEventId = :eid',
+        '#v = :next',
+      ];
+      const values: Record<string, unknown> = {
+        ':status': input.status,
+        ':cat': classification.category,
+        ':urg': classification.urgency,
+        ':conf': classification.confidence,
+        ':score': input.priorityScore,
+        ':band': input.priorityBand,
+        ':sv': input.scoreVersion,
+        ':breakdown': input.scoreBreakdown,
+        ':eid': input.streamEventId,
+        ':next': nextVersion,
+        ':claimed': input.claimedVersion,
+      };
+      const optionalLocation: Record<string, number | string | undefined> = {
+        lat: location.lat,
+        lng: location.lng,
+        geohash: location.geohash,
+        geohashPrefix: location.geohashPrefix,
+      };
+      for (const [field, value] of Object.entries(optionalLocation)) {
+        if (value !== undefined) {
+          sets.push(`${field} = :${field}`);
+          values[`:${field}`] = value;
+        }
+      }
+
       await doc.send(
         new UpdateCommand({
           TableName: tables.report,
           Key: { id: input.reportId },
-          UpdateExpression: [
-            'SET #s = :classified',
-            '#cat = :cat',
-            'urgency = :urg',
-            'classificationConfidence = :conf',
-            'priorityScore = :score',
-            'priorityBand = :band',
-            'scoreVersion = :sv',
-            'locationPrecision = :lp',
-            'statusUpdatedAt = :now',
-            'lastProcessedEventId = :eid',
-            '#v = :next',
-          ].join(', '),
+          UpdateExpression: `SET ${sets.join(', ')}`,
           ConditionExpression: '#v = :claimed',
           ExpressionAttributeNames: { '#s': 'status', '#v': 'version', '#cat': 'category' },
-          ExpressionAttributeValues: {
-            ':classified': ReportStatus.AI_CLASSIFIED,
-            ':cat': classification.category,
-            ':urg': classification.urgency,
-            ':conf': classification.confidence,
-            ':score': input.priorityScore,
-            ':band': input.priorityBand,
-            ':sv': input.scoreVersion,
-            ':lp': location.locationPrecision,
-            ':now': now,
-            ':eid': input.streamEventId,
-            ':claimed': input.claimedVersion,
-            ':next': input.claimedVersion + 1,
-          },
+          ExpressionAttributeValues: values,
         }),
       );
 
-      // 2. Immutable audit event (§5.1).
+      // 2. Immutable audit event (§5.1). `eventId` (the stream event id) makes
+      //    a retried append idempotent (§5.4.4).
       await doc.send(
         new PutCommand({
           TableName: tables.reportEvent,
           Item: {
             id: randomUUID(),
             reportId: input.reportId,
-            eventType: ReportEventType.CLASSIFIED,
+            type: ReportEventType.CLASSIFIED,
             fromStatus: ReportStatus.PROCESSING,
-            toStatus: ReportStatus.AI_CLASSIFIED,
-            payload: {
+            toStatus: input.status,
+            actorId: SYSTEM_ACTOR,
+            version: nextVersion,
+            eventId: input.streamEventId,
+            detail: {
               category: classification.category,
               urgency: classification.urgency,
               confidence: classification.confidence,
               priorityScore: input.priorityScore,
               priorityBand: input.priorityBand,
+              needsHumanReview: classification.needsHumanReview,
             },
-            occurredAt: now,
-          },
-        }),
-      );
-
-      // 3. Redacted public projection mirror (§5.3, §5.6 — non-sensitive only).
-      await doc.send(
-        new PutCommand({
-          TableName: tables.publicReport,
-          Item: {
-            id: input.reportId,
-            category: classification.category,
-            urgency: classification.urgency,
-            priorityScore: input.priorityScore,
-            priorityBand: input.priorityBand,
-            status: ReportStatus.AI_CLASSIFIED,
-            latitude: location.latitude,
-            longitude: location.longitude,
-            geohash: location.geohash,
-            geohashPrefix: location.geohashPrefix,
+            createdAt: now,
           },
         }),
       );
     },
 
     async markNeedsVerification(input) {
-      const now = new Date().toISOString();
       await doc.send(
         new UpdateCommand({
           TableName: tables.report,
           Key: { id: input.reportId },
-          UpdateExpression:
-            'SET #s = :nv, statusUpdatedAt = :now, lastProcessedEventId = :eid, #v = :next',
+          UpdateExpression: 'SET #s = :nv, lastProcessedEventId = :eid, #v = :next',
           ConditionExpression: '#v = :claimed',
           ExpressionAttributeNames: { '#s': 'status', '#v': 'version' },
           ExpressionAttributeValues: {
             ':nv': ReportStatus.NEEDS_VERIFICATION,
-            ':now': now,
             ':eid': input.streamEventId,
             ':claimed': input.claimedVersion,
             ':next': input.claimedVersion + 1,

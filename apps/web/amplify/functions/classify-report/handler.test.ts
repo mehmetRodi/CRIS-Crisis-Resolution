@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { Category, ReportStatus, Urgency, type ClassificationResult } from '@crisismap/shared';
+import {
+  CLASSIFICATION_CONTRACT_VERSION,
+  Category,
+  ReportStatus,
+  Urgency,
+  type ClassificationResult,
+} from '@crisismap/shared';
 import { parseMessage, processRecord, type WorkerDeps } from './handler';
 import type {
   MarkNeedsVerificationInput,
@@ -10,11 +16,14 @@ import type {
 import { ClassificationError, type Classifier } from './bedrock';
 
 const CLASSIFICATION: ClassificationResult = {
+  contractVersion: CLASSIFICATION_CONTRACT_VERSION,
   category: Category.MEDICAL,
   urgency: Urgency.CRITICAL,
   confidence: 0.9,
-  entities: ['clinic'],
+  locationHint: 'the downtown clinic',
   summary: 'Injured people at a clinic.',
+  rationale: 'Multiple casualties reported at a medical facility.',
+  needsHumanReview: false,
 };
 
 function fakeStore(report: ReportRecord | null, claim = true) {
@@ -41,7 +50,7 @@ const NEW_REPORT: ReportRecord = {
   id: 'r1',
   version: 3,
   status: ReportStatus.NEW,
-  rawText: 'people hurt at the clinic',
+  text: 'people hurt at the clinic',
   lastProcessedEventId: null,
 };
 
@@ -73,7 +82,7 @@ describe('parseMessage', () => {
 });
 
 describe('processRecord', () => {
-  it('classifies a NEW report and persists the result', async () => {
+  it('classifies a NEW report and persists the deterministic score', async () => {
     const { store, persisted, flagged } = fakeStore(NEW_REPORT);
     const classifier = fakeClassifier();
 
@@ -85,10 +94,34 @@ describe('processRecord', () => {
       reportId: 'r1',
       claimedVersion: 4,
       streamEventId: 'evt-1',
+      status: ReportStatus.AI_CLASSIFIED,
       classification: { category: Category.MEDICAL, urgency: Urgency.CRITICAL },
-      priorityBand: 'P0', // CRITICAL → provisional score 9 → P0
+      // MEDICAL + CRITICAL at age 0 ⇒ 5 + 3 + 1.5 = 9.5 ⇒ P0 (§5.4.2).
+      priorityBand: 'P0',
     });
+    expect(persisted[0].scoreBreakdown.urgencyWeight).toBe(5);
     expect(flagged).toHaveLength(0);
+  });
+
+  it('escalates a model-flagged classification to NEEDS_VERIFICATION but still records it (§2.6)', async () => {
+    const { store, persisted, flagged } = fakeStore(NEW_REPORT);
+    const classifier = fakeClassifier(async () => ({ ...CLASSIFICATION, needsHumanReview: true }));
+
+    await processRecord(deps(store, classifier), message);
+
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0].status).toBe(ReportStatus.NEEDS_VERIFICATION);
+    expect(flagged).toHaveLength(0);
+  });
+
+  it('escalates a low-confidence classification to NEEDS_VERIFICATION (§2.6)', async () => {
+    const { store, persisted } = fakeStore(NEW_REPORT);
+    const classifier = fakeClassifier(async () => ({ ...CLASSIFICATION, confidence: 0.2 }));
+
+    await processRecord(deps(store, classifier), message);
+
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0].status).toBe(ReportStatus.NEEDS_VERIFICATION);
   });
 
   it('is idempotent when the stream event was already applied', async () => {
@@ -121,7 +154,7 @@ describe('processRecord', () => {
   it('marks NEEDS_VERIFICATION when classification fails (§5.4.4)', async () => {
     const { store, persisted, flagged } = fakeStore(NEW_REPORT);
     const classifier = fakeClassifier(async () => {
-      throw new ClassificationError(['category must be one of: ...']);
+      throw new ClassificationError(['invalid category: ...']);
     });
 
     await processRecord(deps(store, classifier), message);

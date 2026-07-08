@@ -1,11 +1,9 @@
 import type { SQSHandler } from 'aws-lambda';
 import {
   canTransition,
-  LocationPrecision,
-  priorityBandForScore,
   ReportStatus,
-  Urgency,
-  type ClassificationResult,
+  scoreReport,
+  shouldEscalateToVerification,
 } from '@crisismap/shared';
 import { createBedrockClassifier, type Classifier } from './bedrock';
 import { createDynamoStore, type LocationResult, type ReportStore } from './store';
@@ -17,6 +15,10 @@ import { createDynamoStore, type LocationResult, type ReportStore } from './stor
  * an injected {@link WorkerDeps} — so the claim/idempotency/failure control flow
  * is unit-tested with fakes (see handler.test.ts), while the exported `handler`
  * wires the real Bedrock + DynamoDB implementations from the environment.
+ *
+ * Scoring is the deterministic §5.4.2 formula from `@crisismap/shared`
+ * (`scoreReport`, ADR-0010); a low-confidence or model-flagged classification is
+ * escalated to NEEDS_VERIFICATION (§2.6) while still recording the AI result.
  */
 
 /** SQS payload projected by the EventBridge Pipe input transformer (IDs only, no PII). */
@@ -33,28 +35,9 @@ export interface WorkerDeps {
   log?: (entry: Record<string, unknown>) => void;
 }
 
-/** Urgency → provisional score. TODO(CRIS-11): replace with the §5.4.2 formula. */
-const URGENCY_SCORE: Record<string, number> = {
-  [Urgency.CRITICAL]: 9,
-  [Urgency.HIGH]: 7,
-  [Urgency.MEDIUM]: 4,
-  [Urgency.LOW]: 1,
-};
-
-/**
- * Provisional deterministic score (§5.4.2). CRIS-10 delivers only an
- * urgency-based placeholder so the map/board have something to rank on; the
- * authoritative weighted formula + `scoreBreakdown` is CRIS-11. `scoreVersion`
- * 0 marks the result as provisional.
- */
-function provisionalScore(c: ClassificationResult): { score: number; band: string } {
-  const score = URGENCY_SCORE[c.urgency] ?? 0;
-  return { score, band: priorityBandForScore(score) };
-}
-
 /** Geocode seam. TODO(CRIS-13): call Amazon Location; derive geohash/geohashPrefix. */
 function geocode(): LocationResult {
-  return { locationPrecision: LocationPrecision.UNKNOWN };
+  return {};
 }
 
 /** Parses the SQS body into a validated message, or null if malformed (poison). */
@@ -123,19 +106,11 @@ export async function processRecord(
   }
   const claimedVersion = report.version + 1;
 
-  let result: {
-    classification: ClassificationResult;
-    score: number;
-    band: string;
-    location: LocationResult;
-  };
+  let classification;
   try {
-    const classification = await deps.classifier.classify(report.rawText);
-    const { score, band } = provisionalScore(classification);
-    const location = geocode(); // stub (CRIS-13); dedupe likewise deferred.
-    result = { classification, score, band, location };
+    classification = await deps.classifier.classify(report.text);
   } catch (err) {
-    // Bedrock/geocode failure ⇒ NEEDS_VERIFICATION, never lost (§5.4.4).
+    // Bedrock/parse failure ⇒ NEEDS_VERIFICATION, never lost (§5.4.4).
     log({
       event: 'classify.failed',
       reportId,
@@ -150,21 +125,34 @@ export async function processRecord(
     return;
   }
 
+  // Deterministic, explainable priority (§5.4.2, ADR-0010).
+  const scoring = scoreReport({
+    urgency: classification.urgency,
+    category: classification.category,
+  });
+  // Low-confidence / model-flagged reports still record the AI result but are
+  // routed to human review rather than surfacing as AI_CLASSIFIED (§2.6).
+  const status = shouldEscalateToVerification(classification)
+    ? ReportStatus.NEEDS_VERIFICATION
+    : ReportStatus.AI_CLASSIFIED;
+
   await deps.store.persistClassification({
     reportId,
     claimedVersion,
-    classification: result.classification,
-    priorityScore: result.score,
-    priorityBand: result.band,
-    scoreVersion: 0, // provisional (CRIS-11)
-    location: result.location,
+    status,
+    classification,
+    priorityScore: scoring.priorityScore,
+    priorityBand: scoring.priorityBand,
+    scoreVersion: scoring.scoreVersion,
+    scoreBreakdown: scoring.breakdown,
+    location: geocode(), // stub (CRIS-13); dedupe likewise deferred.
     streamEventId,
   });
 
-  // TODO(CRIS-9): call the IAM-only `publishReportUpdate` mutation so subscribed
+  // TODO(CRIS-19): call the IAM-only `publishReportUpdate` mutation so subscribed
   // clients update in near real time (§5.3). Durable write above is independent
   // of AppSync availability.
-  log({ event: 'classify.done', reportId, band: result.band });
+  log({ event: 'classify.done', reportId, band: scoring.priorityBand, status });
 }
 
 function buildDeps(): WorkerDeps {
@@ -176,7 +164,6 @@ function buildDeps(): WorkerDeps {
   return {
     store: createDynamoStore({
       report: env('REPORT_TABLE_NAME'),
-      publicReport: env('PUBLIC_REPORT_TABLE_NAME'),
       reportEvent: env('REPORT_EVENT_TABLE_NAME'),
     }),
     classifier: createBedrockClassifier({ modelId: env('BEDROCK_MODEL_ID') }),

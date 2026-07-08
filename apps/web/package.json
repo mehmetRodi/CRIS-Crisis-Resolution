@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "npm run typecheck && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p amplify/tsconfig.json",
     "test": "vitest run"
   },
   "dependencies": {
@@ -18,11 +18,14 @@
     "@crisismap/shared": "*",
     "aws-amplify": "^6.10.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "ulid": "^2.4.0"
   },
   "devDependencies": {
     "@aws-amplify/backend": "^1.5.0",
     "@aws-amplify/backend-cli": "^1.4.0",
+    "@aws-sdk/client-dynamodb": "^3.1080.0",
+    "@aws-sdk/lib-dynamodb": "^3.1080.0",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
     "@types/aws-lambda": "^8.10.162",

@@ -8,36 +8,83 @@ import { Queue } from 'aws-cdk-lib/aws-sqs';
 import { auth } from './auth/resource';
 import { data } from './data/resource';
 import { storage } from './storage/resource';
+import { submitReport } from './functions/submit-report/resource';
+import { transitionReport } from './functions/transition-report/resource';
+import { publishReportUpdate } from './functions/publish-report-update/resource';
 import { classifyReport } from './functions/classify-report/resource';
 
 /**
  * CrisisMap AI backend (Amplify Gen 2).
  *
- * Managed resources (auth/data/storage) are wired by `defineBackend`. The custom
- * asynchronous AI-triage pipeline from the design doc (§3, §5.4) is added below
- * via CDK escape hatches (ADR-0003, ADR-0007):
+ * Wires the managed auth/data/storage resources, the custom resolvers that back
+ * the E2 API surface (CRIS-9/18/19), and the custom asynchronous AI-triage
+ * pipeline from the design doc (§3, §5.4), added via CDK escape hatches
+ * (ADR-0003, ADR-0013):
  *
  *   Report DynamoDB stream → EventBridge Pipe → SQS (+DLQ) → classify-report Lambda
  *
- * The worker classifies (Bedrock), scores, geocodes, dedupes, and writes results
- * back durably (direct-to-DynamoDB, §5.3), then — once CRIS-9 lands — notifies
- * subscribers via the IAM-only `publishReportUpdate` mutation. SNS proximity
- * alerts remain deferred.
+ * Table names and IAM grants for the resolver/worker functions are set here
+ * rather than in each function's `resource.ts`, because the DynamoDB tables
+ * don't exist until the data schema is synthesized. The worker classifies
+ * (Bedrock), scores, and writes results back durably (direct-to-DynamoDB, §5.3);
+ * fanning the redacted update out to subscribers via `publishReportUpdate`
+ * (CRIS-19) and SNS proximity alerts remain deferred seams.
  *
  * Nothing here is deployed by the scaffold. Run `npx ampx sandbox` from
  * `apps/web` (with AWS credentials + Bedrock model access) to stand up a
  * personal dev environment. NOTE: enabling the stream changes the table's
- * custom-resource update path — deploy on a fresh sandbox first (ADR-0007).
+ * custom-resource update path — deploy on a fresh sandbox first (ADR-0013).
  */
 const backend = defineBackend({
   auth,
   data,
   storage,
+  submitReport,
+  transitionReport,
+  publishReportUpdate,
   classifyReport,
 });
 
-const worker = backend.classifyReport.resources.lambda;
 const tables = backend.data.resources.tables;
+
+/* -------------------------------------------------------------------------- */
+/* submitReport (CRIS-9) — grant table access + inject table names            */
+/* -------------------------------------------------------------------------- */
+
+const submitFn = backend.submitReport.resources.lambda;
+
+// The resolver writes the report + its opening audit event and reads back the
+// existing report on an idempotent replay.
+tables['Report'].grantReadWriteData(submitFn);
+tables['ReportEvent'].grantWriteData(submitFn);
+tables['IdempotencyRecord'].grantReadWriteData(submitFn);
+
+backend.submitReport.addEnvironment('REPORT_TABLE_NAME', tables['Report'].tableName);
+backend.submitReport.addEnvironment('REPORT_EVENT_TABLE_NAME', tables['ReportEvent'].tableName);
+backend.submitReport.addEnvironment(
+  'IDEMPOTENCY_TABLE_NAME',
+  tables['IdempotencyRecord'].tableName,
+);
+
+/* -------------------------------------------------------------------------- */
+/* updateReportStatus (CRIS-18) — grant table access + inject table names     */
+/* -------------------------------------------------------------------------- */
+
+const transitionFn = backend.transitionReport.resources.lambda;
+
+// Reads the current report, applies the version-checked update, appends the
+// audit event.
+tables['Report'].grantReadWriteData(transitionFn);
+tables['ReportEvent'].grantWriteData(transitionFn);
+
+backend.transitionReport.addEnvironment('REPORT_TABLE_NAME', tables['Report'].tableName);
+backend.transitionReport.addEnvironment('REPORT_EVENT_TABLE_NAME', tables['ReportEvent'].tableName);
+
+/* -------------------------------------------------------------------------- */
+/* classify-report pipeline (CRIS-10) — Streams → Pipe → SQS → Lambda          */
+/* -------------------------------------------------------------------------- */
+
+const worker = backend.classifyReport.resources.lambda;
 const cfnTables = backend.data.resources.cfnResources.amplifyDynamoDbTables;
 
 /* -------------------------------------------------------------------------- */
@@ -46,13 +93,13 @@ const cfnTables = backend.data.resources.cfnResources.amplifyDynamoDbTables;
 /* -------------------------------------------------------------------------- */
 
 // Amplify models are `Custom::AmplifyDynamoDBTable`; stream/TTL are set on the
-// wrapper (keyed by model name), not on the L2 ITable (ADR-0007).
+// wrapper (keyed by model name), not on the L2 ITable (ADR-0013).
 cfnTables['Report'].streamSpecification = {
   streamViewType: StreamViewType.NEW_AND_OLD_IMAGES,
 };
 cfnTables['IdempotencyRecord'].timeToLiveAttribute = {
   enabled: true,
-  attributeName: 'expiresAt', // a.timestamp() = epoch seconds, as TTL requires
+  attributeName: 'expiresAt', // a.integer() = epoch seconds, as TTL requires
 };
 
 /* -------------------------------------------------------------------------- */
@@ -111,7 +158,7 @@ new CfnPipe(pipelineStack, 'ReportStreamToClassificationQueue', {
     },
   },
   targetParameters: {
-    // Ship ONLY IDs + trace metadata to SQS — no PII (rawText/reporter*) ever
+    // Ship ONLY IDs + trace metadata to SQS — no PII (text/reporter*) ever
     // leaves the table into the queue (§5.6). The worker re-reads the full item
     // from DynamoDB under IAM.
     inputTemplate: JSON.stringify({
@@ -137,15 +184,15 @@ worker.addEventSource(
 // SQS consume (receive/delete/getAttributes).
 classificationQueue.grantConsumeMessages(worker);
 
-// Durable direct-to-DynamoDB writes (§5.3): read+write Report, write the
-// projection + audit events.
+// Durable direct-to-DynamoDB writes (§5.3): read+write Report, append audit
+// events. The redacted public projection is fanned out via publishReportUpdate
+// (CRIS-19), not written to a table here.
 reportTable.grantReadWriteData(worker);
-tables['PublicReport'].grantWriteData(worker);
 tables['ReportEvent'].grantWriteData(worker);
 
 // Bedrock — scoped to the Claude foundation-model family in this region (no
 // cross-provider access). Kept a family wildcard so switching BEDROCK_MODEL_ID
-// across Claude tiers needs no IAM change (ADR-0007).
+// across Claude tiers needs no IAM change (ADR-0013).
 worker.addToRolePolicy(
   new PolicyStatement({
     actions: ['bedrock:InvokeModel'],
@@ -155,5 +202,4 @@ worker.addToRolePolicy(
 
 // Table names the worker resolves at runtime (no secrets/PII).
 backend.classifyReport.addEnvironment('REPORT_TABLE_NAME', reportTable.tableName);
-backend.classifyReport.addEnvironment('PUBLIC_REPORT_TABLE_NAME', tables['PublicReport'].tableName);
 backend.classifyReport.addEnvironment('REPORT_EVENT_TABLE_NAME', tables['ReportEvent'].tableName);

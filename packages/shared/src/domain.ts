@@ -63,6 +63,79 @@ export function canTransition(from: ReportStatus, to: ReportStatus): boolean {
   return STATUS_TRANSITIONS[from].includes(to);
 }
 
+/**
+ * A status is terminal when no transition leads out of it. Only `REJECTED`
+ * qualifies today (§5.1) — `RESOLVED` can reopen. Guarded resolvers (CRIS-18)
+ * use this to short-circuit before attempting a conditional write.
+ */
+export function isTerminalStatus(status: ReportStatus): boolean {
+  return STATUS_TRANSITIONS[status].length === 0;
+}
+
+/**
+ * Non-human actor for pipeline-driven transitions (NEW→PROCESSING and the
+ * classification outcomes are performed by the async worker, not a user).
+ */
+export const SYSTEM_ACTOR = 'SYSTEM';
+
+/** Who may drive a transition: a Cognito role, or the async pipeline. */
+export type TransitionActor = UserRole | typeof SYSTEM_ACTOR;
+
+/**
+ * Role authority for each transition (§5.6, human-in-the-loop §2.6/§5.5).
+ *
+ * Structurally-legal moves live in `STATUS_TRANSITIONS`; this map narrows each
+ * to the actors allowed to perform it. Irreversible/safety-critical moves
+ * (confirming, rejecting, reopening) require a human role — never the pipeline.
+ * `ADMIN` is granted every legal transition separately (see `canActorTransition`)
+ * and is therefore omitted here. Keys MUST stay a subset of `STATUS_TRANSITIONS`.
+ */
+export const TRANSITION_ROLES: Readonly<
+  Record<ReportStatus, Readonly<Partial<Record<ReportStatus, readonly TransitionActor[]>>>>
+> = {
+  NEW: { PROCESSING: [SYSTEM_ACTOR] },
+  PROCESSING: { AI_CLASSIFIED: [SYSTEM_ACTOR], NEEDS_VERIFICATION: [SYSTEM_ACTOR] },
+  AI_CLASSIFIED: {
+    VERIFIED: ['RESPONDER', 'COORDINATOR'],
+    NEEDS_VERIFICATION: ['RESPONDER', 'COORDINATOR'],
+    REJECTED: ['COORDINATOR'],
+  },
+  NEEDS_VERIFICATION: {
+    VERIFIED: ['RESPONDER', 'COORDINATOR'],
+    REJECTED: ['COORDINATOR'],
+  },
+  VERIFIED: {
+    IN_PROGRESS: ['RESPONDER', 'COORDINATOR'],
+    REJECTED: ['COORDINATOR'],
+  },
+  IN_PROGRESS: { RESOLVED: ['RESPONDER', 'COORDINATOR'] },
+  RESOLVED: { IN_PROGRESS: ['COORDINATOR'] }, // reopen — coordinator only
+  REJECTED: {},
+} as const;
+
+/** Actors permitted to move `from → to`, ignoring the ADMIN override. */
+export function rolesForTransition(
+  from: ReportStatus,
+  to: ReportStatus,
+): readonly TransitionActor[] {
+  return TRANSITION_ROLES[from][to] ?? [];
+}
+
+/**
+ * True when `actor` may perform the `from → to` transition. Requires the move to
+ * be structurally legal AND permitted for the actor. `ADMIN` may perform any
+ * legal transition.
+ */
+export function canActorTransition(
+  actor: TransitionActor,
+  from: ReportStatus,
+  to: ReportStatus,
+): boolean {
+  if (!canTransition(from, to)) return false;
+  if (actor === UserRole.ADMIN) return true;
+  return rolesForTransition(from, to).includes(actor);
+}
+
 /* -------------------------------------------------------------------------- */
 /* Roles — design doc §5.6 (Cognito groups)                                    */
 /* -------------------------------------------------------------------------- */
@@ -148,47 +221,47 @@ export const Urgency = {
 export type Urgency = (typeof Urgency)[keyof typeof Urgency];
 
 /* -------------------------------------------------------------------------- */
-/* Location precision — design doc §2.4, §5.4 (geocoding confidence)           */
+/* Location / geospatial — design doc §5.2                                     */
 /* -------------------------------------------------------------------------- */
 
 /**
- * How precisely a report's location is known after geocoding. Set by the
- * geocode worker (CRIS-10); drives how a marker is rendered on the map.
+ * Geohash precision used for the resolved report location and the map-viewport
+ * GSI (§5.2). Precision 7 ≈ a 153 m × 153 m cell — the granularity coordinators
+ * cluster and query on. Viewport requests are decomposed into a bounded set of
+ * geohash prefixes at this precision, queried in parallel, then filtered exactly
+ * (there is no native radius query in DynamoDB).
  */
-export const LocationPrecision = {
-  /** Exact coordinates supplied (GPS or map pin). */
-  EXACT: 'EXACT',
-  /** Geocoded from text to an approximate point. */
-  APPROXIMATE: 'APPROXIMATE',
-  /** Only the containing region is known. */
-  REGION_ONLY: 'REGION_ONLY',
-  /** Location could not be resolved. */
-  UNKNOWN: 'UNKNOWN',
-} as const;
-
-export type LocationPrecision = (typeof LocationPrecision)[keyof typeof LocationPrecision];
+export const GEOHASH_PRECISION = 7;
 
 /* -------------------------------------------------------------------------- */
-/* Verification — design doc §2.5, §2.6 (human-in-the-loop review)             */
+/* Supporting entities — design doc §5.1, §5.2                                 */
 /* -------------------------------------------------------------------------- */
 
-/** Outcome of a single verification signal on a report (§2.6). */
-export const VerificationStatus = {
-  PENDING: 'PENDING',
+/**
+ * Outcome recorded on a `Verification` (§5.1). A verification preserves the
+ * evidence and human/agent judgement behind a report's move out of
+ * `NEEDS_VERIFICATION`; the outcome is distinct from the report status so the
+ * evidence trail survives even if the report is later reopened.
+ */
+export const VerificationOutcome = {
   CONFIRMED: 'CONFIRMED',
   REJECTED: 'REJECTED',
   INCONCLUSIVE: 'INCONCLUSIVE',
 } as const;
 
-export type VerificationStatus = (typeof VerificationStatus)[keyof typeof VerificationStatus];
+export type VerificationOutcome = (typeof VerificationOutcome)[keyof typeof VerificationOutcome];
 
-/* -------------------------------------------------------------------------- */
-/* Assignment & teams — design doc §2.5, §5.1 (dispatch lifecycle)             */
-/* -------------------------------------------------------------------------- */
-
-/** Lifecycle of a team assignment to a report (§5.1 dispatch). */
+/**
+ * Lifecycle of an `Assignment` linking a `Team` to a report (§5.1, §6.3). Drives
+ * the responder "update assignment status" flow and the team task-board GSI.
+ * TENTATIVE MVP set — the dispatch workflow is owned by E4 / Phase 2 (§5.5).
+ */
 export const AssignmentStatus = {
+  /** Proposed by the Dispatch Agent, awaiting coordinator approval (§5.5). */
   PROPOSED: 'PROPOSED',
+  /** Coordinator assigned the team; not yet acknowledged. */
+  ASSIGNED: 'ASSIGNED',
+  /** Team acknowledged and accepted the task. */
   ACCEPTED: 'ACCEPTED',
   EN_ROUTE: 'EN_ROUTE',
   ON_SCENE: 'ON_SCENE',
@@ -198,20 +271,24 @@ export const AssignmentStatus = {
 
 export type AssignmentStatus = (typeof AssignmentStatus)[keyof typeof AssignmentStatus];
 
-/** Availability of a response team. */
-export const TeamStatus = {
-  AVAILABLE: 'AVAILABLE',
-  BUSY: 'BUSY',
-  OFFLINE: 'OFFLINE',
+/**
+ * Strength of a link inside a `DuplicateGroup` (§5.4.3). Reports are grouped,
+ * never auto-deleted, so evidence is preserved. A similarity ≥ 0.80 is a STRONG
+ * link; 0.65–0.79 is a SUGGESTED link surfaced for coordinator review. The
+ * thresholds/formula themselves are owned by the duplicate-detection ticket.
+ */
+export const DuplicateLinkType = {
+  STRONG: 'STRONG',
+  SUGGESTED: 'SUGGESTED',
 } as const;
 
-export type TeamStatus = (typeof TeamStatus)[keyof typeof TeamStatus];
+export type DuplicateLinkType = (typeof DuplicateLinkType)[keyof typeof DuplicateLinkType];
 
-/* -------------------------------------------------------------------------- */
-/* Alerts — design doc §2.7, §3 (proximity alerts via SNS)                     */
-/* -------------------------------------------------------------------------- */
-
-/** Channel a proximity alert is delivered over (§3 SNS SMS/email/push). */
+/**
+ * Delivery channels for proximity alerts (§2.7, §5). An `AlertSubscription`
+ * opts a recipient into one or more channels; an `AlertDelivery` records one
+ * attempt per recipient per channel.
+ */
 export const AlertChannel = {
   SMS: 'SMS',
   EMAIL: 'EMAIL',
@@ -220,73 +297,130 @@ export const AlertChannel = {
 
 export type AlertChannel = (typeof AlertChannel)[keyof typeof AlertChannel];
 
-/** Lifecycle of an alert subscription (§2.7). */
-export const SubscriptionStatus = {
-  ACTIVE: 'ACTIVE',
-  PAUSED: 'PAUSED',
-  UNSUBSCRIBED: 'UNSUBSCRIBED',
-} as const;
-
-export type SubscriptionStatus = (typeof SubscriptionStatus)[keyof typeof SubscriptionStatus];
-
-/** Delivery state of a single alert send attempt (§5.4.4 resilience). */
-export const DeliveryStatus = {
-  QUEUED: 'QUEUED',
+/**
+ * Delivery state of a single `AlertDelivery` record (§5, Fig 10). Every fan-out
+ * recipient gets a durable record with status + attempt count so delivery is
+ * auditable and retriable.
+ */
+export const AlertDeliveryStatus = {
+  PENDING: 'PENDING',
   SENT: 'SENT',
   DELIVERED: 'DELIVERED',
   FAILED: 'FAILED',
-  SUPPRESSED: 'SUPPRESSED',
 } as const;
 
-export type DeliveryStatus = (typeof DeliveryStatus)[keyof typeof DeliveryStatus];
-
-/* -------------------------------------------------------------------------- */
-/* Audit & duplicates — design doc §5.1 (immutable events), §5.4.3            */
-/* -------------------------------------------------------------------------- */
+export type AlertDeliveryStatus = (typeof AlertDeliveryStatus)[keyof typeof AlertDeliveryStatus];
 
 /**
- * Type of an immutable audit event appended to a report's history (§5.1).
- * Every mutating operation records one of these.
+ * Type of an immutable `ReportEvent` audit record (§5.1). Every mutating
+ * operation appends exactly one event; the append-only stream is the audit log
+ * behind a report's timeline in the coordinator UI (§6.3).
  */
 export const ReportEventType = {
   SUBMITTED: 'SUBMITTED',
   STATUS_CHANGED: 'STATUS_CHANGED',
   CLASSIFIED: 'CLASSIFIED',
-  SCORED: 'SCORED',
-  GEOCODED: 'GEOCODED',
-  DEDUPED: 'DEDUPED',
+  PRIORITY_SCORED: 'PRIORITY_SCORED',
+  VERIFICATION_RECORDED: 'VERIFICATION_RECORDED',
   ASSIGNED: 'ASSIGNED',
-  VERIFIED: 'VERIFIED',
-  ALERT_SENT: 'ALERT_SENT',
-  NOTE_ADDED: 'NOTE_ADDED',
+  DUPLICATE_LINKED: 'DUPLICATE_LINKED',
+  ALERT_DISPATCHED: 'ALERT_DISPATCHED',
 } as const;
 
 export type ReportEventType = (typeof ReportEventType)[keyof typeof ReportEventType];
 
-/** Lifecycle of a duplicate group (§5.4.3 — grouped, never auto-deleted). */
-export const DuplicateGroupStatus = {
-  OPEN: 'OPEN',
-  MERGED: 'MERGED',
-  DISMISSED: 'DISMISSED',
-} as const;
-
-export type DuplicateGroupStatus = (typeof DuplicateGroupStatus)[keyof typeof DuplicateGroupStatus];
-
 /* -------------------------------------------------------------------------- */
-/* PII boundary — design doc §5.3, §5.6 (redacted public projection)          */
+/* Public projection — design doc §5.3, §5.6                                   */
 /* -------------------------------------------------------------------------- */
 
 /**
- * Reporter identity/contact and internal-only fields that MUST NEVER appear in
- * public/guest views (§5.6). The separate `PublicReport` projection omits these
- * physically; this list is the single authority shared by the projection/
- * redaction logic (CRIS-9) and by tests that guard the boundary.
+ * The redacted shape safe to expose through public queries and the live-map
+ * subscription (§5.3). A separate `PublicReport` type is the design's guarantee
+ * that reporter identity, contact data, internal notes, and the raw free-text
+ * report body can never leak (§5.6). The map shows the AI-generated `summary`,
+ * never the untrusted raw `text`.
  */
-export const REDACTED_REPORT_FIELDS = [
-  'reporterUserId',
-  'reporterName',
-  'reporterContact',
-  'internalNotes',
-] as const;
+export interface PublicReport {
+  reportId: string;
+  status: ReportStatus;
+  category: Category | null;
+  urgency: Urgency | null;
+  priorityScore: number | null;
+  priorityBand: PriorityBand | null;
+  summary: string | null;
+  lat: number | null;
+  lng: number | null;
+  geohash: string | null;
+  geohashPrefix: string | null;
+  regionId: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
 
-export type RedactedReportField = (typeof REDACTED_REPORT_FIELDS)[number];
+/**
+ * The exact allow-list of fields that may appear on a `PublicReport`. Exported
+ * so a test (and reviewers) can assert nothing else is ever projected.
+ */
+export const PUBLIC_REPORT_FIELDS = [
+  'reportId',
+  'status',
+  'category',
+  'urgency',
+  'priorityScore',
+  'priorityBand',
+  'summary',
+  'lat',
+  'lng',
+  'geohash',
+  'geohashPrefix',
+  'regionId',
+  'createdAt',
+  'updatedAt',
+] as const satisfies readonly (keyof PublicReport)[];
+
+/** The internal fields `toPublicReport` reads from — a superset that holds PII. */
+export interface RedactableReport {
+  id: string;
+  status: ReportStatus;
+  category?: Category | null;
+  urgency?: Urgency | null;
+  priorityScore?: number | null;
+  priorityBand?: PriorityBand | null;
+  summary?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+  geohash?: string | null;
+  geohashPrefix?: string | null;
+  regionId?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  // PII / internal fields below MUST NOT be copied into the projection.
+  text?: string | null;
+  reporterId?: string | null;
+  reporterContact?: string | null;
+  notes?: string | null;
+}
+
+/**
+ * Project an internal report down to its public, PII-free shape (§5.3, §5.6).
+ * Builds the result from the field allow-list rather than by deleting keys, so a
+ * newly-added sensitive field can never accidentally pass through.
+ */
+export function toPublicReport(report: RedactableReport): PublicReport {
+  return {
+    reportId: report.id,
+    status: report.status,
+    category: report.category ?? null,
+    urgency: report.urgency ?? null,
+    priorityScore: report.priorityScore ?? null,
+    priorityBand: report.priorityBand ?? null,
+    summary: report.summary ?? null,
+    lat: report.lat ?? null,
+    lng: report.lng ?? null,
+    geohash: report.geohash ?? null,
+    geohashPrefix: report.geohashPrefix ?? null,
+    regionId: report.regionId ?? null,
+    createdAt: report.createdAt ?? null,
+    updatedAt: report.updatedAt ?? null,
+  };
+}
