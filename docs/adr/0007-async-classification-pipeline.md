@@ -58,7 +58,7 @@ out of scope — wired as clearly-marked seams.
    duplicate stream events short-circuit on `lastProcessedEventId`; `IdempotencyRecord` gets a
    DynamoDB TTL on `expiresAt`.
 5. **Failure handling.** A Bedrock/geocode failure lands the report in `NEEDS_VERIFICATION`
-   and the message is deleted (a *handled* outcome, §5.4.4) — the DLQ catches only true poison
+   and the message is deleted (a _handled_ outcome, §5.4.4) — the DLQ catches only true poison
    (unparseable message / repeated infra crash), which retries and propagates.
 6. **Classification JSON contract in `@crisismap/shared`** (`classification.ts`): a
    dependency-free `validateClassification` + `CLASSIFICATION_JSON_SCHEMA`, single source of
