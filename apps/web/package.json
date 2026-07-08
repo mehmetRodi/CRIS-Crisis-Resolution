@@ -14,15 +14,12 @@
   "dependencies": {
     "@crisismap/shared": "*",
     "aws-amplify": "^6.10.0",
-<<<<<<< HEAD
+
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-router-dom": "^7.18.1"
-=======
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "react-router-dom": "^7.18.1",
     "ulid": "^2.4.0"
->>>>>>> f4eabf6e63ddb316536c3cb2cc458313ca868dd3
+
   },
   "devDependencies": {
     "@aws-amplify/backend": "^1.5.0",
