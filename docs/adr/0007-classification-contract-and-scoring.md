@@ -16,7 +16,7 @@ be pinned down before the async pipeline (CRIS-10) can be built:
    silently corrupt a report.
 2. **How priority is computed** — the design mandates that priority is a **deterministic,
    explainable** score in [0, 10] mapped to bands P0–P3, and is **never the raw model output**
-   (§5.4.2, architecture.md §3). Coordinators must be able to see *why* a report ranks where
+   (§5.4.2, architecture.md §3). Coordinators must be able to see _why_ a report ranks where
    it does, and the same inputs must always produce the same score.
 
 Both live in `@crisismap/shared` (`packages/shared/src/classification.ts`) so the frontend,
@@ -29,7 +29,7 @@ contract and the scoring math.
 
 - **Where the classification schema lives.** Inline it in the Lambda (fast, but the frontend
   and schema can't share it and it drifts from the enums) vs. a shared, versioned module that
-  is both a JSON Schema for Claude structured output *and* a runtime validator. Chose the
+  is both a JSON Schema for Claude structured output _and_ a runtime validator. Chose the
   shared module: one source of truth, and the JSON Schema derives its `category`/`urgency`
   enums from `@crisismap/shared` so the model literally cannot emit an unknown value.
 - **Trusting vs. validating the model output.** Persist the model JSON as-is (simple, but a
@@ -75,8 +75,8 @@ contract and the scoring math.
    - corroboration: saturating in the number of corroborating reports + confirmed
      verifications, `CORROBORATION_MAX_POINTS` (2), `CORROBORATION_HALF_SATURATION` (2);
    - manual: coordinator delta, clamped to ±`MANUAL_ADJUSTMENT_LIMIT` (3).
-   All weights are exported named constants. The result carries the `ScoreBreakdown` and the
-   band via `priorityBandForScore` (the authoritative cutoffs, kept in `domain.ts`).
+     All weights are exported named constants. The result carries the `ScoreBreakdown` and the
+     band via `priorityBandForScore` (the authoritative cutoffs, kept in `domain.ts`).
 5. **Band cutoffs finalized** in `domain.ts` (P0 ≥ 8, P1 ≥ 6, P2 ≥ 3, else P3) — no longer
    TENTATIVE; a change bumps `SCORE_VERSION`.
 6. **Sync guard.** `ScoreBreakdown` is duplicated in the Amplify `data` schema (embedded
@@ -85,7 +85,7 @@ contract and the scoring math.
 
 ## Tradeoffs & consequences
 
-- **Gain:** one shared, versioned contract that constrains the model at generation time *and*
+- **Gain:** one shared, versioned contract that constrains the model at generation time _and_
   validates at ingest; a reproducible, auditable, explainable score whose breakdown maps 1:1
   to the stored `ScoreBreakdown`; confidence cleanly separated from priority; safety-critical
   logic is pure and fully unit-tested (conventions.md §Testing).
@@ -98,7 +98,7 @@ contract and the scoring math.
     decide precedence (config overrides code) and document it; the code table keeps scoring
     deterministic offline and in tests.
   - **Contract/enum coupling.** The JSON Schema derives its enums from `@crisismap/shared`, so
-    an enum change flows through automatically — but a *breaking* contract change still
+    an enum change flows through automatically — but a _breaking_ contract change still
     requires a `CLASSIFICATION_CONTRACT_VERSION` bump and a reprocessing story (CRIS-10).
   - **`locationHint` is untrusted free text** until CRIS-10 geocodes it; consumers must not
     treat it as a resolved location.
