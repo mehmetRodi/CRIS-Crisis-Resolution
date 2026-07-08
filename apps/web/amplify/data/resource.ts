@@ -39,6 +39,11 @@ const schema = a.schema({
    * Explainable priority breakdown (§5.4.2) — the factors behind priorityScore
    * so the UI can show "why" a report ranked where it did. Embedded on Report;
    * inherits Report's authorization. Populated by CRIS-11 scoring.
+   *
+   * SYNC: these fields mirror `ScoreBreakdown` in `@crisismap/shared`
+   * (packages/shared/src/classification.ts) — the source of truth and the
+   * `scoreReport` output shape. Add/rename a factor in BOTH; the "score
+   * breakdown sync guard" test in classification.test.ts fails on drift.
    */
   ScoreBreakdown: a.customType({
     urgencyWeight: a.float(),
