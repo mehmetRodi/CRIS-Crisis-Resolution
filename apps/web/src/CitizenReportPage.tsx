@@ -1,7 +1,6 @@
 import { ReportForm } from './ReportForm';
 import { useNavigate } from 'react-router-dom';
 
-
 function CitizenReportPage() {
   const navigate = useNavigate();
 
@@ -68,4 +67,3 @@ function CitizenReportPage() {
 }
 
 export default CitizenReportPage;
-

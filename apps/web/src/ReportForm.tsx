@@ -20,7 +20,6 @@ export function ReportForm() {
   const isFormValid = text.trim().length > 10 && category !== '' && urgency !== '';
 
   const report = {
-    
     text: text.trim(),
     category,
     subcategory,

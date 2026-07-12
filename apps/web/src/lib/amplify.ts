@@ -21,7 +21,6 @@
 
 // export const client = generateClient<Schema>();
 
-
 export const client = {
   models: {},
   queries: {},

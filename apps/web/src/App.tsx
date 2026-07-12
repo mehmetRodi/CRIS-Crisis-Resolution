@@ -29,7 +29,6 @@ const SURFACES: Surface[] = [
     ticket: 'CRIS-6',
     description: 'Fast free-text emergency report with optional location, media, and anonymity.',
     path: '/citizen',
-
   },
   {
     title: 'Coordinator dashboard',
@@ -105,7 +104,7 @@ function App() {
                     ? 'cursor-pointer hover:border-blue-400 hover:shadow-md transition-all'
                     : ''
                 }`}
-                >
+              >
                 <div className="flex items-center justify-between">
                   <h3 className="font-semibold">{surface.title}</h3>
                   <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
