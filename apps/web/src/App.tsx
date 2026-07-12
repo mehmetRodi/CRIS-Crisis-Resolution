@@ -1,5 +1,4 @@
 import { ReportStatus, UserRole } from '@crisismap/shared';
-import CitizenReportPage from './CitizenReportPage';
 import { useNavigate } from 'react-router-dom';
 
 /**
