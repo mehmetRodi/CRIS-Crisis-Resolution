@@ -1,0 +1,61 @@
+name: Deploy
+
+# CRIS-14 — Continuous deployment of the Amplify Gen 2 backend (ADR-0016).
+#
+# Dormant until AWS is wired. The job is gated on the `AWS_DEPLOY_ENABLED` repo
+# variable, which is unset on forks and un-configured repos — so this workflow
+# is a skipped no-op (green, never a failure) until an operator opts in by
+# setting the variable + secrets. See docs/runbooks/deploy.md for the OIDC trust
+# setup and the exact variables/secrets required.
+#
+# This deploys the BACKEND only (`ampx pipeline-deploy`), which generates the real
+# `amplify_outputs.json` for the environment. Frontend hosting is out of scope here.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Never interrupt an in-flight CloudFormation deploy; queue instead.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+# OIDC: mint a short-lived token to assume the deploy role — no long-lived keys.
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Amplify pipeline-deploy (backend)
+    # `vars.AWS_DEPLOY_ENABLED` is empty unless explicitly set, so this evaluates
+    # to false and the job is skipped rather than failing on missing secrets.
+    if: vars.AWS_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      # `ampx pipeline-deploy` is the non-interactive deploy for CI/CD: it
+      # synthesizes the backend and deploys the branch's CloudFormation stack,
+      # keyed by the Amplify app id + branch name.
+      - name: Deploy backend (ampx pipeline-deploy)
+        working-directory: apps/web
+        run: npx ampx pipeline-deploy --branch "${{ github.ref_name }}" --app-id "${{ secrets.AMPLIFY_APP_ID }}"
