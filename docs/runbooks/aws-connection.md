@@ -1,0 +1,172 @@
+# Runbook: Connecting AWS (safely)
+
+How to connect this repo to an AWS account so it can deploy — without long-lived keys, without
+committing environment data, and without over-privileged roles. This is the **one-time account
+wiring**; the day-to-day deploy + alarm response lives in [`deploy.md`](deploy.md).
+
+- Deploy pipeline: [ADR-0016](../adr/0016-continuous-deployment-ampx-pipeline-oidc.md)
+- Observability: [ADR-0015](../adr/0015-observability-xray-cloudwatch-alarms.md)
+- Backend/IaC model: [ADR-0003](../adr/0003-backend-amplify-gen2-with-cdk-escape-hatch.md)
+
+## Safety principles (read first)
+
+1. **No long-lived credentials in CI.** CI authenticates via **GitHub OIDC** and assumes a
+   role for a short-lived token. Never add `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` to
+   GitHub secrets.
+2. **Least privilege, branch-scoped.** The deploy role trusts **only this repo on `main`** and
+   holds only the permissions the backend needs.
+3. **Never commit environment data.** `amplify_outputs.json` (Cognito/AppSync/S3 identifiers)
+   is git-ignored and generated per environment — see [ADR-0012](../adr/0012-amplify-outputs-in-ci.md).
+   Don't un-ignore or paste it anywhere.
+4. **No PII off the table.** Reporter identity/contact never enters logs, prompts, or the queue
+   (design doc §5.4.1, §5.6). This is a code invariant, but confirm it holds before pointing a
+   real environment at real reports.
+5. **Isolate stages by account.** Use separate AWS accounts (or at minimum separate Amplify
+   apps) for `sandbox` / `staging` / `production`. Never share a table between stages.
+6. **Region must have Bedrock model access.** The classifier needs `BEDROCK_MODEL_ID`
+   (`anthropic.claude-opus-4-8` by default) enabled in the chosen region.
+
+---
+
+## A. Local developer connection (personal sandbox)
+
+For iterating on the backend before any CD is involved.
+
+1. **Authenticate with SSO / a named profile** — do not use root, do not create static access
+   keys:
+   ```bash
+   aws configure sso            # or: aws configure --profile crisismap-dev
+   export AWS_PROFILE=crisismap-dev
+   aws sts get-caller-identity  # confirm the right account/identity
+   ```
+2. **Stand up your own sandbox** (isolated, disposable):
+   ```bash
+   cd apps/web
+   npx ampx sandbox             # deploys a personal stack; generates amplify_outputs.json (git-ignored)
+   ```
+3. **Tear it down when done** (avoids cost + stray resources):
+   ```bash
+   npx ampx sandbox delete
+   ```
+
+> The sandbox is per-developer and never shared. It is not the CD path.
+
+---
+
+## B. CI/CD connection (OIDC, one-time)
+
+Do these in the AWS account that will host the environment, then in GitHub.
+
+### 1. Bootstrap CDK (once per account/region)
+
+`ampx pipeline-deploy` deploys through CDK, which needs its bootstrap stack:
+
+```bash
+cd apps/web
+npx ampx configure telemetry disable   # optional
+npx cdk bootstrap aws://<ACCOUNT_ID>/<REGION>
+```
+
+### 2. Create the Amplify Gen 2 app
+
+Create an Amplify app in the console (or CLI) for this repo and note its **App ID** — CD keys
+the CloudFormation stack by App ID + branch.
+
+### 3. Create the GitHub OIDC identity provider (once per account)
+
+In IAM → Identity providers, add (if not already present):
+
+- Provider URL: `https://token.actions.githubusercontent.com`
+- Audience: `sts.amazonaws.com`
+
+### 4. Create the deploy role (branch-scoped trust)
+
+Create an IAM role assumed **only** by this repo's `main` branch via OIDC. Trust policy:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::<ACCOUNT_ID>:oidc-provider/token.actions.githubusercontent.com"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
+        },
+        "StringLike": {
+          "token.actions.githubusercontent.com:sub": "repo:mehmetRodi/CRIS-Crisis-Resolution:ref:refs/heads/main"
+        }
+      }
+    }
+  ]
+}
+```
+
+> Tighten `:sub` further (e.g. `environment:production`) if you gate the job behind a GitHub
+> Environment. Never use a wildcard repo/branch in the `:sub` condition.
+
+**Permissions policy:** scope to what the backend provisions. Start from the services in play and
+narrow over time: CloudFormation, the CDK bootstrap resources (the `cdk-*` S3 asset bucket + the
+CDK deploy/exec roles), IAM (create/pass the backend's roles), Lambda, AppSync, DynamoDB,
+Cognito, S3, SQS, EventBridge Pipes, SNS, CloudWatch, X-Ray, and Bedrock model invoke. Prefer
+resource-scoped statements; avoid `"Action": "*"` on `"Resource": "*"`.
+
+### 5. Configure GitHub (repo → Settings)
+
+| Kind        | Name                  | Value                                             |
+| ----------- | --------------------- | ------------------------------------------------- |
+| Variable    | `AWS_DEPLOY_ENABLED`  | `true` to activate the Deploy workflow            |
+| Variable    | `AWS_REGION`          | e.g. `eu-west-1` (must have Bedrock model access) |
+| Secret      | `AWS_DEPLOY_ROLE_ARN` | ARN of the role from step 4                       |
+| Secret      | `AMPLIFY_APP_ID`      | App ID from step 2                                |
+| Environment | `production`          | (recommended) add required reviewers as a gate    |
+
+Until `AWS_DEPLOY_ENABLED == 'true'`, the Deploy workflow is a skipped no-op (green).
+
+### 6. First deploy
+
+Trigger manually to validate wiring before enabling on-push:
+
+- GitHub → Actions → **Deploy** → _Run workflow_ (`workflow_dispatch`).
+- Watch the run assume the role and run `ampx pipeline-deploy`.
+- Thereafter, merges to `main` deploy automatically.
+
+### 7. Post-deploy: subscribe the ops alarm topic
+
+Alarms publish to the `OpsAlarmTopic` SNS topic, which has **no subscriber** until you add one
+(the endpoint is environment-specific, so it's not in code):
+
+```bash
+aws sns subscribe \
+  --topic-arn <OpsAlarmTopic ARN> \
+  --protocol email \
+  --notification-endpoint oncall@example.org
+```
+
+(or an HTTPS/Slack/PagerDuty subscription). See [`deploy.md`](deploy.md) for per-alarm response.
+
+---
+
+## Verification checklist
+
+- [ ] `aws sts get-caller-identity` shows the intended account (locally).
+- [ ] CDK bootstrap stack exists in `<ACCOUNT_ID>/<REGION>`.
+- [ ] Deploy role trust policy is branch-scoped to `main` (no wildcards).
+- [ ] No static AWS keys in GitHub secrets — only `AWS_DEPLOY_ROLE_ARN` + `AMPLIFY_APP_ID`.
+- [ ] `AWS_REGION` has Bedrock access for `BEDROCK_MODEL_ID`.
+- [ ] `amplify_outputs.json` is still git-ignored and not committed.
+- [ ] Manual `workflow_dispatch` deploy succeeds before enabling auto-deploy on `main`.
+- [ ] `OpsAlarmTopic` has a subscription and a test alarm reaches it.
+
+## Teardown / rollback
+
+- **Rollback:** re-run an earlier good commit through the pipeline (revert to `main`, or
+  `workflow_dispatch` from that ref). No automated rollback yet (CRIS-29/35).
+- **Teardown a sandbox:** `npx ampx sandbox delete`.
+- **Decommission an environment:** delete its CloudFormation stack(s) via the Amplify console /
+  CloudFormation; confirm DynamoDB tables and the S3 media bucket are handled per your data-
+  retention policy first.
