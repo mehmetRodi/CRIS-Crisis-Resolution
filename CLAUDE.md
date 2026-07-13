@@ -97,20 +97,20 @@ This scaffold delivers the tooling/skeleton portion of **CRIS-14** and **CRIS-15
 
 ## Ticket ownership (Sprint 2 epics)
 
-| Epic                             | Tickets                                                                     |
-| --------------------------------- | ---------------------------------------------------------------------------- |
-| E1 Citizen Reporting & Media    | CRIS-16 (GPS, map-pin and location-hint input), CRIS-17 (presigned S3 media upload) |
+| Epic                            | Tickets                                                                                             |
+| ------------------------------- | --------------------------------------------------------------------------------------------------- |
+| E1 Citizen Reporting & Media    | CRIS-16 (GPS, map-pin and location-hint input), CRIS-17 (presigned S3 media upload)                 |
 | E2 API, Data & Real-Time        | CRIS-18 (report state-machine mutations), CRIS-19 (public projection and internal publish mutation) |
-| E3 AI Triage & Prioritization   | CRIS-20 (Bedrock triage agent), CRIS-21 (Amazon Location geocoding)         |
-| E4 Coordinator & Volunteer UI   | CRIS-22 (priority incident queue and filters), CRIS-23 (incident-detail interface) |
-| E5 Infra, Security, Alerts & QA | CRIS-24 (Cognito roles and authorization), CRIS-25 (WAF, KMS and security controls) |
+| E3 AI Triage & Prioritization   | CRIS-20 (Bedrock triage agent), CRIS-21 (Amazon Location geocoding)                                 |
+| E4 Coordinator & Volunteer UI   | CRIS-22 (priority incident queue and filters), CRIS-23 (incident-detail interface)                  |
+| E5 Infra, Security, Alerts & QA | CRIS-24 (Cognito roles and authorization), CRIS-25 (WAF, KMS and security controls)                 |
 
 ## Ticket ownership (Sprint 3 epics)
 
-| Epic                             | Tickets                                                                     |
-| --------------------------------- | ---------------------------------------------------------------------------- |
-| E1 Citizen Reporting & Media    | CRIS-26 (offline save, retry and recovery), CRIS-27 (frontend accessibility and tests) |
-| E2 API, Data & Real-Time        | CRIS-28 (AppSync subscriptions), CRIS-29 (API integration tests and documentation) |
-| E3 AI Triage & Prioritization   | CRIS-30 (deterministic priority scoring), CRIS-31 (duplicate detection, DLQ and idempotency) |
+| Epic                            | Tickets                                                                                        |
+| ------------------------------- | ---------------------------------------------------------------------------------------------- |
+| E1 Citizen Reporting & Media    | CRIS-26 (offline save, retry and recovery), CRIS-27 (frontend accessibility and tests)         |
+| E2 API, Data & Real-Time        | CRIS-28 (AppSync subscriptions), CRIS-29 (API integration tests and documentation)             |
+| E3 AI Triage & Prioritization   | CRIS-30 (deterministic priority scoring), CRIS-31 (duplicate detection, DLQ and idempotency)   |
 | E4 Coordinator & Volunteer UI   | CRIS-32 (guarded coordinator actions), CRIS-33 (volunteer task board and UI integration tests) |
-| E5 Infra, Security, Alerts & QA | CRIS-34 (proximity-alert pipeline), CRIS-35 (system testing, alarms and runbook) |
+| E5 Infra, Security, Alerts & QA | CRIS-34 (proximity-alert pipeline), CRIS-35 (system testing, alarms and runbook)               |

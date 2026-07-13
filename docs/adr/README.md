@@ -30,3 +30,5 @@ behind the code — essential when refactoring or extending the system.
 | [0012](0012-amplify-outputs-in-ci.md)                      | Amplify outputs handling in CI       | Accepted |
 | [0013](0013-async-classification-pipeline.md)              | Async classification pipeline        | Accepted |
 | [0014](0014-rollup-native-binary-in-ci.md)                 | Rollup native binary for CI          | Accepted |
+| [0015](0015-observability-xray-cloudwatch-alarms.md)       | Observability: X-Ray + CW alarms     | Accepted |
+| [0016](0016-continuous-deployment-ampx-pipeline-oidc.md)   | CD: ampx pipeline-deploy + OIDC      | Accepted |
