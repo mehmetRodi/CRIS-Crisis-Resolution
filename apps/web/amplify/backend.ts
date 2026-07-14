@@ -1,5 +1,5 @@
 import { defineBackend } from '@aws-amplify/backend';
-import { Duration } from 'aws-cdk-lib';
+import { Duration, Stack } from 'aws-cdk-lib';
 import { StreamViewType } from 'aws-cdk-lib/aws-dynamodb';
 import { PolicyStatement, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { SqsEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
@@ -104,10 +104,19 @@ cfnTables['IdempotencyRecord'].timeToLiveAttribute = {
 };
 
 /* -------------------------------------------------------------------------- */
-/* Pipeline stack — isolated from Amplify's managed nested stacks              */
+/* Pipeline resources — co-located in the worker's (function) nested stack     */
 /* -------------------------------------------------------------------------- */
 
-const pipelineStack = backend.createStack('pipeline');
+// The queues, pipe, and observability alarms all reference the classify worker
+// (event source + consume grant + metric alarms). A separate `createStack`
+// would make that nested stack and the managed `function` stack reference each
+// other, which CloudFormation rejects as a circular dependency
+// (CloudformationStackCircularDependencyError). AWS's fix for this is to create
+// these resources in the SAME stack as the Lambda they wire to, so every
+// reference is intra-stack; the only remaining cross-stack edge is the pipe
+// reading the Report stream ARN (function → data), which is one-directional.
+// See docs/adr — https://docs.amplify.aws/react/build-a-backend/troubleshooting/circular-dependency/
+const pipelineStack = Stack.of(worker);
 
 // Standard queues (reports are independent; idempotency is enforced in-app).
 const classificationDlq = new Queue(pipelineStack, 'ClassificationDlq', {
