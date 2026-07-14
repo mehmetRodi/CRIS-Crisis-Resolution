@@ -2,8 +2,17 @@
 
 How to connect this repo to an AWS account so it can deploy — without long-lived keys, without
 committing environment data, and without over-privileged roles. This is the **one-time account
-wiring**; the day-to-day deploy + alarm response lives in [`deploy.md`](deploy.md).
+wiring**; the day-to-day deploy + alarm response lives in [`deploy.md`](deploy.md), and
+per-developer setup lives in [`team-onboarding.md`](team-onboarding.md).
 
+> **Automated path:** the steps below are implemented as idempotent scripts in
+> [`scripts/aws/`](../../scripts/aws/README.md) — run those rather than clicking through the
+> console. This document is the reference/rationale behind them. The account, identity, and
+> region choices they encode are decided in
+> [ADR-0017](../adr/0017-aws-account-identity-and-region-topology.md): **one AWS account**,
+> **IAM Identity Center** for the team, region **`eu-central-1`**.
+
+- Account/identity/region: [ADR-0017](../adr/0017-aws-account-identity-and-region-topology.md)
 - Deploy pipeline: [ADR-0016](../adr/0016-continuous-deployment-ampx-pipeline-oidc.md)
 - Observability: [ADR-0015](../adr/0015-observability-xray-cloudwatch-alarms.md)
 - Backend/IaC model: [ADR-0003](../adr/0003-backend-amplify-gen2-with-cdk-escape-hatch.md)
@@ -21,10 +30,13 @@ wiring**; the day-to-day deploy + alarm response lives in [`deploy.md`](deploy.m
 4. **No PII off the table.** Reporter identity/contact never enters logs, prompts, or the queue
    (design doc §5.4.1, §5.6). This is a code invariant, but confirm it holds before pointing a
    real environment at real reports.
-5. **Isolate stages by account.** Use separate AWS accounts (or at minimum separate Amplify
-   apps) for `sandbox` / `staging` / `production`. Never share a table between stages.
+5. **Isolate stages.** We run a **single account** (ADR-0017) with stages isolated by separate
+   **Amplify apps** and per-developer sandbox stacks. Never share a table between stages.
+   Graduate to separate AWS accounts as the project matures.
 6. **Region must have Bedrock model access.** The classifier needs `BEDROCK_MODEL_ID`
-   (`anthropic.claude-opus-4-8` by default) enabled in the chosen region.
+   (`eu.anthropic.claude-haiku-4-5-20251001-v1:0` by default) enabled in `eu-central-1`. Current
+   Claude tiers are invoked via a cross-Region **inference profile** (`eu.` prefix), not a bare
+   in-Region model id — the Lambda's Bedrock grant is scoped accordingly (ADR-0017).
 
 ---
 
@@ -109,21 +121,23 @@ Create an IAM role assumed **only** by this repo's `main` branch via OIDC. Trust
 > Tighten `:sub` further (e.g. `environment:production`) if you gate the job behind a GitHub
 > Environment. Never use a wildcard repo/branch in the `:sub` condition.
 
-**Permissions policy:** scope to what the backend provisions. Start from the services in play and
-narrow over time: CloudFormation, the CDK bootstrap resources (the `cdk-*` S3 asset bucket + the
-CDK deploy/exec roles), IAM (create/pass the backend's roles), Lambda, AppSync, DynamoDB,
-Cognito, S3, SQS, EventBridge Pipes, SNS, CloudWatch, X-Ray, and Bedrock model invoke. Prefer
-resource-scoped statements; avoid `"Action": "*"` on `"Resource": "*"`.
+**Permissions policy:** the deploy role holds **no direct provisioning power** — it only
+`sts:AssumeRole`s the CDK bootstrap roles (`cdk-<qualifier>-{deploy,file-publishing,image-publishing,lookup}-role-*`),
+which hold the real permissions. This is the least-privilege CDK pattern and is exactly what
+[`infra/bootstrap/github-oidc-deploy-role.yaml`](../../infra/bootstrap/github-oidc-deploy-role.yaml)
+provisions (plus reading the bootstrap-version SSM parameter and `cloudformation:Describe*`). The
+_runtime_ Bedrock grant (inference profile + EU foundation-model ARNs) lives on the classifier
+Lambda's role, created during deploy (see `apps/web/amplify/backend.ts`), not on the deploy role.
 
 ### 5. Configure GitHub (repo → Settings)
 
-| Kind        | Name                  | Value                                             |
-| ----------- | --------------------- | ------------------------------------------------- |
-| Variable    | `AWS_DEPLOY_ENABLED`  | `true` to activate the Deploy workflow            |
-| Variable    | `AWS_REGION`          | e.g. `eu-west-1` (must have Bedrock model access) |
-| Secret      | `AWS_DEPLOY_ROLE_ARN` | ARN of the role from step 4                       |
-| Secret      | `AMPLIFY_APP_ID`      | App ID from step 2                                |
-| Environment | `production`          | (recommended) add required reviewers as a gate    |
+| Kind        | Name                  | Value                                           |
+| ----------- | --------------------- | ----------------------------------------------- |
+| Variable    | `AWS_DEPLOY_ENABLED`  | `true` to activate the Deploy workflow          |
+| Variable    | `AWS_REGION`          | `eu-central-1` (must have Bedrock model access) |
+| Secret      | `AWS_DEPLOY_ROLE_ARN` | ARN of the role from step 4                     |
+| Secret      | `AMPLIFY_APP_ID`      | App ID from step 2                              |
+| Environment | `production`          | (recommended) add required reviewers as a gate  |
 
 Until `AWS_DEPLOY_ENABLED == 'true'`, the Deploy workflow is a skipped no-op (green).
 

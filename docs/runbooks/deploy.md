@@ -32,16 +32,17 @@ The backend deploys via `.github/workflows/deploy.yml` (`ampx pipeline-deploy`) 
 
 ### Configure GitHub (repo → Settings)
 
-| Kind        | Name                  | Value                                             |
-| ----------- | --------------------- | ------------------------------------------------- |
-| Variable    | `AWS_DEPLOY_ENABLED`  | `true` to activate the workflow                   |
-| Variable    | `AWS_REGION`          | e.g. `eu-west-1` (must have Bedrock model access) |
-| Secret      | `AWS_DEPLOY_ROLE_ARN` | ARN of the deploy role from step 3                |
-| Secret      | `AMPLIFY_APP_ID`      | App ID from step 1                                |
-| Environment | `production`          | (optional) add required reviewers for a gate      |
+| Kind        | Name                  | Value                                           |
+| ----------- | --------------------- | ----------------------------------------------- |
+| Variable    | `AWS_DEPLOY_ENABLED`  | `true` to activate the workflow                 |
+| Variable    | `AWS_REGION`          | `eu-central-1` (must have Bedrock model access) |
+| Secret      | `AWS_DEPLOY_ROLE_ARN` | ARN of the deploy role from step 3              |
+| Secret      | `AMPLIFY_APP_ID`      | App ID from step 1                              |
+| Environment | `production`          | (optional) add required reviewers for a gate    |
 
 Also confirm Bedrock model access is enabled for `BEDROCK_MODEL_ID`
-(`anthropic.claude-opus-4-8` by default) in `AWS_REGION`.
+(`eu.anthropic.claude-haiku-4-5-20251001-v1:0` by default, via the EU inference profile) in
+`AWS_REGION`. See [ADR-0017](../adr/0017-aws-account-identity-and-region-topology.md).
 
 ### Deploy
 
