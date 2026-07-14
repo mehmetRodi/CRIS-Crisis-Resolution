@@ -8,13 +8,13 @@ describe('App shell', () => {
     render(
       <BrowserRouter>
         <App />
-      </BrowserRouter>
+      </BrowserRouter>,
     );
     expect(
       screen.getByRole('heading', {
         level: 1,
         name: /crisismap ai/i,
-      })
+      }),
     ).toBeInTheDocument();
   });
 
@@ -22,7 +22,7 @@ describe('App shell', () => {
     render(
       <BrowserRouter>
         <App />
-      </BrowserRouter>
+      </BrowserRouter>,
     );
     expect(screen.getByText('Citizen submission')).toBeInTheDocument();
     expect(screen.getByText('Coordinator dashboard')).toBeInTheDocument();
