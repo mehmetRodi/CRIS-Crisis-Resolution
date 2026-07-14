@@ -67,13 +67,15 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        # `npm install`, not `npm ci`, on purpose. `ampx` pulls in @parcel/watcher,
-        # whose per-platform native binary is an OPTIONAL dependency. Our lockfile is
-        # generated on macOS, so npm only records the darwin binary; `npm ci` (strict)
-        # then fails on the Linux runner with "No prebuild ... @parcel/watcher-linux-
-        # x64-glibc". `npm install` re-resolves optional deps for the runner's platform
-        # and fetches the Linux binary. Dependency versions stay pinned by the lockfile.
-        run: npm install --no-audit --no-fund
+        # `npm ci` for a strict, reproducible install from the lockfile. `ampx` pulls in
+        # @parcel/watcher, whose per-platform native binary is an OPTIONAL dependency. A
+        # lockfile generated on macOS only records the darwin node, so a plain `npm ci`
+        # (or even `npm install`, which honours the lockfile) never fetches the Linux
+        # binary and `ampx` crashes with "No prebuild ... @parcel/watcher-linux-x64-glibc".
+        # Fix: the Linux binary is declared as an explicit root optionalDependency (see
+        # package.json), which forces a lockfile node for it — same pattern we already use
+        # for @rollup/rollup-linux-x64-gnu. `npm ci` then installs it on the Linux runner.
+        run: npm ci --no-audit --no-fund
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
