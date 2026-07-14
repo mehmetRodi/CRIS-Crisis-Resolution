@@ -27,6 +27,16 @@ Parameters:
       The ONLY branch allowed to assume the deploy role. Never use a wildcard
       here — a wildcard would let any branch/PR from the repo deploy.
 
+  GitHubEnvironment:
+    Type: String
+    Default: production
+    Description: >
+      The GitHub Actions Environment the Deploy job runs in. When a job targets
+      an Environment, GitHub's OIDC token `sub` becomes
+      `repo:<org>/<repo>:environment:<name>` instead of the branch ref, so the
+      role must trust that subject too. Keep in sync with deploy.yml's
+      `environment:` key.
+
   CreateOIDCProvider:
     Type: String
     Default: 'true'
@@ -96,9 +106,12 @@ Resources:
             Condition:
               StringEquals:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
-              # Branch-scoped: only refs/heads/<branch> of this exact repo.
+              # Scoped to this exact repo: either the deploy branch (ref) or the
+              # gated Environment. No wildcards — both subjects are fully pinned.
               StringLike:
-                token.actions.githubusercontent.com:sub: !Sub 'repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/${GitHubBranch}'
+                token.actions.githubusercontent.com:sub:
+                  - !Sub 'repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/${GitHubBranch}'
+                  - !Sub 'repo:${GitHubOrg}/${GitHubRepo}:environment:${GitHubEnvironment}'
       Policies:
         - PolicyName: assume-cdk-bootstrap-roles
           PolicyDocument:
