@@ -91,8 +91,8 @@ NEW → PROCESSING → AI_CLASSIFIED → VERIFIED → IN_PROGRESS → RESOLVED
 | S3 media                             | `apps/web/amplify/storage` — stub bucket                                                                                                                                                                                   |
 | MapLibre + Amazon Location           | not built — CRIS-13                                                                                                                                                                                                        |
 | Shared domain vocabulary             | `packages/shared` — statuses, roles, bands, categories + verification/assignment/alert/audit enums (CRIS-8)                                                                                                                |
-| CI                                   | `.github/workflows/ci.yml` — CRIS-15                                                                                                                                                                                       |
-| Observability (CloudWatch/X-Ray)     | conventions only (docs/conventions.md); wired with Lambdas                                                                                                                                                                 |
+| CI                                   | `.github/workflows/ci.yml` — format/lint/typecheck/build/test; `deploy.yml` = `ampx pipeline-deploy` via OIDC, dormant until AWS wired (CRIS-14 ✓/CRIS-15, ADR-0016; setup in `docs/runbooks/deploy.md`)                   |
+| Observability (CloudWatch/X-Ray)     | wired (CRIS-15 ✓, ADR-0015): X-Ray active on AppSync + all Lambdas; `amplify/observability.ts` — CloudWatch alarms (DLQ/queue-age/errors/throttles) + SLA dashboard + ops SNS topic; structured JSON logs in handlers      |
 
 ## 5. Deferred to later phases (design doc §1.2, §4)
 
