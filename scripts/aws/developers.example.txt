@@ -1,0 +1,9 @@
+# Copy to developers.txt (git-ignored) and list your 5 developers, one per line.
+# Format:  email[,GivenName,FamilyName]
+# Name is optional; it defaults to the email local-part if omitted.
+#
+# ada@oplog.io,Ada,Lovelace
+# grace@oplog.io,Grace,Hopper
+# alan@oplog.io
+# katherine@oplog.io,Katherine,Johnson
+# margaret@oplog.io,Margaret,Hamilton
