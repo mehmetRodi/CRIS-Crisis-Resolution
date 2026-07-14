@@ -33,3 +33,4 @@ behind the code — essential when refactoring or extending the system.
 | [0015](0015-observability-xray-cloudwatch-alarms.md)       | Observability: X-Ray + CW alarms     | Accepted |
 | [0016](0016-continuous-deployment-ampx-pipeline-oidc.md)   | CD: ampx pipeline-deploy + OIDC      | Accepted |
 | [0017](0017-aws-account-identity-and-region-topology.md)   | AWS account/identity/region topology | Accepted |
+| [0018](0018-gate-deploy-on-ci-via-workflow-run.md)         | Gate deploy on CI via workflow_run   | Accepted |
