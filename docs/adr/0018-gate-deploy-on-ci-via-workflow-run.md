@@ -37,7 +37,7 @@ on:
   workflow_run:
     workflows: [CI]
     types: [completed]
-    branches: [main]   # matches the CI run's head branch → excludes PR runs
+    branches: [main] # matches the CI run's head branch → excludes PR runs
   workflow_dispatch:
 ```
 
