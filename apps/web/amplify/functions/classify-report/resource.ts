@@ -27,10 +27,15 @@ export const classifyReport = defineFunction({
   timeoutSeconds: 60,
   memoryMB: 1024,
   environment: {
-    // Bedrock model id (Bedrock IDs carry the `anthropic.` prefix). Overridable
-    // so the team can trade cost/latency (e.g. a Sonnet/Haiku tier) without a
-    // code change — see ADR-0013. NO secrets/PII in env.
-    BEDROCK_MODEL_ID: 'anthropic.claude-opus-4-8',
+    // Bedrock model id. Current Claude tiers are invoked via an EU cross-Region
+    // *inference profile* (`eu.` prefix) so triage traffic stays inside the EU
+    // geography (data residency, §5.6; ADR-0017). Haiku is the default: triage
+    // is short-text → structured-JSON extraction, a Haiku-class job, and the
+    // cheapest/fastest tier best fits the 1,000 writes/min + p95 < 15 s targets
+    // (§3.2). Swap to `eu.anthropic.claude-sonnet-5` for more reasoning headroom
+    // with no IAM change (the grant is a `claude-*` family wildcard). NO
+    // secrets/PII in env.
+    BEDROCK_MODEL_ID: 'eu.anthropic.claude-haiku-4-5-20251001-v1:0',
     // Feature flag for the CRIS-13 Amazon Location geocoder. Off until the place
     // index exists; the worker leaves location unresolved meanwhile.
     GEOCODING_ENABLED: 'false',

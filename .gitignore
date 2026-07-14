@@ -28,3 +28,6 @@ amplify_outputs.*
 # Logs
 *.log
 npm-debug.log*
+
+# Team roster for Identity Center wiring (never commit real emails)
+scripts/aws/developers.txt

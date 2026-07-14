@@ -1,0 +1,151 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  CrisisMap AI — GitHub Actions OIDC identity provider + branch-scoped CDK deploy
+  role for `ampx pipeline-deploy` (CRIS-14, ADR-0016, ADR-0017). No long-lived
+  AWS keys: GitHub mints a short-lived OIDC token that assumes DeployRole, which
+  in turn assumes the CDK bootstrap roles that hold the real provisioning power.
+  Deploy this ONCE per AWS account with `scripts/aws/30-deploy-role.sh`.
+
+# ---------------------------------------------------------------------------
+# Parameters — safe defaults for this repo; override per environment if needed.
+# ---------------------------------------------------------------------------
+Parameters:
+  GitHubOrg:
+    Type: String
+    Default: mehmetRodi
+    Description: GitHub org/user that owns the repository.
+
+  GitHubRepo:
+    Type: String
+    Default: CRIS-Crisis-Resolution
+    Description: Repository name (without the org prefix).
+
+  GitHubBranch:
+    Type: String
+    Default: main
+    Description: >
+      The ONLY branch allowed to assume the deploy role. Never use a wildcard
+      here — a wildcard would let any branch/PR from the repo deploy.
+
+  GitHubEnvironment:
+    Type: String
+    Default: production
+    Description: >
+      The GitHub Actions Environment the Deploy job runs in. When a job targets
+      an Environment, GitHub's OIDC token `sub` becomes
+      `repo:<org>/<repo>:environment:<name>` instead of the branch ref, so the
+      role must trust that subject too. Keep in sync with deploy.yml's
+      `environment:` key.
+
+  CreateOIDCProvider:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: >
+      Create the token.actions.githubusercontent.com OIDC provider. Set to
+      "false" if the account already has one (only one is allowed per account);
+      then pass ExistingOIDCProviderArn.
+
+  ExistingOIDCProviderArn:
+    Type: String
+    Default: ''
+    Description: >
+      ARN of a pre-existing GitHub OIDC provider. Required only when
+      CreateOIDCProvider is "false".
+
+  CdkQualifier:
+    Type: String
+    Default: hnb659fds
+    Description: >
+      CDK bootstrap qualifier. `hnb659fds` is the CDK default used by
+      `cdk bootstrap` / `ampx`. Change only if you bootstrapped with a custom
+      --qualifier.
+
+Conditions:
+  ShouldCreateProvider: !Equals [!Ref CreateOIDCProvider, 'true']
+
+Resources:
+  # -------------------------------------------------------------------------
+  # GitHub Actions OIDC identity provider (one per account).
+  # -------------------------------------------------------------------------
+  GitHubOIDCProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: ShouldCreateProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      # IAM no longer validates the thumbprint for well-known IdPs, but the
+      # property is still accepted; these are GitHub's published thumbprints.
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+        - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
+
+  # -------------------------------------------------------------------------
+  # Deploy role — assumed by GitHub Actions on `main` only, via OIDC.
+  # -------------------------------------------------------------------------
+  DeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: crisismap-github-deploy
+      Description: >
+        Assumed by GitHub Actions (mehmetRodi/CRIS-Crisis-Resolution @ main) to
+        run `ampx pipeline-deploy`. Holds no direct provisioning power - it only
+        assumes the CDK bootstrap roles.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If
+                - ShouldCreateProvider
+                - !Ref GitHubOIDCProvider
+                - !Ref ExistingOIDCProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              # Scoped to this exact repo: either the deploy branch (ref) or the
+              # gated Environment. No wildcards — both subjects are fully pinned.
+              StringLike:
+                token.actions.githubusercontent.com:sub:
+                  - !Sub 'repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/${GitHubBranch}'
+                  - !Sub 'repo:${GitHubOrg}/${GitHubRepo}:environment:${GitHubEnvironment}'
+      Policies:
+        - PolicyName: assume-cdk-bootstrap-roles
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # CDK / ampx deploys by assuming the file-publishing, image-
+              # publishing, lookup, and deploy roles created by `cdk bootstrap`.
+              # Those roles hold the real permissions; this role only reaches
+              # them. Scoped to this account + the bootstrap qualifier.
+              - Sid: AssumeCdkBootstrapRoles
+                Effect: Allow
+                Action: sts:AssumeRole
+                Resource:
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/cdk-${CdkQualifier}-deploy-role-${AWS::AccountId}-*'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/cdk-${CdkQualifier}-file-publishing-role-${AWS::AccountId}-*'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/cdk-${CdkQualifier}-image-publishing-role-${AWS::AccountId}-*'
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/cdk-${CdkQualifier}-lookup-role-${AWS::AccountId}-*'
+              # Pre-flight checks CDK/ampx run before assuming a bootstrap role.
+              - Sid: ReadBootstrapVersion
+                Effect: Allow
+                Action: ssm:GetParameter
+                Resource:
+                  - !Sub 'arn:aws:ssm:*:${AWS::AccountId}:parameter/cdk-bootstrap/${CdkQualifier}/version'
+              - Sid: DescribeDeploymentStacks
+                Effect: Allow
+                Action:
+                  - cloudformation:DescribeStacks
+                  - cloudformation:DescribeStackEvents
+                Resource: '*'
+
+Outputs:
+  DeployRoleArn:
+    Description: Set this as the AWS_DEPLOY_ROLE_ARN GitHub secret.
+    Value: !GetAtt DeployRole.Arn
+  OIDCProviderArn:
+    Description: The GitHub OIDC provider ARN (created or pre-existing).
+    Value: !If [ShouldCreateProvider, !Ref GitHubOIDCProvider, !Ref ExistingOIDCProviderArn]

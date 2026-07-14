@@ -1,0 +1,96 @@
+name: Deploy
+
+# CRIS-14 — Continuous deployment of the Amplify Gen 2 backend (ADR-0016, ADR-0018).
+#
+# Dormant until AWS is wired. The job is gated on the `AWS_DEPLOY_ENABLED` repo
+# variable, which is unset on forks and un-configured repos — so this workflow
+# is a skipped no-op (green, never a failure) until an operator opts in by
+# setting the variable + secrets. See docs/runbooks/deploy.md for the OIDC trust
+# setup and the exact variables/secrets required.
+#
+# This deploys the BACKEND only (`ampx pipeline-deploy`), which generates the real
+# `amplify_outputs.json` for the environment. Frontend hosting is out of scope here.
+#
+# TRIGGER (ADR-0018): this runs *after* CI, not in parallel with it. It fires on
+# CI's `workflow_run` completion (filtered to the `main` branch) and the job only
+# proceeds when that CI run concluded `success`. A red build therefore never
+# deploys. CI stays a separate workflow so it still runs on pull requests, where
+# deploy must not. `workflow_dispatch` remains for manual re-deploy / bootstrap.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+# Never interrupt an in-flight CloudFormation deploy; queue instead.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+# OIDC: mint a short-lived token to assume the deploy role — no long-lived keys.
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Amplify pipeline-deploy (backend)
+    # Two gates, both must hold:
+    #  1. `vars.AWS_DEPLOY_ENABLED` is empty unless explicitly set, so this
+    #     evaluates to false and the job is skipped rather than failing on
+    #     missing secrets (dormant-until-wired, ADR-0016).
+    #  2. On a `workflow_run` trigger, only deploy if the CI run concluded
+    #     `success`. `workflow_dispatch` bypasses this (there is no upstream CI
+    #     run) so operators can still manually deploy/bootstrap (ADR-0018).
+    if: >
+      vars.AWS_DEPLOY_ENABLED == 'true' &&
+      (github.event_name == 'workflow_dispatch' ||
+       github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # A `workflow_run` event runs in the context of the default branch, so
+          # `github.sha` is main's tip — which may have advanced past the commit
+          # CI actually validated. Check out that exact commit instead. Empty on
+          # `workflow_dispatch` (no upstream run) ⇒ falls back to the dispatched ref.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        # `npm ci` for a strict, reproducible install from the lockfile. `ampx` pulls in
+        # @parcel/watcher, whose per-platform native binary is an OPTIONAL dependency. A
+        # lockfile generated on macOS only records the darwin node, so a plain `npm ci`
+        # (or even `npm install`, which honours the lockfile) never fetches the Linux
+        # binary and `ampx` crashes with "No prebuild ... @parcel/watcher-linux-x64-glibc".
+        # Fix: the Linux binary is declared as an explicit root optionalDependency (see
+        # package.json), which forces a lockfile node for it — same pattern we already use
+        # for @rollup/rollup-linux-x64-gnu. `npm ci` then installs it on the Linux runner.
+        run: npm ci --no-audit --no-fund
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      # `ampx pipeline-deploy` is the non-interactive deploy for CI/CD: it
+      # synthesizes the backend and deploys the branch's CloudFormation stack,
+      # keyed by the Amplify app id + branch name.
+      # `github.ref_name` is `main` under a `workflow_run` event (default-branch
+      # context), which is correct here since the trigger is filtered to `main`.
+      # We use the CI run's `head_branch` when present so the deploy stays keyed
+      # to the branch that was actually built, and fall back to `ref_name` for
+      # `workflow_dispatch`.
+      - name: Deploy backend (ampx pipeline-deploy)
+        working-directory: apps/web
+        run: npx ampx pipeline-deploy --branch "${{ github.event.workflow_run.head_branch || github.ref_name }}" --app-id "${{ secrets.AMPLIFY_APP_ID }}"
