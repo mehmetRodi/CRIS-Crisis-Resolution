@@ -191,13 +191,24 @@ classificationQueue.grantConsumeMessages(worker);
 reportTable.grantReadWriteData(worker);
 tables['ReportEvent'].grantWriteData(worker);
 
-// Bedrock — scoped to the Claude foundation-model family in this region (no
-// cross-provider access). Kept a family wildcard so switching BEDROCK_MODEL_ID
-// across Claude tiers needs no IAM change (ADR-0013).
+// Bedrock — scoped to the Claude family, no cross-provider access. Current
+// Claude tiers (Opus 4.8 / Sonnet 5 / Haiku 4.5) are invoked through a
+// cross-Region *inference profile* (`eu.anthropic.claude-*`), not a bare
+// in-Region model id, so the grant needs BOTH (ADR-0017):
+//   1. the inference-profile ARN in this account/Region (what the API call
+//      names), and
+//   2. the underlying foundation-model ARNs in every EU destination Region the
+//      profile can route to (`eu-*`) — an in-Region-only grant throws
+//      AccessDenied the moment the profile fans out.
+// The `claude-*` wildcard keeps BEDROCK_MODEL_ID swappable across tiers with no
+// IAM change; `eu-*` keeps it within the EU geography (data residency, §5.6).
 worker.addToRolePolicy(
   new PolicyStatement({
-    actions: ['bedrock:InvokeModel'],
-    resources: [`arn:aws:bedrock:${backend.stack.region}::foundation-model/anthropic.claude-*`],
+    actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],
+    resources: [
+      `arn:aws:bedrock:${backend.stack.region}:${backend.stack.account}:inference-profile/eu.anthropic.claude-*`,
+      'arn:aws:bedrock:eu-*::foundation-model/anthropic.claude-*',
+    ],
   }),
 );
 
