@@ -31,13 +31,18 @@ Shared conventions for CrisisMap AI. Keep this current; it is the reference for 
 - Mutations use **optimistic concurrency**: require `expectedVersion` + conditional write;
   a conflict returns a machine-readable `CONFLICT` error.
 
-## Logging & observability (baseline for CRIS-15; wired with Lambdas)
+## Logging & observability (wired — CRIS-15, ADR-0015)
 
 - Emit **structured JSON logs** (one object per line) with a correlation/trace id, the
-  `reportId`, and the event type. No free-form string logs for domain events.
-- Plan for **AWS X-Ray** tracing across AppSync → Lambda → downstream calls.
-- Alarms/metrics (submission latency, classification latency, DLQ depth) are defined when the
-  pipeline lands (CRIS-10/14). Until then this section is the contract.
+  `reportId`, and the event type. No free-form string logs for domain events. (See the
+  `classify-report` handler for the pattern.)
+- **AWS X-Ray** active tracing is enabled on AppSync + all four Lambdas (`backend.ts`). New
+  Lambdas get tracing + the `xray:Put*` grant the same way — don't add an untraced function.
+- **Alarms/metrics/dashboard** live in `apps/web/amplify/observability.ts` (`addObservability`).
+  Thresholds trace back to the §3.2 SLAs; alarms notify the ops SNS topic. When you add a
+  worker/queue/failure mode, add the matching alarm + a dashboard widget there, and record the
+  first-response in `docs/runbooks/deploy.md`. Keep `treatMissingData: NOT_BREACHING` so idle
+  environments don't page.
 
 ## Backend custom resolvers (Amplify Gen 2)
 

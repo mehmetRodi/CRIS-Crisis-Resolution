@@ -12,6 +12,7 @@ import { submitReport } from './functions/submit-report/resource';
 import { transitionReport } from './functions/transition-report/resource';
 import { publishReportUpdate } from './functions/publish-report-update/resource';
 import { classifyReport } from './functions/classify-report/resource';
+import { addObservability } from './observability';
 
 /**
  * CrisisMap AI backend (Amplify Gen 2).
@@ -190,16 +191,67 @@ classificationQueue.grantConsumeMessages(worker);
 reportTable.grantReadWriteData(worker);
 tables['ReportEvent'].grantWriteData(worker);
 
-// Bedrock — scoped to the Claude foundation-model family in this region (no
-// cross-provider access). Kept a family wildcard so switching BEDROCK_MODEL_ID
-// across Claude tiers needs no IAM change (ADR-0013).
+// Bedrock — scoped to the Claude family, no cross-provider access. Current
+// Claude tiers (Opus 4.8 / Sonnet 5 / Haiku 4.5) are invoked through a
+// cross-Region *inference profile* (`eu.anthropic.claude-*`), not a bare
+// in-Region model id, so the grant needs BOTH (ADR-0017):
+//   1. the inference-profile ARN in this account/Region (what the API call
+//      names), and
+//   2. the underlying foundation-model ARNs in every EU destination Region the
+//      profile can route to (`eu-*`) — an in-Region-only grant throws
+//      AccessDenied the moment the profile fans out.
+// The `claude-*` wildcard keeps BEDROCK_MODEL_ID swappable across tiers with no
+// IAM change; `eu-*` keeps it within the EU geography (data residency, §5.6).
 worker.addToRolePolicy(
   new PolicyStatement({
-    actions: ['bedrock:InvokeModel'],
-    resources: [`arn:aws:bedrock:${backend.stack.region}::foundation-model/anthropic.claude-*`],
+    actions: ['bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream'],
+    resources: [
+      `arn:aws:bedrock:${backend.stack.region}:${backend.stack.account}:inference-profile/eu.anthropic.claude-*`,
+      'arn:aws:bedrock:eu-*::foundation-model/anthropic.claude-*',
+    ],
   }),
 );
 
 // Table names the worker resolves at runtime (no secrets/PII).
 backend.classifyReport.addEnvironment('REPORT_TABLE_NAME', reportTable.tableName);
 backend.classifyReport.addEnvironment('REPORT_EVENT_TABLE_NAME', tables['ReportEvent'].tableName);
+
+/* -------------------------------------------------------------------------- */
+/* Observability (CRIS-15, ADR-0015) — X-Ray tracing + CloudWatch alarms       */
+/* -------------------------------------------------------------------------- */
+
+// X-Ray active tracing across AppSync → Lambda → downstream calls (design doc
+// §3.1). The managed `defineFunction`/`data` constructs don't expose a tracing
+// prop, so it's set via CDK escape hatches; enabling it manually means we must
+// also grant the X-Ray write actions (an L2 `tracing: ACTIVE` would do both).
+const tracedFunctions = [
+  backend.submitReport,
+  backend.transitionReport,
+  backend.publishReportUpdate,
+  backend.classifyReport,
+];
+for (const fn of tracedFunctions) {
+  fn.resources.cfnResources.cfnFunction.tracingConfig = { mode: 'Active' };
+  fn.resources.lambda.addToRolePolicy(
+    new PolicyStatement({
+      actions: ['xray:PutTraceSegments', 'xray:PutTelemetryRecords'],
+      resources: ['*'], // X-Ray write actions don't support resource-level scoping.
+    }),
+  );
+}
+backend.data.resources.cfnResources.cfnGraphqlApi.xrayEnabled = true;
+
+// Alarms + dashboard + ops SNS topic live in the pipeline stack (same stack as
+// the queues they watch, so the SQS alarms need no cross-stack export). Returns
+// the topic; an alert endpoint is subscribed post-deploy (docs/runbooks/deploy.md).
+addObservability({
+  scope: pipelineStack,
+  functions: {
+    submitReport: submitFn,
+    transitionReport: transitionFn,
+    publishReportUpdate: backend.publishReportUpdate.resources.lambda,
+    classifyReport: worker,
+  },
+  classificationQueue,
+  classificationDlq,
+});
