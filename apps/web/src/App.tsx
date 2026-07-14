@@ -98,9 +98,17 @@ function App() {
               <li
                 key={surface.title}
                 onClick={() => handleCardClick(surface.path)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    handleCardClick(surface.path);
+                  }
+                }}
+                role={surface.path ? 'button' : undefined}
+                tabIndex={surface.path ? 0 : undefined}
                 className={`rounded-lg border border-slate-200 bg-white p-4 shadow-sm ${
                   surface.path
-                    ? 'cursor-pointer hover:border-blue-400 hover:shadow-md transition-all'
+                    ? 'cursor-pointer hover:border-blue-400 hover:shadow-md transition-all  focus:outline-none focus:ring-2 focus:ring-blue-500'
                     : ''
                 }`}
               >
