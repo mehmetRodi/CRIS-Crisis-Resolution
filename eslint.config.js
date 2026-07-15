@@ -13,7 +13,9 @@ export default tseslint.config(
       '**/build/**',
       '**/coverage/**',
       '**/.amplify/**',
+      '**/.expo/**',
       '**/node_modules/**',
+      'apps/mobile/expo-env.d.ts',
     ],
   },
   js.configs.recommended,
@@ -27,6 +29,16 @@ export default tseslint.config(
     rules: {
       ...reactHooks.configs.recommended.rules,
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
+    },
+  },
+  {
+    // React Native app — react-hooks applies; react-refresh is Vite-only.
+    files: ['apps/mobile/**/*.{ts,tsx}'],
+    plugins: {
+      'react-hooks': reactHooks,
+    },
+    rules: {
+      ...reactHooks.configs.recommended.rules,
     },
   },
 );

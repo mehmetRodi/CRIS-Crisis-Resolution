@@ -7,3 +7,5 @@ coverage
 amplify_outputs.json
 *.pdf
 package-lock.json
+.expo
+expo-env.d.ts

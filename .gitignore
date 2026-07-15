@@ -31,3 +31,12 @@ npm-debug.log*
 
 # Team roster for Identity Center wiring (never commit real emails)
 scripts/aws/developers.txt
+
+# Expo / React Native (apps/mobile)
+.expo/
+expo-env.d.ts
+.kotlin/
+*.jks
+*.p8
+*.p12
+*.mobileprovision
