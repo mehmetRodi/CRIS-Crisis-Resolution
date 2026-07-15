@@ -67,3 +67,60 @@ describe('CoordinatorDashboard shell', () => {
     expect(onExit).toHaveBeenCalledOnce();
   });
 });
+
+describe('CoordinatorDashboard live feed', () => {
+  it('renders a sign-in prompt (not an error) when unauthenticated', () => {
+    const feed: IncidentFeedState = { status: 'unauthenticated' };
+    render(<CoordinatorDashboard onExit={() => {}} feed={feed} />);
+    expect(screen.getAllByText(/sign in as a coordinator/i).length).toBeGreaterThan(0);
+  });
+
+  it('shows a message when the read fails', () => {
+    const feed: IncidentFeedState = { status: 'error', message: 'Network down' };
+    render(<CoordinatorDashboard onExit={() => {}} feed={feed} />);
+    expect(screen.getByText(/network down/i)).toBeInTheDocument();
+  });
+
+  it('tallies live incidents into the priority band tiles', () => {
+    const feed: IncidentFeedState = {
+      status: 'ready',
+      incidents: [
+        incident({ reportId: 'a', priorityBand: PriorityBand.P0 }),
+        incident({ reportId: 'b', priorityBand: PriorityBand.P0 }),
+        incident({ reportId: 'c', priorityBand: PriorityBand.P1 }),
+      ],
+    };
+    render(<CoordinatorDashboard onExit={() => {}} feed={feed} />);
+    // P0 tile shows a count of 2.
+    const p0Tile = screen.getByText('P0').closest('div')?.parentElement as HTMLElement;
+    expect(within(p0Tile).getByText('2')).toBeInTheDocument();
+    expect(screen.getByText(/3 incidents loaded/i)).toBeInTheDocument();
+  });
+
+  it('renders queue rows ordered by priority, highest first', () => {
+    const feed: IncidentFeedState = {
+      status: 'ready',
+      incidents: [
+        incident({ reportId: 'low-pri', priorityScore: 2, priorityBand: PriorityBand.P3 }),
+        incident({ reportId: 'high-pri', priorityScore: 9, priorityBand: PriorityBand.P0 }),
+      ],
+    };
+    render(<CoordinatorDashboard onExit={() => {}} feed={feed} />);
+    const rows = screen.getAllByText(/-pri/).map((el) => el.textContent);
+    expect(rows[0]).toContain('high-pri');
+  });
+
+  it('shows an empty state when there are no incidents', () => {
+    const feed: IncidentFeedState = { status: 'ready', incidents: [] };
+    render(<CoordinatorDashboard onExit={() => {}} feed={feed} />);
+    expect(screen.getByText(/no incidents yet/i)).toBeInTheDocument();
+  });
+
+  it('invokes onRefresh when the refresh button is pressed', () => {
+    const onRefresh = vi.fn();
+    const feed: IncidentFeedState = { status: 'ready', incidents: [] };
+    render(<CoordinatorDashboard onExit={() => {}} feed={feed} onRefresh={onRefresh} />);
+    fireEvent.click(screen.getByRole('button', { name: /refresh/i }));
+    expect(onRefresh).toHaveBeenCalledOnce();
+  });
+});
