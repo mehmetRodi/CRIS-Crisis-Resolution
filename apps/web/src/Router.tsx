@@ -21,9 +21,7 @@ import { useLiveReports } from './surfaces/coordinator/useLiveReports';
 function CoordinatorRoute() {
   const navigate = useNavigate();
   const { state, refresh } = useLiveReports();
-  return (
-    <CoordinatorDashboard onExit={() => navigate('/')} feed={state} onRefresh={refresh} />
-  );
+  return <CoordinatorDashboard onExit={() => navigate('/')} feed={state} onRefresh={refresh} />;
 }
 
 export function Router() {

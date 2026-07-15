@@ -169,7 +169,9 @@ function IncidentRow({ incident }: { incident: PublicReport }) {
   return (
     <tr className="border-t border-slate-100 hover:bg-slate-50">
       <td className="whitespace-nowrap px-3 py-2">
-        <span className={`rounded px-1.5 py-0.5 text-xs font-semibold ${badge}`}>{band ?? '—'}</span>
+        <span className={`rounded px-1.5 py-0.5 text-xs font-semibold ${badge}`}>
+          {band ?? '—'}
+        </span>
         <span className="ml-2 tabular-nums text-xs text-slate-500">
           {incident.priorityScore != null ? incident.priorityScore.toFixed(1) : '—'}
         </span>
@@ -189,7 +191,9 @@ function IncidentRow({ incident }: { incident: PublicReport }) {
 /** The priority-ordered incident table (design doc §2.4). */
 function IncidentQueue({ incidents }: { incidents: PublicReport[] }) {
   if (incidents.length === 0) {
-    return <RegionMessage>No incidents yet. New reports will appear here as they arrive.</RegionMessage>;
+    return (
+      <RegionMessage>No incidents yet. New reports will appear here as they arrive.</RegionMessage>
+    );
   }
   return (
     <div className="overflow-x-auto">
@@ -219,7 +223,10 @@ function IncidentQueue({ incidents }: { incidents: PublicReport[] }) {
  * Renders the body of a data-driven region for each feed state. `idle` returns
  * `null` so the parent `Region` falls back to its shell placeholder.
  */
-function feedBody(feed: IncidentFeedState, ready: (incidents: PublicReport[]) => ReactNode): ReactNode {
+function feedBody(
+  feed: IncidentFeedState,
+  ready: (incidents: PublicReport[]) => ReactNode,
+): ReactNode {
   switch (feed.status) {
     case 'idle':
       return null;
@@ -245,7 +252,10 @@ function ReadStatus({ feed }: { feed: IncidentFeedState }) {
     loading: { dot: 'bg-amber-400', text: 'Loading incidents…' },
     unauthenticated: { dot: 'bg-slate-300', text: 'Sign in to load incidents' },
     error: { dot: 'bg-red-400', text: 'Load failed' },
-    ready: { dot: 'bg-emerald-500', text: `${feed.status === 'ready' ? feed.incidents.length : 0} incidents loaded` },
+    ready: {
+      dot: 'bg-emerald-500',
+      text: `${feed.status === 'ready' ? feed.incidents.length : 0} incidents loaded`,
+    },
   };
   const { dot, text } = map[feed.status];
   return (
@@ -256,7 +266,11 @@ function ReadStatus({ feed }: { feed: IncidentFeedState }) {
   );
 }
 
-export function CoordinatorDashboard({ onExit, feed = { status: 'idle' }, onRefresh }: CoordinatorDashboardProps) {
+export function CoordinatorDashboard({
+  onExit,
+  feed = { status: 'idle' },
+  onRefresh,
+}: CoordinatorDashboardProps) {
   const counts = feed.status === 'ready' ? countByBand(feed.incidents) : null;
   const unscored = feed.status === 'ready' ? countUnscored(feed.incidents) : 0;
   const categories = feed.status === 'ready' ? countByCategory(feed.incidents) : [];
@@ -328,7 +342,10 @@ export function CoordinatorDashboard({ onExit, feed = { status: 'idle' }, onRefr
                     {counts[tile.band]}
                   </p>
                 ) : (
-                  <p className="mt-1 text-2xl font-bold tabular-nums text-slate-300" aria-hidden="true">
+                  <p
+                    className="mt-1 text-2xl font-bold tabular-nums text-slate-300"
+                    aria-hidden="true"
+                  >
                     —
                   </p>
                 )}

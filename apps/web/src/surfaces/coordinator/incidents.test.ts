@@ -77,8 +77,16 @@ describe('sortByPriority', () => {
     const low = incident({ reportId: 'low', priorityScore: 2 });
     const high = incident({ reportId: 'high', priorityScore: 9 });
     const unscored = incident({ reportId: 'unscored' });
-    const tieOld = incident({ reportId: 'old', priorityScore: 5, createdAt: '2026-01-01T00:00:00Z' });
-    const tieNew = incident({ reportId: 'new', priorityScore: 5, createdAt: '2026-02-01T00:00:00Z' });
+    const tieOld = incident({
+      reportId: 'old',
+      priorityScore: 5,
+      createdAt: '2026-01-01T00:00:00Z',
+    });
+    const tieNew = incident({
+      reportId: 'new',
+      priorityScore: 5,
+      createdAt: '2026-02-01T00:00:00Z',
+    });
 
     const order = sortByPriority([low, unscored, tieOld, high, tieNew]).map((i) => i.reportId);
     expect(order).toEqual(['high', 'new', 'old', 'low', 'unscored']);
