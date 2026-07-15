@@ -17,6 +17,7 @@
     "@aws-sdk/lib-dynamodb": "^3.1081.0",
     "@crisismap/shared": "*",
     "aws-amplify": "^6.10.0",
+    "maplibre-gl": "^5.24.0",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-router-dom": "^7.18.1",

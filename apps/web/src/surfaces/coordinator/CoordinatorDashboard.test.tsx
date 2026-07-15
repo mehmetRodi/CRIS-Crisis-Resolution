@@ -1,6 +1,8 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { PriorityBand } from '@crisismap/shared';
+// The "Live map" region now mounts a real MapLibre map (CRIS-13); MapLibre is
+// stubbed globally in vitest.setup.ts (WebGL is absent in jsdom).
 import { CoordinatorDashboard } from './CoordinatorDashboard';
 
 describe('CoordinatorDashboard shell', () => {
