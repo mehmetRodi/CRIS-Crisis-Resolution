@@ -1,6 +1,8 @@
 # ADR-0002: Frontend — Vite + React SPA
 
-- **Status:** Accepted
+- **Status:** Partially superseded by
+  [ADR-0020](0020-react-native-mobile-app-for-citizen-reporting.md) — the web SPA stands for
+  coordinator/responder/volunteer surfaces, but citizen reporting moved to a React Native app
 - **Date:** 2026-07-01
 - **Deciders:** Team (scaffolding)
 

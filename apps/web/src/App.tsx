@@ -1,11 +1,14 @@
 import { ReportStatus, UserRole } from '@crisismap/shared';
+import { useNavigate } from 'react-router-dom';
 
 /**
  * Placeholder application shell.
  *
- * This is intentionally a static landing surface for the scaffold. The four
- * real role surfaces below are stubs; each is built by its owning ticket:
- *   - Citizen submission form   → CRIS-6
+ * This is intentionally a static landing surface for the scaffold. The web SPA
+ * serves coordinators/responders/volunteers; the mobile app (`apps/mobile`,
+ * CRIS-6 — see ADR 0020) is the primary citizen channel, with `/report` as a
+ * web emergency fallback (ADR 0021). Remaining surfaces are stubs, each built
+ * by its owning ticket:
  *   - Coordinator dashboard     → CRIS-12
  *   - Live map                  → CRIS-13
  *   - Volunteer task board      → CRIS-4 epic (E4)
@@ -17,6 +20,7 @@ interface Surface {
   role: string;
   ticket: string;
   description: string;
+  path?: string;
 }
 
 const SURFACES: Surface[] = [
@@ -24,7 +28,10 @@ const SURFACES: Surface[] = [
     title: 'Citizen submission',
     role: UserRole.CITIZEN,
     ticket: 'CRIS-6',
-    description: 'Fast free-text emergency report with optional location, media, and anonymity.',
+    description:
+      'Fast free-text emergency report with optional media and anonymity. Primary channel ' +
+      'is the mobile app; this web form is the emergency fallback (ADR-0021).',
+    path: '/report',
   },
   {
     title: 'Coordinator dashboard',
@@ -49,6 +56,14 @@ const SURFACES: Surface[] = [
 const LIFECYCLE = Object.values(ReportStatus);
 
 function App() {
+  const navigate = useNavigate();
+
+  const handleCardClick = (path?: string) => {
+    if (path) {
+      navigate(path);
+    }
+  };
+
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900">
       <div className="mx-auto max-w-4xl px-6 py-12">
@@ -86,7 +101,20 @@ function App() {
             {SURFACES.map((surface) => (
               <li
                 key={surface.title}
-                className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
+                onClick={() => handleCardClick(surface.path)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    handleCardClick(surface.path);
+                  }
+                }}
+                role={surface.path ? 'button' : undefined}
+                tabIndex={surface.path ? 0 : undefined}
+                className={`rounded-lg border border-slate-200 bg-white p-4 shadow-sm ${
+                  surface.path
+                    ? 'cursor-pointer hover:border-blue-400 hover:shadow-md transition-all  focus:outline-none focus:ring-2 focus:ring-blue-500'
+                    : ''
+                }`}
               >
                 <div className="flex items-center justify-between">
                   <h3 className="font-semibold">{surface.title}</h3>

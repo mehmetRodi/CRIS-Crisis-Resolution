@@ -25,9 +25,11 @@ intentionally minimal stubs marked `TODO(CRIS-xx)`. Do **not** implement epic fe
 ```
 .
 ├── apps/
-│   └── web/                 # @crisismap/web — Vite + React SPA (frontend)
+│   ├── mobile/              # @crisismap/mobile — Expo + React Native (citizen reporting, CRIS-6)
+│   │   └── src/             # report form screen/components
+│   └── web/                 # @crisismap/web — Vite + React SPA (coordinator/responder/volunteer UI)
 │       ├── src/             # React app (placeholder shell today)
-│       └── amplify/         # Amplify Gen 2 backend definition (auth/data/storage stubs)
+│       └── amplify/         # Amplify Gen 2 backend definition (shared by both clients)
 ├── packages/
 │   └── shared/              # @crisismap/shared — domain enums/types (source-only pkg)
 ├── docs/
@@ -40,11 +42,13 @@ intentionally minimal stubs marked `TODO(CRIS-xx)`. Do **not** implement epic fe
 └── crisismap.pdf            # design document (source of truth)
 ```
 
-## Tech stack (see design doc §4 and ADR 0003)
+## Tech stack (see design doc §4, ADR 0003, ADR 0020)
 
-Vite + React SPA · TypeScript everywhere · AWS Amplify Gen 2 (Cognito, AppSync GraphQL +
-subscriptions, DynamoDB, S3) with CDK escape hatches for the async pipeline · Bedrock (Claude)
-for classification · SQS + DynamoDB Streams · Lambda · SNS · MapLibre + Amazon Location.
+**Cross-platform clients:** React Native (Expo) mobile app for citizen reporting ·
+Vite + React SPA for the coordinator/responder/volunteer web UI · TypeScript everywhere ·
+AWS Amplify Gen 2 (Cognito, AppSync GraphQL + subscriptions, DynamoDB, S3) with CDK escape
+hatches for the async pipeline · Bedrock (Claude) for classification · SQS + DynamoDB
+Streams · Lambda · SNS · MapLibre + Amazon Location.
 
 ## Commands
 
@@ -54,6 +58,7 @@ Run from the repo root (npm workspaces):
 | ----------------------------------------- | ------------------------------------------------- |
 | `npm install`                             | Install all workspace dependencies                |
 | `npm run dev`                             | Start the web app (Vite) at http://localhost:5173 |
+| `npm run dev:mobile`                      | Start the Expo dev server for the mobile app      |
 | `npm run build`                           | Build all workspaces                              |
 | `npm run typecheck`                       | Type-check all workspaces                         |
 | `npm run lint` / `npm run lint:fix`       | ESLint                                            |
