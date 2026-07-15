@@ -35,3 +35,4 @@ behind the code — essential when refactoring or extending the system.
 | [0017](0017-aws-account-identity-and-region-topology.md)   | AWS account/identity/region topology | Accepted |
 | [0018](0018-gate-deploy-on-ci-via-workflow-run.md)         | Gate deploy on CI via workflow_run   | Accepted |
 | [0019](0019-parcel-watcher-native-binary-in-deploy.md)     | Parcel watcher binary for deploy     | Accepted |
+| [0020](0020-coordinator-dashboard-shell.md)                | Coordinator dashboard shell          | Accepted |

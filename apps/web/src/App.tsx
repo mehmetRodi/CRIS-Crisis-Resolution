@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import { ReportStatus, UserRole } from '@crisismap/shared';
+import { CoordinatorDashboard } from './surfaces/coordinator/CoordinatorDashboard';
 
 /**
  * Placeholder application shell.
@@ -6,17 +8,24 @@ import { ReportStatus, UserRole } from '@crisismap/shared';
  * This is intentionally a static landing surface for the scaffold. The four
  * real role surfaces below are stubs; each is built by its owning ticket:
  *   - Citizen submission form   → CRIS-6
- *   - Coordinator dashboard     → CRIS-12
+ *   - Coordinator dashboard     → CRIS-12 (shell landed; opens from here)
  *   - Live map                  → CRIS-13
  *   - Volunteer task board      → CRIS-4 epic (E4)
- * Routing/auth wiring is added with CRIS-7. See docs/architecture.md.
+ *
+ * Full client-side routing and auth/role-gating are added with CRIS-7. Until
+ * then, surfaces whose shell exists are reached through a minimal, router-free
+ * view switch (see ADR-0020) — the coordinator dashboard is the first.
  */
+
+type View = 'overview' | 'coordinator';
 
 interface Surface {
   title: string;
   role: string;
   ticket: string;
   description: string;
+  /** The view this surface opens, if its shell has landed. */
+  opens?: View;
 }
 
 const SURFACES: Surface[] = [
@@ -31,6 +40,7 @@ const SURFACES: Surface[] = [
     role: UserRole.COORDINATOR,
     ticket: 'CRIS-12',
     description: 'Real-time, de-duplicated, priority-ordered incident view.',
+    opens: 'coordinator',
   },
   {
     title: 'Live map',
@@ -49,6 +59,12 @@ const SURFACES: Surface[] = [
 const LIFECYCLE = Object.values(ReportStatus);
 
 function App() {
+  const [view, setView] = useState<View>('overview');
+
+  if (view === 'coordinator') {
+    return <CoordinatorDashboard onExit={() => setView('overview')} />;
+  }
+
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900">
       <div className="mx-auto max-w-4xl px-6 py-12">
@@ -83,21 +99,39 @@ function App() {
             Surfaces
           </h2>
           <ul className="grid gap-4 sm:grid-cols-2">
-            {SURFACES.map((surface) => (
-              <li
-                key={surface.title}
-                className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
-              >
-                <div className="flex items-center justify-between">
-                  <h3 className="font-semibold">{surface.title}</h3>
-                  <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
-                    {surface.ticket}
-                  </span>
-                </div>
-                <p className="mt-1 text-sm text-slate-600">{surface.description}</p>
-                <p className="mt-2 text-xs text-slate-400">Primary role: {surface.role}</p>
-              </li>
-            ))}
+            {SURFACES.map((surface) => {
+              const target = surface.opens;
+              const body = (
+                <>
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-semibold">{surface.title}</h3>
+                    <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+                      {surface.ticket}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-sm text-slate-600">{surface.description}</p>
+                  <p className="mt-2 text-xs text-slate-400">Primary role: {surface.role}</p>
+                </>
+              );
+              return (
+                <li key={surface.title}>
+                  {target ? (
+                    <button
+                      type="button"
+                      onClick={() => setView(target)}
+                      className="block w-full rounded-lg border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-slate-300 hover:shadow focus:outline-none focus:ring-2 focus:ring-slate-400"
+                    >
+                      {body}
+                      <p className="mt-2 text-xs font-medium text-slate-500">Open shell →</p>
+                    </button>
+                  ) : (
+                    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+                      {body}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
           </ul>
         </section>
       </div>
