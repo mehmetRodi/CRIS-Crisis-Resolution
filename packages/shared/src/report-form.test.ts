@@ -1,0 +1,97 @@
+import { describe, expect, it } from 'vitest';
+
+import { Category, Urgency } from './domain';
+import {
+  REPORT_TEXT_MAX_LENGTH,
+  REPORT_TEXT_MIN_LENGTH,
+  createEmptyReportDraft,
+  isReportDraftSubmittable,
+  toReportSubmission,
+  toSubmissionText,
+  validateReportDraft,
+  type ReportDraft,
+} from './report-form';
+
+function submittableDraft(overrides: Partial<ReportDraft> = {}): ReportDraft {
+  return {
+    ...createEmptyReportDraft(),
+    text: 'Collapsed wall, two people trapped near the market.',
+    category: Category.RESCUE,
+    urgency: Urgency.CRITICAL,
+    ...overrides,
+  };
+}
+
+describe('validateReportDraft', () => {
+  it('flags every required field on an empty draft', () => {
+    const errors = validateReportDraft(createEmptyReportDraft());
+    expect(Object.keys(errors).sort()).toEqual(['category', 'text', 'urgency']);
+  });
+
+  it('accepts a complete draft', () => {
+    expect(validateReportDraft(submittableDraft())).toEqual({});
+    expect(isReportDraftSubmittable(submittableDraft())).toBe(true);
+  });
+
+  it('rejects a description at or below the minimum length after trimming', () => {
+    const padded = `  ${'x'.repeat(REPORT_TEXT_MIN_LENGTH)}  `;
+    expect(validateReportDraft(submittableDraft({ text: padded }))).toHaveProperty('text');
+    expect(
+      validateReportDraft(submittableDraft({ text: 'x'.repeat(REPORT_TEXT_MIN_LENGTH + 1) })),
+    ).toEqual({});
+  });
+
+  it('rejects a description above the maximum length', () => {
+    const oversized = 'x'.repeat(REPORT_TEXT_MAX_LENGTH + 1);
+    expect(validateReportDraft(submittableDraft({ text: oversized }))).toHaveProperty('text');
+  });
+
+  it('treats subcategory and contact as optional', () => {
+    expect(validateReportDraft(submittableDraft({ subcategory: '', contact: '' }))).toEqual({});
+  });
+});
+
+describe('toReportSubmission', () => {
+  it('throws on a draft that is not submittable', () => {
+    expect(() => toReportSubmission(createEmptyReportDraft())).toThrow(/not submittable/);
+  });
+
+  it('trims text and normalizes empty optionals to null', () => {
+    const submission = toReportSubmission(
+      submittableDraft({ text: '  Bridge out on route 9, cars backed up.  ', subcategory: '  ' }),
+    );
+    expect(submission.text).toBe('Bridge out on route 9, cars backed up.');
+    expect(submission.subcategory).toBeNull();
+    expect(submission.contact).toBeNull();
+  });
+
+  it('strips contact data when the report is anonymous', () => {
+    const submission = toReportSubmission(
+      submittableDraft({ anonymous: true, contact: '+90 555 000 0000' }),
+    );
+    expect(submission.anonymous).toBe(true);
+    expect(submission.contact).toBeNull();
+  });
+
+  it('keeps trimmed contact data on a non-anonymous report', () => {
+    const submission = toReportSubmission(
+      submittableDraft({ anonymous: false, contact: ' reporter@example.org ' }),
+    );
+    expect(submission.contact).toBe('reporter@example.org');
+  });
+});
+
+describe('toSubmissionText', () => {
+  it('appends citizen selections as a delimited hint block', () => {
+    const text = toSubmissionText(toReportSubmission(submittableDraft()));
+    expect(text).toBe(
+      'Collapsed wall, two people trapped near the market.\n\n' +
+        '[Citizen selections — category: RESCUE; urgency: CRITICAL]',
+    );
+  });
+
+  it('includes the supply hint only when a subcategory was given', () => {
+    const text = toSubmissionText(toReportSubmission(submittableDraft({ subcategory: 'Water' })));
+    expect(text).toContain('supply: Water');
+  });
+});

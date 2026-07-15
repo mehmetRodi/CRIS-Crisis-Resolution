@@ -19,13 +19,14 @@ import { Category, PriorityBand, ReportStatus, UserRole } from '@crisismap/share
  *   - Recent activity (audit timeline)             → CRIS-28
  *   - Live-update connection (subscriptions)       → CRIS-28
  *
- * Auth/role-gating and real routing are intentionally out of scope here — they
- * arrive with CRIS-7. Until then the surface is reached via the router-free
- * switch in `App.tsx` (see ADR-0020).
+ * The surface mounts at the `/coordinator` route (see ADR-0022); the router
+ * itself arrived with ADR-0021. Auth/role-gating of that route is intentionally
+ * out of scope here — it arrives with CRIS-7.
  */
 
 interface CoordinatorDashboardProps {
-  /** Return to the scaffold overview. Interim affordance until CRIS-7 routing. */
+  /** Navigate back to the scaffold overview. Router-agnostic: the route wrapper
+   * wires this to the router (ADR-0022) so the component stays presentational. */
   onExit: () => void;
 }
 
@@ -48,6 +49,9 @@ const PRIORITY_TILES: readonly PriorityTile[] = [
 const CATEGORIES = Object.values(Category);
 const STATUSES = Object.values(ReportStatus);
 
+// Derives an `aria-labelledby` id from a region title. Assumes region titles are
+// unique within the dashboard (they are — see the fixed set below); two regions
+// sharing a title would produce duplicate element ids and invalid ARIA.
 function slugify(value: string): string {
   return value
     .toLowerCase()
@@ -80,9 +84,9 @@ function Region({
       className={`flex flex-col rounded-lg border border-slate-200 bg-white shadow-sm ${className ?? ''}`}
     >
       <header className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-        <h3 id={headingId} className="text-sm font-semibold text-slate-700">
+        <h2 id={headingId} className="text-sm font-semibold text-slate-700">
           {title}
-        </h3>
+        </h2>
         <span className="rounded bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">
           {ticket}
         </span>
