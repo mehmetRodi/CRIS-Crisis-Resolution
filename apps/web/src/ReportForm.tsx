@@ -1,11 +1,14 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { Category, Urgency } from '@crisismap/shared';
+import { useAuth } from './AuthContext';
 
 const CATEGORY_OPTIONS = Object.values(Category);
 const URGENCY_OPTIONS = Object.values(Urgency);
 
 export function ReportForm() {
+  const { user } = useAuth();
+
   const [text, setText] = useState('');
   const [category, setCategory] = useState('');
   const [subcategory, setSubcategory] = useState('');
@@ -27,6 +30,8 @@ export function ReportForm() {
     contact: anonymous ? null : contact,
     anonymous,
     photo,
+    userId: anonymous ? null : user?.username, 
+    userEmail: anonymous ? null : user?.email,
   };
 
   async function handleSubmit(e: FormEvent) {
