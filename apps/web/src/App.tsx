@@ -53,7 +53,7 @@ const SURFACES: Surface[] = [
 const LIFECYCLE = Object.values(ReportStatus);
 
 function App() {
-  const { user, signOut, isAuthenticated } = useAuth();
+  const { email, signOut, isAuthenticated } = useAuth();
   const navigate = useNavigate();
  
   const handleSignOut = async () => {
@@ -79,9 +79,9 @@ function App() {
       </p>
     </div>
     <div className="flex items-center gap-4">
-      {isAuthenticated && (
+      {isAuthenticated ? (
         <>
-          <span className="text-sm text-slate-600">👤 {user?.username}</span>
+          <span className="text-sm text-slate-600">👤 {email}</span>
           <button
             onClick={handleSignOut}
             className="text-sm text-red-600 hover:text-red-800"
@@ -89,6 +89,13 @@ function App() {
             Sign Out
           </button>
         </>
+      ) : (
+              <button
+                onClick={() => navigate('/login')}
+                className="text-sm font-medium text-blue-600 hover:text-blue-800"
+              >
+                Sign In
+              </button>
       )}
     </div>
   </header>

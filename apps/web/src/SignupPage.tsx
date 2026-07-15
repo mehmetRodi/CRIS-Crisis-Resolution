@@ -2,10 +2,13 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from './AuthContext';
 
+function isPasswordValid(pw: string): boolean {
+  return pw.length >= 8 && /[A-Z]/.test(pw) && /[a-z]/.test(pw) && /[0-9]/.test(pw);
+}
+
 export default function SignupPage() {
   const navigate = useNavigate();
   const { signUp } = useAuth();
-  const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -21,18 +24,20 @@ export default function SignupPage() {
       return;
     }
 
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters');
+   if (!isPasswordValid(password)) {
+      setError(
+        'Password must be at least 8 characters, with an uppercase letter, a lowercase letter, and a number.',
+      );
       return;
     }
 
     setLoading(true);
 
     try {
-      await signUp(username, password, email);
-      navigate('/confirm-signup', { state: { username } });
+      await signUp(email, password);
+      navigate('/confirm-signup', { state: { email } });
     } catch (err: any) {
-      setError(err.message || 'Something went wrong');
+      setError(err instanceof Error ? err.message : 'Something went wrong');
     } finally {
       setLoading(false);
     }
@@ -51,25 +56,15 @@ export default function SignupPage() {
             <div>
               <label className="block text-sm font-medium text-slate-700">Username</label>
               <input
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                required
-                className="mt-1 w-full rounded-lg border border-slate-300 px-4 py-2.5 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Choose a username"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700">Email</label>
-              <input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 className="mt-1 w-full rounded-lg border border-slate-300 px-4 py-2.5 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Enter your email"
+                placeholder="Choose your email as username"
               />
             </div>
+            
             <div>
               <label className="block text-sm font-medium text-slate-700">Password</label>
               <input
@@ -80,6 +75,9 @@ export default function SignupPage() {
                 className="mt-1 w-full rounded-lg border border-slate-300 px-4 py-2.5 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="Minimum 8 characters"
               />
+              <p className="mt-1 text-xs text-slate-500">
+                At least 8 characters, with an uppercase letter, a lowercase letter, and a number.
+              </p>
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700">Confirm Password</label>

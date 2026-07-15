@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import { 
   getCurrentUser, 
+  fetchUserAttributes,
   signIn, 
   signUp, 
   signOut, 
@@ -11,12 +12,13 @@ import type { AuthUser } from 'aws-amplify/auth';
 
 interface AuthContextType {
   user: AuthUser | null;
+  email: string | null;
   loading: boolean;
   signIn: (username: string, password: string) => Promise<void>;
-  signUp: (username: string, password: string, email: string) => Promise<void>;
+  signUp: (username: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
-  confirmSignUp: (username: string, code: string) => Promise<void>;
-  resendSignUpCode: (username: string) => Promise<void>;
+  confirmSignUp: (email: string, code: string) => Promise<void>;
+  resendSignUpCode: (email: string) => Promise<void>;
   isAuthenticated: boolean;
 }
 
@@ -24,6 +26,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [email, setEmail] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -34,6 +37,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const currentUser = await getCurrentUser();
       setUser(currentUser);
+      const attributes = await fetchUserAttributes();
+      setEmail(attributes.email ?? null);
     } catch {
       setUser(null);
     } finally {
@@ -41,37 +46,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const signInHandler = async (username: string, password: string) => {
-    const result = await signIn({ username, password });
+  const signInHandler = async (userEmail: string, password: string) => {
+    const result = await signIn({ username: userEmail, password  });
     if (result.isSignedIn) {
       await checkUser();
     }
   };
 
-  const signUpHandler = async (username: string, password: string, email: string) => {
+  const signUpHandler = async (userEmail: string, password: string) => {
     await signUp({
-      username,
+      username: userEmail,
       password,
-      options: { userAttributes: { email } },
+      options: { userAttributes: { email: userEmail } },
     });
   };
 
   const signOutHandler = async () => {
     await signOut();
     setUser(null);
+    setEmail(null);
+
   };
 
-  const confirmSignUpHandler = async (username: string, code: string) => {
-    await confirmSignUp({ username, confirmationCode: code });
+  const confirmSignUpHandler = async (userEmail: string, code: string) => {
+    await confirmSignUp({ username: userEmail, confirmationCode: code });
     await checkUser();
   };
 
-  const resendCodeHandler = async (username: string) => {
-    await resendSignUpCode({ username });
+  const resendCodeHandler = async (userEmail: string) => {
+    await resendSignUpCode({ username: userEmail });
   };
 
   const value = {
     user,
+    email,
     loading,
     signIn: signInHandler,
     signUp: signUpHandler,

@@ -10,13 +10,13 @@ export default function ConfirmSignupPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
-  const username = location.state?.username || '';
+  const email = location.state?.email || '';
 
   useEffect(() => {
-    if (!username) {
+    if (!email) {
       navigate('/signup');
     }
-  }, [username, navigate]);
+  }, [email, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -24,10 +24,10 @@ export default function ConfirmSignupPage() {
     setLoading(true);
 
     try {
-      await confirmSignUp(username, code);
+      await confirmSignUp(email, code);
       navigate('/login');
     } catch (err: any) {
-      setError(err.message || 'Invalid verification code');
+      setError(err instanceof Error ? err.message : 'Invalid verification code');
     } finally {
       setLoading(false);
     }
@@ -36,9 +36,9 @@ export default function ConfirmSignupPage() {
   const handleResend = async () => {
     setResending(true);
     try {
-      await resendSignUpCode(username);
+      await resendSignUpCode(email);
     } catch (err: any) {
-      setError(err.message || 'Failed to resend code');
+      setError(err instanceof Error ? err.message : 'Failed to resend code');
     } finally {
       setResending(false);
     }
