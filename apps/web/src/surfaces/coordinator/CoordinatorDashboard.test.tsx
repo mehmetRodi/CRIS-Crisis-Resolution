@@ -1,7 +1,28 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { PriorityBand } from '@crisismap/shared';
+import { Category, PriorityBand, type PublicReport } from '@crisismap/shared';
 import { CoordinatorDashboard } from './CoordinatorDashboard';
+import type { IncidentFeedState } from './incidents';
+
+function incident(overrides: Partial<PublicReport> = {}): PublicReport {
+  return {
+    reportId: 'report-0001',
+    status: 'AI_CLASSIFIED',
+    category: Category.MEDICAL,
+    urgency: 'HIGH',
+    priorityScore: 7,
+    priorityBand: PriorityBand.P1,
+    summary: null,
+    lat: null,
+    lng: null,
+    geohash: null,
+    geohashPrefix: null,
+    regionId: 'region-a',
+    createdAt: '2026-07-15T10:00:00Z',
+    updatedAt: null,
+    ...overrides,
+  };
+}
 
 describe('CoordinatorDashboard shell', () => {
   it('renders the dashboard heading and coordinator role', () => {

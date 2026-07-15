@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import App from './App';
 import { ReportPage } from './screens/ReportPage';
 import { CoordinatorDashboard } from './surfaces/coordinator/CoordinatorDashboard';
+import { useLiveReports } from './surfaces/coordinator/useLiveReports';
 
 /**
  * Web routes. The web SPA is chiefly the coordinator/responder/volunteer
@@ -12,10 +13,17 @@ import { CoordinatorDashboard } from './surfaces/coordinator/CoordinatorDashboar
  * is added by CRIS-13. Route-level auth/role-gating arrives with CRIS-7.
  */
 
-/** Wires the dashboard's router-agnostic `onExit` to a navigation home. */
+/**
+ * Wires the presentational dashboard to its data source and router. The live
+ * incident feed (`useLiveReports`) degrades gracefully to an `unauthenticated`
+ * state until sign-in lands (CRIS-7); `onExit` navigates home (ADR-0022).
+ */
 function CoordinatorRoute() {
   const navigate = useNavigate();
-  return <CoordinatorDashboard onExit={() => navigate('/')} />;
+  const { state, refresh } = useLiveReports();
+  return (
+    <CoordinatorDashboard onExit={() => navigate('/')} feed={state} onRefresh={refresh} />
+  );
 }
 
 export function Router() {
