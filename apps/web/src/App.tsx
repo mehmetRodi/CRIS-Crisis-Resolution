@@ -5,9 +5,10 @@ import { useNavigate } from 'react-router-dom';
  * Placeholder application shell.
  *
  * This is intentionally a static landing surface for the scaffold. The web SPA
- * serves coordinators/responders/volunteers; citizen submission is the React
- * Native mobile app (`apps/mobile`, CRIS-6 — see ADR 0020). Remaining surfaces
- * are stubs, each built by its owning ticket:
+ * serves coordinators/responders/volunteers; the mobile app (`apps/mobile`,
+ * CRIS-6 — see ADR 0020) is the primary citizen channel, with `/report` as a
+ * web emergency fallback (ADR 0021). Remaining surfaces are stubs, each built
+ * by its owning ticket:
  *   - Coordinator dashboard     → CRIS-12
  *   - Live map                  → CRIS-13
  *   - Volunteer task board      → CRIS-4 epic (E4)
@@ -28,8 +29,9 @@ const SURFACES: Surface[] = [
     role: UserRole.CITIZEN,
     ticket: 'CRIS-6',
     description:
-      'Fast free-text emergency report with optional location, media, and anonymity. ' +
-      'Lives in the React Native mobile app (apps/mobile), not this web SPA.',
+      'Fast free-text emergency report with optional media and anonymity. Primary channel ' +
+      'is the mobile app; this web form is the emergency fallback (ADR-0021).',
+    path: '/report',
   },
   {
     title: 'Coordinator dashboard',
