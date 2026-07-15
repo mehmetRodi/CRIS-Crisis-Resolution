@@ -78,7 +78,8 @@ describe('CoordinatorDashboard live feed', () => {
   it('shows a message when the read fails', () => {
     const feed: IncidentFeedState = { status: 'error', message: 'Network down' };
     render(<CoordinatorDashboard onExit={() => {}} feed={feed} />);
-    expect(screen.getByText(/network down/i)).toBeInTheDocument();
+    // The failure surfaces in every data-driven region (queue + distribution).
+    expect(screen.getAllByText(/network down/i).length).toBeGreaterThan(0);
   });
 
   it('tallies live incidents into the priority band tiles', () => {
@@ -91,8 +92,10 @@ describe('CoordinatorDashboard live feed', () => {
       ],
     };
     render(<CoordinatorDashboard onExit={() => {}} feed={feed} />);
-    // P0 tile shows a count of 2.
-    const p0Tile = screen.getByText('P0').closest('div')?.parentElement as HTMLElement;
+    // P0 tile shows a count of 2 (scoped to the metrics strip — P0 also appears
+    // as a band chip in the queue rows).
+    const metrics = screen.getByRole('region', { name: /incident metrics/i });
+    const p0Tile = within(metrics).getByText('P0').closest('div')?.parentElement as HTMLElement;
     expect(within(p0Tile).getByText('2')).toBeInTheDocument();
     expect(screen.getByText(/3 incidents loaded/i)).toBeInTheDocument();
   });
@@ -113,7 +116,7 @@ describe('CoordinatorDashboard live feed', () => {
   it('shows an empty state when there are no incidents', () => {
     const feed: IncidentFeedState = { status: 'ready', incidents: [] };
     render(<CoordinatorDashboard onExit={() => {}} feed={feed} />);
-    expect(screen.getByText(/no incidents yet/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/no incidents yet/i).length).toBeGreaterThan(0);
   });
 
   it('invokes onRefresh when the refresh button is pressed', () => {
