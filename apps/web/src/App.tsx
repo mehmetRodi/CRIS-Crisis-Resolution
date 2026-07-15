@@ -9,10 +9,12 @@ import { useNavigate } from 'react-router-dom';
  * CRIS-6 — see ADR 0020) is the primary citizen channel, with `/report` as a
  * web emergency fallback (ADR 0021). Remaining surfaces are stubs, each built
  * by its owning ticket:
- *   - Coordinator dashboard     → CRIS-12
+ *   - Coordinator dashboard     → CRIS-12 (shell landed at /coordinator; ADR-0022)
  *   - Live map                  → CRIS-13
  *   - Volunteer task board      → CRIS-4 epic (E4)
- * Routing/auth wiring is added with CRIS-7. See docs/architecture.md.
+ *
+ * Cards whose shell exists navigate via the router (ADR-0021). Auth/role-gating
+ * of these routes arrives with CRIS-7. See docs/architecture.md.
  */
 
 interface Surface {
@@ -20,6 +22,7 @@ interface Surface {
   role: string;
   ticket: string;
   description: string;
+  /** The route this surface opens, if its shell has landed. */
   path?: string;
 }
 
@@ -38,6 +41,7 @@ const SURFACES: Surface[] = [
     role: UserRole.COORDINATOR,
     ticket: 'CRIS-12',
     description: 'Real-time, de-duplicated, priority-ordered incident view.',
+    path: '/coordinator',
   },
   {
     title: 'Live map',
@@ -103,7 +107,7 @@ function App() {
                 key={surface.title}
                 onClick={() => handleCardClick(surface.path)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
+                  if (surface.path && (e.key === 'Enter' || e.key === ' ')) {
                     e.preventDefault();
                     handleCardClick(surface.path);
                   }
@@ -112,7 +116,7 @@ function App() {
                 tabIndex={surface.path ? 0 : undefined}
                 className={`rounded-lg border border-slate-200 bg-white p-4 shadow-sm ${
                   surface.path
-                    ? 'cursor-pointer hover:border-blue-400 hover:shadow-md transition-all  focus:outline-none focus:ring-2 focus:ring-blue-500'
+                    ? 'cursor-pointer transition-all hover:border-blue-400 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500'
                     : ''
                 }`}
               >
@@ -124,6 +128,9 @@ function App() {
                 </div>
                 <p className="mt-1 text-sm text-slate-600">{surface.description}</p>
                 <p className="mt-2 text-xs text-slate-400">Primary role: {surface.role}</p>
+                {surface.path ? (
+                  <p className="mt-2 text-xs font-medium text-slate-500">Open shell →</p>
+                ) : null}
               </li>
             ))}
           </ul>
