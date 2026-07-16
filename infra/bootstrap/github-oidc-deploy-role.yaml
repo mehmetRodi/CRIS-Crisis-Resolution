@@ -135,12 +135,32 @@ Resources:
                 Action: ssm:GetParameter
                 Resource:
                   - !Sub 'arn:aws:ssm:*:${AWS::AccountId}:parameter/cdk-bootstrap/${CdkQualifier}/version'
+              # Read-only stack inspection ampx runs directly with THIS role
+              # (not via the assumed CDK role): Describe* to poll deploy
+              # progress, and GetTemplateSummary to read the deployed stack when
+              # generating amplify_outputs.json at the end of pipeline-deploy.
+              # All read-only — no provisioning power, consistent with the
+              # assume-only design above.
               - Sid: DescribeDeploymentStacks
                 Effect: Allow
                 Action:
                   - cloudformation:DescribeStacks
                   - cloudformation:DescribeStackEvents
+                  - cloudformation:GetTemplateSummary
                 Resource: '*'
+              # After CDK provisions the data stack, ampx reads the generated
+              # GraphQL schema (model-schema.graphql) it stages in the Amplify
+              # codegen S3 bucket, to finish emitting amplify_outputs.json. This
+              # is a direct read with THIS role (not the assumed CDK role) and is
+              # scoped to Amplify-managed buckets only — read-only, no writes.
+              - Sid: ReadAmplifyCodegenArtifacts
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub 'arn:aws:s3:::amplify-*'
+                  - !Sub 'arn:aws:s3:::amplify-*/*'
 
 Outputs:
   DeployRoleArn:

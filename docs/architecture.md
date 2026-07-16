@@ -11,9 +11,9 @@ API backed by DynamoDB. Expensive AI work is pushed onto an asynchronous queue s
 path stays fast and resilient.
 
 ```
-        ┌──────────────────────────┐
-        │  React / Amplify client  │  Citizen · Volunteer · Responder · Coordinator
-        └────────────┬─────────────┘
+        ┌──────────────────────────────────────────────┐
+        │ React Native app (Citizen) · React SPA (Web) │  Volunteer · Responder · Coordinator
+        └────────────────────┬─────────────────────────┘
                      │ HTTPS / GraphQL (+ subscriptions)
                      ▼
         ┌──────────────────────────┐        ┌───────────────┐
@@ -80,7 +80,8 @@ NEW → PROCESSING → AI_CLASSIFIED → VERIFIED → IN_PROGRESS → RESOLVED
 
 | Target component                     | Scaffold status                                                                                                                                                                                                            |
 | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| React SPA client                     | `apps/web` — placeholder shell, real surfaces per CRIS-6/12/13                                                                                                                                                             |
+| React Native citizen app             | `apps/mobile` — Expo app with the citizen report form (CRIS-6 ✓ UI, ADR-0020); submit wiring per CRIS-9, GPS/media per CRIS-16/17                                                                                          |
+| React SPA client (web)               | `apps/web` — coordinator/responder/volunteer shell, real surfaces per CRIS-12/13 (ADR-0020)                                                                                                                                |
 | Cognito auth                         | `apps/web/amplify/auth` — stub, 5 groups (CRIS-7 for anonymous/roles)                                                                                                                                                      |
 | AppSync + DynamoDB                   | `apps/web/amplify/data` — MVP model: 11 entities, 6 GSIs (CRIS-8)                                                                                                                                                          |
 | Write path (`submitReport`)          | `amplify/functions/submit-report` — durable NEW + idempotency (CRIS-9)                                                                                                                                                     |
@@ -90,7 +91,7 @@ NEW → PROCESSING → AI_CLASSIFIED → VERIFIED → IN_PROGRESS → RESOLVED
 | Streams→SQS→Lambda→Bedrock           | `amplify/functions/classify-report` — Streams→Pipe→SQS(+DLQ)→Lambda + real Bedrock classification & scoring (CRIS-10 ✓, ADR-0013). Seams: `publishReportUpdate` fan-out (CRIS-19), geocoding (CRIS-13), dedupe, SNS alerts |
 | S3 media                             | `apps/web/amplify/storage` — stub bucket                                                                                                                                                                                   |
 | MapLibre + Amazon Location           | not built — CRIS-13                                                                                                                                                                                                        |
-| Shared domain vocabulary             | `packages/shared` — statuses, roles, bands, categories + verification/assignment/alert/audit enums (CRIS-8)                                                                                                                |
+| Shared domain vocabulary             | `packages/shared` — statuses, roles, bands, categories + verification/assignment/alert/audit enums (CRIS-8); report-form draft/validation core shared by clients (CRIS-6)                                                  |
 | CI                                   | `.github/workflows/ci.yml` — format/lint/typecheck/build/test; `deploy.yml` = `ampx pipeline-deploy` via OIDC, dormant until AWS wired (CRIS-14 ✓/CRIS-15, ADR-0016; setup in `docs/runbooks/deploy.md`)                   |
 | Observability (CloudWatch/X-Ray)     | wired (CRIS-15 ✓, ADR-0015): X-Ray active on AppSync + all Lambdas; `amplify/observability.ts` — CloudWatch alarms (DLQ/queue-age/errors/throttles) + SLA dashboard + ops SNS topic; structured JSON logs in handlers      |
 

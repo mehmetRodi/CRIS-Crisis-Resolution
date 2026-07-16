@@ -125,7 +125,11 @@ Create an IAM role assumed **only** by this repo's `main` branch via OIDC. Trust
 `sts:AssumeRole`s the CDK bootstrap roles (`cdk-<qualifier>-{deploy,file-publishing,image-publishing,lookup}-role-*`),
 which hold the real permissions. This is the least-privilege CDK pattern and is exactly what
 [`infra/bootstrap/github-oidc-deploy-role.yaml`](../../infra/bootstrap/github-oidc-deploy-role.yaml)
-provisions (plus reading the bootstrap-version SSM parameter and `cloudformation:Describe*`). The
+provisions (plus reading the bootstrap-version SSM parameter and a small set of read-only
+actions `ampx` itself calls directly — with the deploy role, not the assumed CDK role — to emit
+`amplify_outputs.json` after provisioning: `cloudformation:Describe*` / `GetTemplateSummary` to
+read the deployed stack, and `s3:GetObject`/`ListBucket` on `amplify-*` buckets to read the
+generated `model-schema.graphql` codegen artifact). The
 _runtime_ Bedrock grant (inference profile + EU foundation-model ARNs) lives on the classifier
 Lambda's role, created during deploy (see `apps/web/amplify/backend.ts`), not on the deploy role.
 
