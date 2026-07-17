@@ -1,12 +1,13 @@
-import { createContext, useContext, useState, useEffect } from 'react';
-import { 
-  getCurrentUser, 
+import { createContext, useContext, useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
+import {
+  confirmSignUp,
   fetchUserAttributes,
-  signIn, 
-  signUp, 
-  signOut, 
-  confirmSignUp, 
-  resendSignUpCode 
+  getCurrentUser,
+  resendSignUpCode,
+  signIn,
+  signOut,
+  signUp,
 } from 'aws-amplify/auth';
 import type { AuthUser } from 'aws-amplify/auth';
 
@@ -24,7 +25,13 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+/**
+ * Mobile twin of the web `AuthContext` (apps/web/src/AuthContext.tsx). Same
+ * Cognito User Pool API surface and optional/non-blocking auth model
+ * (ADR-0022) — only the platform wiring differs, same as the ReportForm
+ * split between web and mobile (ADR-0021).
+ */
+export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [email, setEmail] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -48,7 +55,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signInHandler = async (userEmail: string, password: string) => {
-    const result = await signIn({ username: userEmail, password  });
+    const result = await signIn({ username: userEmail, password });
     if (result.isSignedIn) {
       await checkUser();
     }
@@ -66,7 +73,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await signOut();
     setUser(null);
     setEmail(null);
-
   };
 
   const confirmSignUpHandler = async (userEmail: string, code: string) => {
@@ -78,7 +84,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await resendSignUpCode({ username: userEmail });
   };
 
-  const value = {
+  const value: AuthContextType = {
     user,
     email,
     loading,

@@ -36,3 +36,5 @@ behind the code — essential when refactoring or extending the system.
 | [0018](0018-gate-deploy-on-ci-via-workflow-run.md)            | Gate deploy on CI via workflow_run                   | Accepted                         |
 | [0019](0019-parcel-watcher-native-binary-in-deploy.md)        | Parcel watcher binary for deploy                     | Accepted                         |
 | [0020](0020-react-native-mobile-app-for-citizen-reporting.md) | React Native (Expo) mobile app for citizen reporting | Accepted                         |
+| [0021](0021-web-emergency-fallback-report-form.md)            | Web emergency-fallback citizen report form           | Accepted                         |
+| [0022](0022-optional-auth-and-anonymous-guest-access.md)      | Optional Cognito sign-in + anonymous guest access    | Accepted                         |

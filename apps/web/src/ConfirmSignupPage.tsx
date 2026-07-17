@@ -26,7 +26,7 @@ export default function ConfirmSignupPage() {
     try {
       await confirmSignUp(email, code);
       navigate('/login');
-    } catch (err: any) {
+    } catch (err) {
       setError(err instanceof Error ? err.message : 'Invalid verification code');
     } finally {
       setLoading(false);
@@ -37,7 +37,7 @@ export default function ConfirmSignupPage() {
     setResending(true);
     try {
       await resendSignUpCode(email);
-    } catch (err: any) {
+    } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to resend code');
     } finally {
       setResending(false);

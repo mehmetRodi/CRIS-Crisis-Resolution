@@ -13,7 +13,8 @@ import { useAuth } from './AuthContext';
  *   - Coordinator dashboard     → CRIS-12
  *   - Live map                  → CRIS-13
  *   - Volunteer task board      → CRIS-4 epic (E4)
- * Routing/auth wiring is added with CRIS-7. See docs/architecture.md.
+ * Auth is optional (CRIS-7, ADR-0022): sign-in is available but nothing here is
+ * gated behind it. See docs/architecture.md.
  */
 
 interface Surface {

@@ -387,6 +387,12 @@ const schema = a.schema({
    * returning immediately (§3.2). Available to authenticated users and to
    * guests for anonymous submissions (§2.1). Identity is resolved server-side
    * from the request — reporterId is never a client argument.
+   *
+   * The web/mobile clients always call this with `authMode: 'identityPool'`
+   * (ADR-0021) — guests AND signed-in citizens alike — so a signed-in caller
+   * presents an identityPool-*authenticated* credential, not a userPool JWT.
+   * `allow.authenticated()` alone only matches the userPool JWT case, so it's
+   * listed here alongside the identityPool variant (ADR-0022).
    */
   submitReport: a
     .mutation()
@@ -402,7 +408,11 @@ const schema = a.schema({
     })
     .returns(a.ref('Report'))
     .handler(a.handler.function(submitReportFn))
-    .authorization((allow) => [allow.authenticated(), allow.guest()]),
+    .authorization((allow) => [
+      allow.authenticated(),
+      allow.authenticated('identityPool'),
+      allow.guest(),
+    ]),
 
   /**
    * CRIS-18 — the guarded state-machine engine. Applies a single report

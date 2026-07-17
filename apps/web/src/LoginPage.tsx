@@ -17,8 +17,8 @@ export default function LoginPage() {
 
     try {
       await signIn(email, password);
-      navigate('/citizen');
-    } catch (err) {
+      navigate('/');
+    } catch {
       setError('Invalid email or password');
     } finally {
       setLoading(false);

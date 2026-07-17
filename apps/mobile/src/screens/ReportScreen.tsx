@@ -1,15 +1,22 @@
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { ReportForm } from '../components/ReportForm';
+import { useAuth } from '../lib/AuthContext';
 import { colors, radii } from '../theme';
+import type { RootStackParamList } from '../navigation/RootNavigator';
 
 /**
- * Citizen emergency-report screen (CRIS-6). The mobile app's single surface
- * today; navigation (auth, report history) arrives with CRIS-7.
+ * Citizen emergency-report screen (CRIS-6). The mobile app's home route.
+ * Auth is optional (CRIS-7, ADR-0022): a Sign In link is available but
+ * nothing here is gated behind it — citizens submit as guests by default.
  */
 export function ReportScreen() {
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { email, isAuthenticated, signOut } = useAuth();
 
   return (
     <KeyboardAvoidingView
@@ -26,11 +33,25 @@ export function ReportScreen() {
       >
         {/* Header */}
         <View style={styles.header}>
-          <View style={styles.kickerRow}>
-            <View style={styles.kickerBar} />
-            <Text style={styles.kicker}>Emergency Reporting</Text>
+          <View style={styles.headerTop}>
+            <View style={styles.kickerRow}>
+              <View style={styles.kickerBar} />
+              <Text style={styles.kicker}>Emergency Reporting</Text>
+            </View>
+            {isAuthenticated ? (
+              <Pressable onPress={signOut} hitSlop={8}>
+                <Text style={styles.authLink}>Sign Out</Text>
+              </Pressable>
+            ) : (
+              <Pressable onPress={() => navigation.navigate('Login')} hitSlop={8}>
+                <Text style={styles.authLink}>Sign In</Text>
+              </Pressable>
+            )}
           </View>
           <Text style={styles.title}>CrisisMap AI</Text>
+          {isAuthenticated && email ? (
+            <Text style={styles.signedInAs}>Signed in as {email}</Text>
+          ) : null}
           <Text style={styles.subtitle}>
             Submit an emergency report to help responders act quickly
           </Text>
@@ -69,6 +90,20 @@ const styles = StyleSheet.create({
   },
   header: {
     gap: 6,
+  },
+  headerTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  authLink: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.primary,
+  },
+  signedInAs: {
+    fontSize: 13,
+    color: colors.textSecondary,
   },
   kickerRow: {
     flexDirection: 'row',

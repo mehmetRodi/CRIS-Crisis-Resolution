@@ -1,5 +1,6 @@
 import { Amplify } from 'aws-amplify';
 import { generateClient } from 'aws-amplify/data';
+import type { Schema } from '../../amplify/data/resource';
 import { 
   getCurrentUser, 
   signIn, 
@@ -15,7 +16,7 @@ import outputs from '../../amplify_outputs.json';
 Amplify.configure(outputs);
 
 // Data client
-export const client = generateClient();
+export const client = generateClient<Schema>();
 
 // Re-export auth functions directly
 export { 

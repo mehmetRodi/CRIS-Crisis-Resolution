@@ -36,7 +36,7 @@ export default function SignupPage() {
     try {
       await signUp(email, password);
       navigate('/confirm-signup', { state: { email } });
-    } catch (err: any) {
+    } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
     } finally {
       setLoading(false);
