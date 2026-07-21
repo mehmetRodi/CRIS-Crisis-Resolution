@@ -1,16 +1,38 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { BrowserRouter, MemoryRouter, Route, Routes } from 'react-router-dom';
 import App from './App';
+import { AuthProvider } from './AuthContext';
 import { CoordinatorDashboard } from './surfaces/coordinator/CoordinatorDashboard';
 
-describe('App shell', () => {
-  it('renders the product name', () => {
-    render(
-      <BrowserRouter>
+// No signed-in user in these tests; getCurrentUser rejects like it does for a
+// guest, so AuthProvider settles with isAuthenticated: false.
+vi.mock('aws-amplify/auth', () => ({
+  getCurrentUser: () => Promise.reject(new Error('not signed in')),
+  fetchUserAttributes: () => Promise.resolve({}),
+  signIn: vi.fn(),
+  signUp: vi.fn(),
+  signOut: vi.fn(),
+  confirmSignUp: vi.fn(),
+  resendSignUpCode: vi.fn(),
+}));
+
+function renderApp() {
+  render(
+    <BrowserRouter>
+      <AuthProvider>
         <App />
-      </BrowserRouter>,
-    );
+      </AuthProvider>
+    </BrowserRouter>,
+  );
+  // Flush AuthProvider's checkUser() rejection before asserting, so React
+  // doesn't warn about a post-test state update outside act().
+  return screen.findByRole('button', { name: /sign in/i });
+}
+
+describe('App shell', () => {
+  it('renders the product name', async () => {
+    await renderApp();
     expect(
       screen.getByRole('heading', {
         level: 1,
@@ -19,29 +41,31 @@ describe('App shell', () => {
     ).toBeInTheDocument();
   });
 
-  it('lists the placeholder surfaces', () => {
-    render(
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>,
-    );
+  it('lists the placeholder surfaces', async () => {
+    await renderApp();
     expect(screen.getByText('Citizen submission')).toBeInTheDocument();
     expect(screen.getByText('Coordinator dashboard')).toBeInTheDocument();
   });
 
-  it('navigates to the coordinator dashboard shell when its card is activated', () => {
+  it('navigates to the coordinator dashboard shell when its card is activated', async () => {
+    // App reads useAuth(), so it must render inside an AuthProvider; the mock
+    // above makes it settle unauthenticated.
     render(
       <MemoryRouter initialEntries={['/']}>
-        <Routes>
-          <Route path="/" element={<App />} />
-          <Route path="/coordinator" element={<CoordinatorDashboard onExit={() => {}} />} />
-        </Routes>
+        <AuthProvider>
+          <Routes>
+            <Route path="/" element={<App />} />
+            <Route path="/coordinator" element={<CoordinatorDashboard onExit={() => {}} />} />
+          </Routes>
+        </AuthProvider>
       </MemoryRouter>,
     );
 
     fireEvent.click(screen.getByRole('button', { name: /coordinator dashboard/i }));
+    // findBy* awaits pending state, flushing AuthProvider's checkUser() settle
+    // so React doesn't warn about an update outside act().
     expect(
-      screen.getByRole('heading', { level: 1, name: /coordinator dashboard/i }),
+      await screen.findByRole('heading', { level: 1, name: /coordinator dashboard/i }),
     ).toBeInTheDocument();
   });
 });

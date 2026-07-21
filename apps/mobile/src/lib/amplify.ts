@@ -1,4 +1,6 @@
-// Polyfill first: Amplify's credential/uuid machinery needs crypto.getRandomValues.
+// Polyfills first, before any Amplify import: URL/base64/crypto shims plus
+// crypto.getRandomValues that Amplify's credential/uuid machinery needs.
+import '@aws-amplify/react-native';
 import 'react-native-get-random-values';
 
 import { Amplify } from 'aws-amplify';
@@ -24,7 +26,9 @@ Amplify.configure(outputs);
 
 /**
  * The single typed GraphQL client for the app. `identityPool` auth is the
- * default: citizens are guests (unauthenticated Cognito identities) until
- * sign-in arrives with CRIS-7, and `submitReport` allows `allow.guest()`.
+ * default for every call (CRIS-7, ADR-0024) — guests AND signed-in citizens
+ * submit the same way; `submitReport` allows both `allow.guest()` and
+ * `allow.authenticated('identityPool')`. Sign-in (`AuthContext`,
+ * `screens/auth/*`) is a separate, optional identity layer on top.
  */
 export const client = generateClient<Schema>({ authMode: 'identityPool' });

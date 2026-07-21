@@ -1,5 +1,6 @@
 import { ReportStatus, UserRole } from '@crisismap/shared';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from './AuthContext';
 
 /**
  * Placeholder application shell.
@@ -13,8 +14,9 @@ import { useNavigate } from 'react-router-dom';
  *   - Live map                  → CRIS-13
  *   - Volunteer task board      → CRIS-4 epic (E4)
  *
- * Cards whose shell exists navigate via the router (ADR-0021). Auth/role-gating
- * of these routes arrives with CRIS-7. See docs/architecture.md.
+ * Cards whose shell exists navigate via the router (ADR-0021). Auth is optional
+ * (CRIS-7, ADR-0024): sign-in is available but nothing here is gated behind it.
+ * See docs/architecture.md.
  */
 
 interface Surface {
@@ -60,7 +62,13 @@ const SURFACES: Surface[] = [
 const LIFECYCLE = Object.values(ReportStatus);
 
 function App() {
+  const { email, signOut, isAuthenticated } = useAuth();
   const navigate = useNavigate();
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate('/login');
+  };
 
   const handleCardClick = (path?: string) => {
     if (path) {
@@ -71,14 +79,30 @@ function App() {
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900">
       <div className="mx-auto max-w-4xl px-6 py-12">
-        <header className="mb-10">
-          <h1 className="text-3xl font-bold tracking-tight">CrisisMap AI</h1>
-          <p className="mt-2 text-slate-600">
-            Real-time serverless disaster intelligence and emergency coordination platform.
-          </p>
-          <span className="mt-3 inline-block rounded bg-amber-100 px-2 py-1 text-xs font-medium text-amber-800">
-            Scaffold — surfaces below are placeholders
-          </span>
+        <header className="mb-10 flex justify-between items-center">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">CrisisMap AI</h1>
+            <p className="mt-2 text-slate-600">
+              Real-time serverless disaster intelligence and emergency coordination platform.
+            </p>
+          </div>
+          <div className="flex items-center gap-4">
+            {isAuthenticated ? (
+              <>
+                <span className="text-sm text-slate-600">👤 {email}</span>
+                <button onClick={handleSignOut} className="text-sm text-red-600 hover:text-red-800">
+                  Sign Out
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={() => navigate('/login')}
+                className="text-sm font-medium text-blue-600 hover:text-blue-800"
+              >
+                Sign In
+              </button>
+            )}
+          </div>
         </header>
 
         <section className="mb-10">

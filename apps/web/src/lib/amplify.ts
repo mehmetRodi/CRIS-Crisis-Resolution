@@ -16,13 +16,10 @@ import outputs from '../../amplify_outputs.json';
  * (CRIS-6 report form, CRIS-12 dashboard, …) imports it and calls the schema's
  * models / custom operations with full type-safety, e.g.
  * `client.mutations.submitReport({ text, clientRequestId })`.
+ *
+ * Auth (sign-in/up/confirm) lives in `AuthContext.tsx`, which calls
+ * `aws-amplify/auth` directly (CRIS-7, ADR-0024) — it is not re-exported here.
  */
 Amplify.configure(outputs);
 
 export const client = generateClient<Schema>();
-
-// export const client = {
-//   models: {},
-//   queries: {},
-//   mutations: {},
-// };

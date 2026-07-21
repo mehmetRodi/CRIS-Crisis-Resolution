@@ -5,6 +5,7 @@ import { PolicyStatement, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { SqsEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
 import { CfnPipe } from 'aws-cdk-lib/aws-pipes';
 import { Queue } from 'aws-cdk-lib/aws-sqs';
+import { PASSWORD_MIN_LENGTH } from '@crisismap/shared';
 import { auth } from './auth/resource';
 import { data } from './data/resource';
 import { storage } from './storage/resource';
@@ -45,6 +46,25 @@ const backend = defineBackend({
   publishReportUpdate,
   classifyReport,
 });
+
+/* -------------------------------------------------------------------------- */
+/* auth (CRIS-7, ADR-0024) — pin the User Pool password policy                */
+/* -------------------------------------------------------------------------- */
+
+// `defineAuth` has no password-policy option, so set it via the CDK escape
+// hatch (ADR-0003). Keep it exactly in step with the client-side rule in
+// `@crisismap/shared` (`isPasswordValid` / `PASSWORD_MIN_LENGTH`) so a password
+// the sign-up form accepts is never rejected only by Cognito. Symbols are not
+// required — matching the shared rule (upper + lower + number, min length).
+backend.auth.resources.cfnResources.cfnUserPool.policies = {
+  passwordPolicy: {
+    minimumLength: PASSWORD_MIN_LENGTH,
+    requireUppercase: true,
+    requireLowercase: true,
+    requireNumbers: true,
+    requireSymbols: false,
+  },
+};
 
 const tables = backend.data.resources.tables;
 

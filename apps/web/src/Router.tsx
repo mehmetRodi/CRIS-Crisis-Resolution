@@ -1,6 +1,10 @@
 import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
+import { AuthProvider } from './AuthContext';
 import App from './App';
 import { ReportPage } from './screens/ReportPage';
+import LoginPage from './LoginPage';
+import SignupPage from './SignupPage';
+import ConfirmSignupPage from './ConfirmSignupPage';
 import { CoordinatorDashboard } from './surfaces/coordinator/CoordinatorDashboard';
 import { useLiveReports } from './surfaces/coordinator/useLiveReports';
 
@@ -27,11 +31,16 @@ function CoordinatorRoute() {
 export function Router() {
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<App />} />
-        <Route path="/report" element={<ReportPage />} />
-        <Route path="/coordinator" element={<CoordinatorRoute />} />
-      </Routes>
+      <AuthProvider>
+        <Routes>
+          <Route path="/" element={<App />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/signup" element={<SignupPage />} />
+          <Route path="/confirm-signup" element={<ConfirmSignupPage />} />
+          <Route path="/report" element={<ReportPage />} />
+          <Route path="/coordinator" element={<CoordinatorRoute />} />
+        </Routes>
+      </AuthProvider>
     </BrowserRouter>
   );
 }
