@@ -11,7 +11,7 @@ import { useAuth } from './AuthContext';
  * web emergency fallback (ADR 0021). Remaining surfaces are stubs, each built
  * by its owning ticket:
  *   - Coordinator dashboard     → CRIS-12 (shell landed at /coordinator; ADR-0022)
- *   - Live map                  → CRIS-13
+ *   - Live map                  → CRIS-13 (base map at /map; ADR-0025)
  *   - Volunteer task board      → CRIS-4 epic (E4)
  *
  * Cards whose shell exists navigate via the router (ADR-0021). Auth is optional
@@ -50,6 +50,7 @@ const SURFACES: Surface[] = [
     role: UserRole.COORDINATOR,
     ticket: 'CRIS-13',
     description: 'MapLibre + Amazon Location incident map with clustering and heatmaps.',
+    path: '/map',
   },
   {
     title: 'Volunteer task board',
