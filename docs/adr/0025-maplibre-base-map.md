@@ -1,4 +1,4 @@
-# ADR-0023: MapLibre base map, tile source behind an env seam, lazy-loaded
+# ADR-0025: MapLibre base map, tile source behind an env seam, lazy-loaded
 
 - **Status:** Accepted
 - **Date:** 2026-07-15

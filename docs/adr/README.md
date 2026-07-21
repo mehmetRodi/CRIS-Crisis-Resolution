@@ -38,4 +38,6 @@ behind the code — essential when refactoring or extending the system.
 | [0020](0020-react-native-mobile-app-for-citizen-reporting.md) | React Native (Expo) mobile app for citizen reporting | Accepted                         |
 | [0021](0021-web-emergency-fallback-report-form.md)            | Web emergency-fallback citizen report form           | Accepted                         |
 | [0022](0022-coordinator-dashboard-shell.md)                   | Coordinator dashboard shell                          | Accepted                         |
-| [0023](0023-maplibre-base-map.md)                             | MapLibre base map (env tile source, lazy-loaded)     | Accepted                         |
+| [0023](0023-coordinator-dashboard-live-read-path.md)          | Coordinator dashboard live incident read path        | Accepted                         |
+| [0024](0024-optional-auth-and-anonymous-guest-access.md)      | Optional Cognito sign-in + anonymous guest access    | Accepted                         |
+| [0025](0025-maplibre-base-map.md)                             | MapLibre base map (env tile source, lazy-loaded)     | Accepted                         |

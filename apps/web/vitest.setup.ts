@@ -6,7 +6,7 @@ import { vi } from 'vitest';
 // base map (IncidentMap, the coordinator dashboard, the App landing) would crash on
 // load. Stub the module globally so the surrounding UI renders headlessly; the map's
 // own lifecycle is asserted against dedicated spies in IncidentMap.test.tsx, which
-// overrides this with its own factory. (CRIS-13, ADR-0023; docs/conventions.md → Testing.)
+// overrides this with its own factory. (CRIS-13, ADR-0025; docs/conventions.md → Testing.)
 vi.mock('maplibre-gl', () => ({
   default: {
     Map: vi.fn(() => ({

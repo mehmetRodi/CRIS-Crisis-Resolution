@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 // MapLibre GL needs WebGL, which jsdom does not provide. This file asserts the
 // map's lifecycle, so it overrides the global stub (vitest.setup.ts) with its own
 // factory backed by referenceable spies. `vi.hoisted` lets the spies exist above
-// the hoisted `vi.mock`. See ADR-0023 and docs/conventions.md → Testing.
+// the hoisted `vi.mock`. See ADR-0025 and docs/conventions.md → Testing.
 const { addControl, remove, MapMock, NavigationControl } = vi.hoisted(() => {
   const addControl = vi.fn();
   const remove = vi.fn();

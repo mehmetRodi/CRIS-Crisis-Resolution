@@ -5,7 +5,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { resolveMapStyle } from './mapStyle';
 
 /**
- * The live incident **base map** view (CRIS-13, ADR-0023).
+ * The live incident **base map** view (CRIS-13, ADR-0025).
  *
  * This is the heavy half of the map surface — it pulls in `maplibre-gl` (~200 kB
  * gzipped) and its stylesheet, so it is **lazy-loaded** via {@link IncidentMap} and

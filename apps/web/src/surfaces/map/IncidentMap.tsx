@@ -5,7 +5,7 @@ import type { IncidentMapProps } from './IncidentMapView';
 export type { IncidentMapProps } from './IncidentMapView';
 
 /**
- * Lazy boundary for the incident base map (CRIS-13, ADR-0023).
+ * Lazy boundary for the incident base map (CRIS-13, ADR-0025).
  *
  * `maplibre-gl` is large (~200 kB gzipped) and the map appears only on the
  * coordinator surfaces (`/coordinator`, `/map`). Splitting it behind `React.lazy`

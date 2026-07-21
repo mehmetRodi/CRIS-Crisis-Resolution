@@ -1,5 +1,5 @@
 /**
- * Resolves the MapLibre style the base map renders from (CRIS-13, ADR-0023).
+ * Resolves the MapLibre style the base map renders from (CRIS-13, ADR-0025).
  *
  * The design target is **Amazon Location Service** (design doc §4, §2.4), but ALS
  * needs a deployed backend plus Cognito / API-key auth that arrive with CRIS-24

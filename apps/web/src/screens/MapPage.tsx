@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { IncidentMap } from '../surfaces/map/IncidentMap';
 
 /**
- * Full-screen live incident map route (`/map`, CRIS-13, ADR-0023).
+ * Full-screen live incident map route (`/map`, CRIS-13, ADR-0025).
  *
  * The same {@link IncidentMap} base map that fills the coordinator dashboard's
  * "Live map" region, given its own deep-linkable route (the App landing "Live
