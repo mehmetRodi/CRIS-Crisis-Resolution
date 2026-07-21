@@ -4,16 +4,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
+import { PASSWORD_RULE_HINT, isPasswordValid } from '@crisismap/shared';
+
 import { useAuth } from '../../lib/AuthContext';
 import { colors } from '../../theme';
 import { authStyles as s } from './authStyles';
 import type { RootStackParamList } from '../../navigation/RootNavigator';
 
-function isPasswordValid(pw: string): boolean {
-  return pw.length >= 8 && /[A-Z]/.test(pw) && /[a-z]/.test(pw) && /[0-9]/.test(pw);
-}
-
-/** Mobile twin of apps/web/src/SignupPage.tsx (CRIS-7, ADR-0022). */
+/** Mobile twin of apps/web/src/SignupPage.tsx (CRIS-7, ADR-0024). */
 export function SignupScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { signUp } = useAuth();
@@ -31,9 +29,7 @@ export function SignupScreen() {
       return;
     }
     if (!isPasswordValid(password)) {
-      setError(
-        'Password must be at least 8 characters, with an uppercase letter, a lowercase letter, and a number.',
-      );
+      setError(PASSWORD_RULE_HINT);
       return;
     }
 
@@ -65,7 +61,7 @@ export function SignupScreen() {
               style={s.input}
               value={email}
               onChangeText={setEmail}
-              placeholder="Choose your email as username"
+              placeholder="Enter your email"
               placeholderTextColor={colors.textMuted}
               autoCapitalize="none"
               keyboardType="email-address"
@@ -82,9 +78,7 @@ export function SignupScreen() {
               placeholderTextColor={colors.textMuted}
               secureTextEntry
             />
-            <Text style={s.hint}>
-              At least 8 characters, with an uppercase letter, a lowercase letter, and a number.
-            </Text>
+            <Text style={s.hint}>{PASSWORD_RULE_HINT}</Text>
           </View>
 
           <View style={s.field}>
@@ -108,7 +102,11 @@ export function SignupScreen() {
           <Pressable
             onPress={handleSubmit}
             disabled={loading}
-            style={({ pressed }) => [s.submit, pressed && s.submitPressed, loading && s.submitDisabled]}
+            style={({ pressed }) => [
+              s.submit,
+              pressed && s.submitPressed,
+              loading && s.submitDisabled,
+            ]}
             accessibilityRole="button"
           >
             {loading ? (

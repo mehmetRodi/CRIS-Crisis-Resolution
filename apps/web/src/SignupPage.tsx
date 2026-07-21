@@ -1,10 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import { PASSWORD_RULE_HINT, isPasswordValid } from '@crisismap/shared';
 import { useAuth } from './AuthContext';
-
-function isPasswordValid(pw: string): boolean {
-  return pw.length >= 8 && /[A-Z]/.test(pw) && /[a-z]/.test(pw) && /[0-9]/.test(pw);
-}
 
 export default function SignupPage() {
   const navigate = useNavigate();
@@ -24,10 +21,8 @@ export default function SignupPage() {
       return;
     }
 
-   if (!isPasswordValid(password)) {
-      setError(
-        'Password must be at least 8 characters, with an uppercase letter, a lowercase letter, and a number.',
-      );
+    if (!isPasswordValid(password)) {
+      setError(PASSWORD_RULE_HINT);
       return;
     }
 
@@ -48,23 +43,25 @@ export default function SignupPage() {
       <div className="max-w-md w-full space-y-8 bg-white p-8 rounded-2xl shadow-lg">
         <div>
           <h2 className="text-3xl font-bold text-slate-900 text-center">Create Account</h2>
-          <p className="mt-2 text-sm text-slate-600 text-center">Sign up to submit emergency reports</p>
+          <p className="mt-2 text-sm text-slate-600 text-center">
+            Sign up to submit emergency reports
+          </p>
         </div>
 
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700">Username</label>
+              <label className="block text-sm font-medium text-slate-700">Email</label>
               <input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 className="mt-1 w-full rounded-lg border border-slate-300 px-4 py-2.5 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Choose your email as username"
+                placeholder="Enter your email"
               />
             </div>
-            
+
             <div>
               <label className="block text-sm font-medium text-slate-700">Password</label>
               <input
@@ -75,9 +72,7 @@ export default function SignupPage() {
                 className="mt-1 w-full rounded-lg border border-slate-300 px-4 py-2.5 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="Minimum 8 characters"
               />
-              <p className="mt-1 text-xs text-slate-500">
-                At least 8 characters, with an uppercase letter, a lowercase letter, and a number.
-              </p>
+              <p className="mt-1 text-xs text-slate-500">{PASSWORD_RULE_HINT}</p>
             </div>
             <div>
               <label className="block text-sm font-medium text-slate-700">Confirm Password</label>

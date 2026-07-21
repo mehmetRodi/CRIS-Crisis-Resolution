@@ -9,13 +9,13 @@ import {
   signOut,
   signUp,
 } from 'aws-amplify/auth';
-import type { AuthUser } from 'aws-amplify/auth';
+import type { AuthUser, SignInOutput } from 'aws-amplify/auth';
 
 interface AuthContextType {
   user: AuthUser | null;
   email: string | null;
   loading: boolean;
-  signIn: (username: string, password: string) => Promise<void>;
+  signIn: (username: string, password: string) => Promise<SignInOutput>;
   signUp: (username: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   confirmSignUp: (email: string, code: string) => Promise<void>;
@@ -28,7 +28,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 /**
  * Mobile twin of the web `AuthContext` (apps/web/src/AuthContext.tsx). Same
  * Cognito User Pool API surface and optional/non-blocking auth model
- * (ADR-0022) — only the platform wiring differs, same as the ReportForm
+ * (ADR-0024) — only the platform wiring differs, same as the ReportForm
  * split between web and mobile (ADR-0021).
  */
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -54,11 +54,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const signInHandler = async (userEmail: string, password: string) => {
+  const signInHandler = async (userEmail: string, password: string): Promise<SignInOutput> => {
     const result = await signIn({ username: userEmail, password });
+    // Only refresh identity when Cognito actually completed sign-in; otherwise
+    // return the result so the caller can act on `nextStep` (e.g. confirm).
     if (result.isSignedIn) {
       await checkUser();
     }
+    return result;
   };
 
   const signUpHandler = async (userEmail: string, password: string) => {

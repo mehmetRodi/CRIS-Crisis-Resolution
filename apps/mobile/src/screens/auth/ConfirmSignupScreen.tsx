@@ -10,7 +10,7 @@ import { colors } from '../../theme';
 import { authStyles as s } from './authStyles';
 import type { RootStackParamList } from '../../navigation/RootNavigator';
 
-/** Mobile twin of apps/web/src/ConfirmSignupPage.tsx (CRIS-7, ADR-0022). */
+/** Mobile twin of apps/web/src/ConfirmSignupPage.tsx (CRIS-7, ADR-0024). */
 export function ConfirmSignupScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { email } = useRoute<RouteProp<RootStackParamList, 'ConfirmSignup'>>().params;
@@ -73,7 +73,11 @@ export function ConfirmSignupScreen() {
           <Pressable
             onPress={handleSubmit}
             disabled={loading}
-            style={({ pressed }) => [s.submit, pressed && s.submitPressed, loading && s.submitDisabled]}
+            style={({ pressed }) => [
+              s.submit,
+              pressed && s.submitPressed,
+              loading && s.submitDisabled,
+            ]}
             accessibilityRole="button"
           >
             {loading ? (

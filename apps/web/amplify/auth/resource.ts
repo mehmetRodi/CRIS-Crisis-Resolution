@@ -1,9 +1,9 @@
 import { defineAuth } from '@aws-amplify/backend';
 
 /**
- * Cognito authentication (design doc §5.6, ADR-0022).
+ * Cognito authentication (design doc §5.6, ADR-0024).
  *
- * Sign-in is optional (ADR-0022): named accounts use this Cognito User Pool,
+ * Sign-in is optional (ADR-0024): named accounts use this Cognito User Pool,
  * but citizens can submit anonymously as Identity Pool guests. Guest access
  * needs no extra config here — Amplify Gen 2 provisions the unauthenticated
  * Identity Pool role automatically from the `allow.guest()` rules already on

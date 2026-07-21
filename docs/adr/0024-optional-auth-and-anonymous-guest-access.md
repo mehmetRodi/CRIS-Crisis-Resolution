@@ -1,4 +1,4 @@
-# ADR-0022: Optional Cognito sign-in + anonymous guest access (CRIS-7)
+# ADR-0024: Optional Cognito sign-in + anonymous guest access (CRIS-7)
 
 - **Status:** Accepted
 - **Date:** 2026-07-16
@@ -46,8 +46,10 @@ this decision.
    media (`amplify/storage/resource.ts`) authorizes it. No change was needed in
    `amplify/auth/resource.ts` for this — Amplify Gen 2 provisions the unauthenticated Identity
    Pool role automatically from those `allow.guest()` rules.
-3. **Named accounts use Cognito User Pool email/password sign-in** (`AuthContext.tsx`,
-   `LoginPage.tsx`, `SignupPage.tsx`, `ConfirmSignupPage.tsx`), independent of the guest path.
+3. **Named accounts use Cognito User Pool email/password sign-in** — web
+   (`AuthContext.tsx`, `LoginPage.tsx`, `SignupPage.tsx`, `ConfirmSignupPage.tsx`) and the
+   mobile twins (`apps/mobile/src/lib/AuthContext.tsx`, `src/screens/auth/*`), independent of
+   the guest path.
    The five `UserRole` groups (`CITIZEN`, `VOLUNTEER`, `RESPONDER`, `COORDINATOR`, `ADMIN`)
    remain defined on the User Pool but are **not** auto-assigned at signup — group membership
    is manual/admin-assigned until a role-assignment story is scoped.
@@ -55,6 +57,13 @@ this decision.
    `anonymous` toggle controls whether reporter contact info is attached
    (`toReportSubmission` in `@crisismap/shared`); it is independent of whether the submitter is
    signed in.
+5. **One password policy, two enforcers.** The client rule (`isPasswordValid` /
+   `PASSWORD_MIN_LENGTH` in `@crisismap/shared`) and the Cognito User Pool policy (set via the
+   CDK escape hatch in `apps/web/amplify/backend.ts`, since `defineAuth` exposes no policy
+   option) are kept identical — minimum length with an uppercase letter, a lowercase letter,
+   and a number; **no** required symbol. This ensures the sign-up form never accepts a password
+   that Cognito would then reject, which would otherwise surface as a confusing raw backend
+   error.
 
 ## Tradeoffs & consequences
 
@@ -69,5 +78,7 @@ this decision.
   - Deferred to CRIS-17: tightening `amplify/storage/resource.ts` beyond its current
     entity_id-scoped guest-write / authenticated-read-write rule, alongside the presigned
     upload rework.
-  - Mobile sign-in (`apps/mobile/src/lib/amplify.ts` currently guest-only via
-    `identityPool`) is out of scope here; CRIS-7 covers the web SPA's auth surfaces.
+  - Mobile sign-in mirrors the web surfaces: `apps/mobile` ships the same optional Cognito
+    flow (`src/lib/AuthContext.tsx`, `src/screens/auth/*`, reachable from `RootNavigator`),
+    while report submission stays guest-first via `identityPool`
+    (`apps/mobile/src/lib/amplify.ts`).

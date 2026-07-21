@@ -26,7 +26,7 @@ Amplify.configure(outputs);
 
 /**
  * The single typed GraphQL client for the app. `identityPool` auth is the
- * default for every call (CRIS-7, ADR-0022) — guests AND signed-in citizens
+ * default for every call (CRIS-7, ADR-0024) — guests AND signed-in citizens
  * submit the same way; `submitReport` allows both `allow.guest()` and
  * `allow.authenticated('identityPool')`. Sign-in (`AuthContext`,
  * `screens/auth/*`) is a separate, optional identity layer on top.

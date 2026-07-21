@@ -392,7 +392,7 @@ const schema = a.schema({
    * (ADR-0021) — guests AND signed-in citizens alike — so a signed-in caller
    * presents an identityPool-*authenticated* credential, not a userPool JWT.
    * `allow.authenticated()` alone only matches the userPool JWT case, so it's
-   * listed here alongside the identityPool variant (ADR-0022).
+   * listed here alongside the identityPool variant (ADR-0024).
    */
   submitReport: a
     .mutation()

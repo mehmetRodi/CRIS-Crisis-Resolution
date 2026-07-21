@@ -17,7 +17,7 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 
 /**
  * Root navigator (CRIS-7). `Report` is the initial/home route — sign-in is
- * reachable but never required, mirroring the web SPA (ADR-0022): citizens
+ * reachable but never required, mirroring the web SPA (ADR-0024): citizens
  * submit anonymously by default; Login/Signup/ConfirmSignup are opt-in.
  * Screens render their own header (back links, titles), so the native header
  * bar is disabled here.

@@ -10,11 +10,13 @@ import { useAuth } from './AuthContext';
  * CRIS-6 — see ADR 0020) is the primary citizen channel, with `/report` as a
  * web emergency fallback (ADR 0021). Remaining surfaces are stubs, each built
  * by its owning ticket:
- *   - Coordinator dashboard     → CRIS-12
+ *   - Coordinator dashboard     → CRIS-12 (shell landed at /coordinator; ADR-0022)
  *   - Live map                  → CRIS-13
  *   - Volunteer task board      → CRIS-4 epic (E4)
- * Auth is optional (CRIS-7, ADR-0022): sign-in is available but nothing here is
- * gated behind it. See docs/architecture.md.
+ *
+ * Cards whose shell exists navigate via the router (ADR-0021). Auth is optional
+ * (CRIS-7, ADR-0024): sign-in is available but nothing here is gated behind it.
+ * See docs/architecture.md.
  */
 
 interface Surface {
@@ -22,6 +24,7 @@ interface Surface {
   role: string;
   ticket: string;
   description: string;
+  /** The route this surface opens, if its shell has landed. */
   path?: string;
 }
 
@@ -40,6 +43,7 @@ const SURFACES: Surface[] = [
     role: UserRole.COORDINATOR,
     ticket: 'CRIS-12',
     description: 'Real-time, de-duplicated, priority-ordered incident view.',
+    path: '/coordinator',
   },
   {
     title: 'Live map',
@@ -60,7 +64,7 @@ const LIFECYCLE = Object.values(ReportStatus);
 function App() {
   const { email, signOut, isAuthenticated } = useAuth();
   const navigate = useNavigate();
- 
+
   const handleSignOut = async () => {
     await signOut();
     navigate('/login');
@@ -75,35 +79,31 @@ function App() {
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900">
       <div className="mx-auto max-w-4xl px-6 py-12">
-          <header className="mb-10 flex justify-between items-center">
-
+        <header className="mb-10 flex justify-between items-center">
           <div>
-      <h1 className="text-3xl font-bold tracking-tight">CrisisMap AI</h1>
-      <p className="mt-2 text-slate-600">
-        Real-time serverless disaster intelligence and emergency coordination platform.
-      </p>
-    </div>
-    <div className="flex items-center gap-4">
-      {isAuthenticated ? (
-        <>
-          <span className="text-sm text-slate-600">👤 {email}</span>
-          <button
-            onClick={handleSignOut}
-            className="text-sm text-red-600 hover:text-red-800"
-          >
-            Sign Out
-          </button>
-        </>
-      ) : (
+            <h1 className="text-3xl font-bold tracking-tight">CrisisMap AI</h1>
+            <p className="mt-2 text-slate-600">
+              Real-time serverless disaster intelligence and emergency coordination platform.
+            </p>
+          </div>
+          <div className="flex items-center gap-4">
+            {isAuthenticated ? (
+              <>
+                <span className="text-sm text-slate-600">👤 {email}</span>
+                <button onClick={handleSignOut} className="text-sm text-red-600 hover:text-red-800">
+                  Sign Out
+                </button>
+              </>
+            ) : (
               <button
                 onClick={() => navigate('/login')}
                 className="text-sm font-medium text-blue-600 hover:text-blue-800"
               >
                 Sign In
               </button>
-      )}
-    </div>
-  </header>
+            )}
+          </div>
+        </header>
 
         <section className="mb-10">
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">
@@ -131,7 +131,7 @@ function App() {
                 key={surface.title}
                 onClick={() => handleCardClick(surface.path)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
+                  if (surface.path && (e.key === 'Enter' || e.key === ' ')) {
                     e.preventDefault();
                     handleCardClick(surface.path);
                   }
@@ -140,7 +140,7 @@ function App() {
                 tabIndex={surface.path ? 0 : undefined}
                 className={`rounded-lg border border-slate-200 bg-white p-4 shadow-sm ${
                   surface.path
-                    ? 'cursor-pointer hover:border-blue-400 hover:shadow-md transition-all  focus:outline-none focus:ring-2 focus:ring-blue-500'
+                    ? 'cursor-pointer transition-all hover:border-blue-400 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500'
                     : ''
                 }`}
               >
@@ -152,6 +152,9 @@ function App() {
                 </div>
                 <p className="mt-1 text-sm text-slate-600">{surface.description}</p>
                 <p className="mt-2 text-xs text-slate-400">Primary role: {surface.role}</p>
+                {surface.path ? (
+                  <p className="mt-2 text-xs font-medium text-slate-500">Open shell →</p>
+                ) : null}
               </li>
             ))}
           </ul>

@@ -16,10 +16,23 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      await signIn(email, password);
-      navigate('/');
-    } catch {
-      setError('Invalid email or password');
+      const result = await signIn(email, password);
+      if (result.isSignedIn) {
+        navigate('/');
+      } else if (result.nextStep.signInStep === 'CONFIRM_SIGN_UP') {
+        // Account exists but was never verified — take them to confirmation.
+        navigate('/confirm-signup', { state: { email } });
+      } else {
+        setError('Additional verification is required to finish signing in.');
+      }
+    } catch (err) {
+      // Cognito throws UserNotConfirmedException when the email was never
+      // verified; route there rather than a misleading credentials error.
+      if (err instanceof Error && err.name === 'UserNotConfirmedException') {
+        navigate('/confirm-signup', { state: { email } });
+      } else {
+        setError('Invalid email or password');
+      }
     } finally {
       setLoading(false);
     }
@@ -30,13 +43,15 @@ export default function LoginPage() {
       <div className="max-w-md w-full space-y-8 bg-white p-8 rounded-2xl shadow-lg">
         <div>
           <h2 className="text-3xl font-bold text-slate-900 text-center">Welcome Back</h2>
-          <p className="mt-2 text-sm text-slate-600 text-center">Sign in to submit an emergency report</p>
+          <p className="mt-2 text-sm text-slate-600 text-center">
+            Sign in to submit an emergency report
+          </p>
         </div>
 
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700">Username</label>
+              <label className="block text-sm font-medium text-slate-700">Email</label>
               <input
                 type="email"
                 value={email}

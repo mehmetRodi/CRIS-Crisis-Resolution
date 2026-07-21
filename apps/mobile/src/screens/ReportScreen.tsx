@@ -1,4 +1,12 @@
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -10,7 +18,7 @@ import type { RootStackParamList } from '../navigation/RootNavigator';
 
 /**
  * Citizen emergency-report screen (CRIS-6). The mobile app's home route.
- * Auth is optional (CRIS-7, ADR-0022): a Sign In link is available but
+ * Auth is optional (CRIS-7, ADR-0024): a Sign In link is available but
  * nothing here is gated behind it — citizens submit as guests by default.
  */
 export function ReportScreen() {

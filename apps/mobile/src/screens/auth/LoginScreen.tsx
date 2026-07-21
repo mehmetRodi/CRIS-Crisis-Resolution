@@ -9,7 +9,7 @@ import { colors } from '../../theme';
 import { authStyles as s } from './authStyles';
 import type { RootStackParamList } from '../../navigation/RootNavigator';
 
-/** Mobile twin of apps/web/src/LoginPage.tsx (CRIS-7, ADR-0022). */
+/** Mobile twin of apps/web/src/LoginPage.tsx (CRIS-7, ADR-0024). */
 export function LoginScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { signIn } = useAuth();
@@ -22,10 +22,23 @@ export function LoginScreen() {
     setError('');
     setLoading(true);
     try {
-      await signIn(email, password);
-      navigation.navigate('Report');
-    } catch {
-      setError('Invalid email or password');
+      const result = await signIn(email, password);
+      if (result.isSignedIn) {
+        navigation.navigate('Report');
+      } else if (result.nextStep.signInStep === 'CONFIRM_SIGN_UP') {
+        // Account exists but was never verified — take them to confirmation.
+        navigation.navigate('ConfirmSignup', { email });
+      } else {
+        setError('Additional verification is required to finish signing in.');
+      }
+    } catch (err) {
+      // Cognito throws UserNotConfirmedException when the email was never
+      // verified; route there rather than a misleading credentials error.
+      if (err instanceof Error && err.name === 'UserNotConfirmedException') {
+        navigation.navigate('ConfirmSignup', { email });
+      } else {
+        setError('Invalid email or password');
+      }
     } finally {
       setLoading(false);
     }
@@ -76,7 +89,11 @@ export function LoginScreen() {
           <Pressable
             onPress={handleSubmit}
             disabled={loading}
-            style={({ pressed }) => [s.submit, pressed && s.submitPressed, loading && s.submitDisabled]}
+            style={({ pressed }) => [
+              s.submit,
+              pressed && s.submitPressed,
+              loading && s.submitDisabled,
+            ]}
             accessibilityRole="button"
           >
             {loading ? (

@@ -1,20 +1,20 @@
 import { createContext, useContext, useState, useEffect } from 'react';
-import { 
-  getCurrentUser, 
+import {
+  getCurrentUser,
   fetchUserAttributes,
-  signIn, 
-  signUp, 
-  signOut, 
-  confirmSignUp, 
-  resendSignUpCode 
+  signIn,
+  signUp,
+  signOut,
+  confirmSignUp,
+  resendSignUpCode,
 } from 'aws-amplify/auth';
-import type { AuthUser } from 'aws-amplify/auth';
+import type { AuthUser, SignInOutput } from 'aws-amplify/auth';
 
 interface AuthContextType {
   user: AuthUser | null;
   email: string | null;
   loading: boolean;
-  signIn: (username: string, password: string) => Promise<void>;
+  signIn: (username: string, password: string) => Promise<SignInOutput>;
   signUp: (username: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   confirmSignUp: (email: string, code: string) => Promise<void>;
@@ -47,11 +47,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const signInHandler = async (userEmail: string, password: string) => {
-    const result = await signIn({ username: userEmail, password  });
+  const signInHandler = async (userEmail: string, password: string): Promise<SignInOutput> => {
+    const result = await signIn({ username: userEmail, password });
+    // Only refresh identity when Cognito actually completed sign-in; otherwise
+    // return the result so the caller can act on `nextStep` (e.g. confirm).
     if (result.isSignedIn) {
       await checkUser();
     }
+    return result;
   };
 
   const signUpHandler = async (userEmail: string, password: string) => {
@@ -66,7 +69,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await signOut();
     setUser(null);
     setEmail(null);
-
   };
 
   const confirmSignUpHandler = async (userEmail: string, code: string) => {
