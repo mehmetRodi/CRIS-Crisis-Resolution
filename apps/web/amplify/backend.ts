@@ -28,9 +28,14 @@ import { addObservability } from './observability';
  * Table names and IAM grants for the resolver/worker functions are set here
  * rather than in each function's `resource.ts`, because the DynamoDB tables
  * don't exist until the data schema is synthesized. The worker classifies
- * (Bedrock), scores, and writes results back durably (direct-to-DynamoDB, §5.3);
- * Worker invocation of `publishReportUpdate`, custom subscriptions, and SNS
- * proximity alerts remain deferred seams.
+ * (Bedrock), scores, writes results back durably (direct-to-DynamoDB, §5.3),
+ * and then fans the redacted update out via the internal `publishReportUpdate`
+ * mutation (CRIS-19). That last grant is NOT wired here: the schema's
+ * `allow.resource(classifyReport)` (data/resource.ts) attaches the
+ * `appsync:GraphQL` policy and injects the endpoint/introspection env vars onto
+ * the worker's role automatically — all `classify-report → data` edges, the same
+ * direction as the table grants below, so no cross-stack cycle. Custom
+ * subscriptions (CRIS-28) and SNS proximity alerts remain deferred seams.
  *
  * Run `npx ampx sandbox` from `apps/web` (with AWS credentials + Bedrock model
  * access) to stand up a personal dev environment. Source control does not
@@ -215,8 +220,9 @@ worker.addEventSource(
 classificationQueue.grantConsumeMessages(worker);
 
 // Durable direct-to-DynamoDB writes (§5.3): read+write Report, append audit
-// events. The redacted public projection is not written to a table; worker
-// invocation of publishReportUpdate remains deferred.
+// events. The redacted public projection is not written to a table — after the
+// durable write the worker calls `publishReportUpdate`, whose IAM grant comes
+// from `allow.resource(classifyReport)` in the schema (CRIS-19), not from here.
 reportTable.grantReadWriteData(worker);
 tables['ReportEvent'].grantWriteData(worker);
 
