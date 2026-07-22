@@ -74,8 +74,9 @@ export interface ClassificationResult {
   confidence: number;
   /**
    * Free-text location description extracted from the report (e.g.
-   * "near the north bridge on Route 9"). NOT geocoded — the geocode worker
-   * (CRIS-10) resolves this to coordinates. `null` when no location is stated.
+   * "near the north bridge on Route 9"). NOT itself coordinates — the Triage
+   * Agent's geocode tool (CRIS-20 seam / CRIS-21 Amazon Location) resolves it.
+   * `null` when no location is stated.
    */
   locationHint: string | null;
   /** Short, PII-free summary for coordinator triage. */
