@@ -29,7 +29,12 @@ const CLASSIFICATION: ClassificationResult = {
   entities: { peopleAffected: 4, infrastructure: ['downtown clinic'], hazards: [] },
 };
 
-const LOCATION: LocationResult = { lat: 40.71, lng: -74.0, geohash: 'dr5reg', geohashPrefix: 'dr5re' };
+const LOCATION: LocationResult = {
+  lat: 40.71,
+  lng: -74.0,
+  geohash: 'dr5reg',
+  geohashPrefix: 'dr5re',
+};
 
 function fakeStore(report: ReportRecord | null, claim = true) {
   const persisted: PersistClassificationInput[] = [];
@@ -49,7 +54,10 @@ function fakeStore(report: ReportRecord | null, claim = true) {
 
 function fakeAgent(impl?: TriageAgent['triage']): TriageAgent {
   return {
-    triage: vi.fn(impl ?? (async (): Promise<TriageResult> => ({ classification: CLASSIFICATION, location: null }))),
+    triage: vi.fn(
+      impl ??
+        (async (): Promise<TriageResult> => ({ classification: CLASSIFICATION, location: null })),
+    ),
   };
 }
 

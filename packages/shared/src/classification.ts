@@ -253,8 +253,16 @@ export function parseClassification(raw: unknown): ClassificationResult {
     throw new ClassificationContractError('classification response is not an object');
   }
 
-  const { category, urgency, confidence, locationHint, summary, rationale, needsHumanReview, entities } =
-    raw;
+  const {
+    category,
+    urgency,
+    confidence,
+    locationHint,
+    summary,
+    rationale,
+    needsHumanReview,
+    entities,
+  } = raw;
 
   if (typeof category !== 'string' || !CATEGORY_VALUES.has(category)) {
     throw new ClassificationContractError(`invalid category: ${String(category)}`);

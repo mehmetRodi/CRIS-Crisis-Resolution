@@ -103,16 +103,16 @@ interface ToolUseBlock {
   name: string;
   input: Record<string, unknown>;
 }
-type ContentBlock = ToolUseBlock | { type: string; [key: string]: unknown };
-interface BedrockMessage {
-  role: 'user' | 'assistant';
-  content: ContentBlock[];
-}
 interface ToolResultBlock {
   type: 'tool_result';
   tool_use_id: string;
   content: string;
   is_error?: boolean;
+}
+type ContentBlock = ToolUseBlock | ToolResultBlock | { type: string; [key: string]: unknown };
+interface BedrockMessage {
+  role: 'user' | 'assistant';
+  content: ContentBlock[];
 }
 interface BedrockResponseBody {
   content?: ContentBlock[];

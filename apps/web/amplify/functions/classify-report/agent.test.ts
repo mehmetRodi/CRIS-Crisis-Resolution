@@ -28,7 +28,12 @@ const VALID_TRIAGE_INPUT = {
   entities: { peopleAffected: 3, infrastructure: ['north bridge'], hazards: ['road blocked'] },
 };
 
-const RESOLVED: LocationResult = { lat: 40.71, lng: -74.0, geohash: 'dr5reg', geohashPrefix: 'dr5re' };
+const RESOLVED: LocationResult = {
+  lat: 40.71,
+  lng: -74.0,
+  geohash: 'dr5reg',
+  geohashPrefix: 'dr5re',
+};
 
 interface BedrockBody {
   content?: { type: string; [k: string]: unknown }[];
@@ -36,7 +41,10 @@ interface BedrockBody {
 }
 
 function submitResponse(input: Record<string, unknown>): BedrockBody {
-  return { content: [{ type: 'tool_use', id: 's1', name: 'submit_triage', input }], stop_reason: 'tool_use' };
+  return {
+    content: [{ type: 'tool_use', id: 's1', name: 'submit_triage', input }],
+    stop_reason: 'tool_use',
+  };
 }
 
 function geocodeResponse(query: string, id = 'g1'): BedrockBody {
@@ -91,7 +99,10 @@ describe('runTriage', () => {
     const geocoder = fakeGeocoder(RESOLVED);
     const result = await runTriage(
       {
-        invoke: scripted([geocodeResponse('north bridge on Route 9'), submitResponse(VALID_TRIAGE_INPUT)]),
+        invoke: scripted([
+          geocodeResponse('north bridge on Route 9'),
+          submitResponse(VALID_TRIAGE_INPUT),
+        ]),
         geocoder,
       },
       'collapse near the north bridge',
@@ -143,7 +154,10 @@ describe('runTriage', () => {
     const invalid = { ...VALID_TRIAGE_INPUT, urgency: 'EXTREME' };
     await expect(
       runTriage(
-        { invoke: scripted([submitResponse(invalid), submitResponse(invalid)]), geocoder: fakeGeocoder(null) },
+        {
+          invoke: scripted([submitResponse(invalid), submitResponse(invalid)]),
+          geocoder: fakeGeocoder(null),
+        },
         'ambiguous report',
       ),
     ).rejects.toBeInstanceOf(ClassificationError);
