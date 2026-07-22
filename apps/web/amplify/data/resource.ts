@@ -22,9 +22,11 @@ import { classifyReport as classifyReportFn } from '../functions/classify-report
  * Custom API status:
  *   - `submitReport` implements the guarded, idempotent create path (CRIS-9).
  *   - `updateReportStatus` implements the guarded transition engine (CRIS-18).
- *   - `publishReportUpdate` is the internal, IAM-only fan-out mutation the triage
- *     worker calls after its durable write (CRIS-19, ADR-0009/0029). Custom
- *     subscriptions that consume it remain deferred to CRIS-28.
+ *   - `publishReportUpdate` is the internal fan-out mutation the triage worker
+ *     calls over IAM after its durable write; it also carries an `ADMIN` group
+ *     gate so it satisfies Amplify's per-operation auth requirement (CRIS-19,
+ *     ADR-0009/0029/0030). Custom subscriptions that consume it remain deferred
+ *     to CRIS-28.
  *
  * ENUM SYNC: `a.enum()` requires literal arrays, so the members below are
  * duplicated from `@crisismap/shared` (the source of truth). When you change an
@@ -479,21 +481,26 @@ const schema = a
     }),
 
     /**
-     * Internal mutation for driving subscriptions (§5.3, ADR-0009). AppSync
-     * subscriptions fire on mutations, not on raw DynamoDB writes, so the async
-     * triage worker writes the report durably and then calls this to fan the
-     * redacted update out to subscribers — keeping the durable write independent
-     * of AppSync availability.
+     * Internal fan-out mutation for driving subscriptions (§5.3, ADR-0009,
+     * ADR-0030). AppSync subscriptions fire on mutations, not on raw DynamoDB
+     * writes, so the async triage worker writes the report durably and then calls
+     * this to fan the redacted update out to subscribers — keeping the durable
+     * write independent of AppSync availability.
      *
-     * CRIS-19: this operation declares NO per-operation `allow` rule, so no user,
-     * group, or guest can invoke it — it is internal-only. The sole caller is the
-     * `classify-report` worker, granted at the SCHEMA level via
+     * AUTH (ADR-0030, superseding ADR-0029): the intended caller is the
+     * `classify-report` worker over IAM, granted at the SCHEMA level via
      * `allow.resource(classifyReportFn).to(['mutate'])` (see the schema
-     * `.authorization()` below). `allow.resource` is only expressible at schema
-     * scope (Amplify grants function access to the API, not to a single field),
-     * which is why the grant lives there and this operation is left rule-less.
-     * Dropping the previous ADMIN rule closes the last client-facing door on the
-     * real-time channel (ADR-0029).
+     * `.authorization()` below). But Amplify Gen 2 requires every Lambda-backed
+     * custom operation to declare its OWN per-operation auth rule: a schema-level
+     * `allow.resource` grant is siphoned into function-access wiring and does NOT
+     * count as the operation's auth, so a rule-less operation fails synthesis with
+     * `InvalidSchemaError: ...requires both an authorization rule and a handler
+     * reference` (ADR-0029's rule-less design was never deployable — its own
+     * "validation owed on deploy" caveat is what this ADR discharges). The
+     * narrowest operation-level rule Amplify offers is a group gate, so we
+     * reinstate `allow.groups(['ADMIN'])`: the worker still calls over IAM via the
+     * resource grant, and only the trusted internal ADMIN role has a client-facing
+     * door onto the channel.
      *
      * The argument list is exactly the public fields, so PII has no wire
      * representation on this path — the type system is the redaction guarantee,
@@ -518,7 +525,8 @@ const schema = a
         updatedAt: a.datetime(),
       })
       .returns(a.ref('PublicReport'))
-      .handler(a.handler.function(publishReportUpdateFn)),
+      .handler(a.handler.function(publishReportUpdateFn))
+      .authorization((allow) => [allow.groups(['ADMIN'])]),
 
     /*
      * TODO(CRIS-28): Real-time subscriptions are temporarily disabled. Amplify
@@ -570,9 +578,11 @@ const schema = a
    * `publishReportUpdate`), and every model mutation still enforces its own
    * optimistic-lock/role guards. Revisit if a tighter per-field grant appears.
    *
-   * All models and the other custom operations declare their own per-op rules,
-   * so this schema-level rule is NOT a client-facing default for them; it only
-   * supplies auth for the otherwise rule-less `publishReportUpdate`.
+   * All models and custom operations — including `publishReportUpdate`, which
+   * declares its own `allow.groups(['ADMIN'])` rule (ADR-0030) — carry their own
+   * per-op rules, so this schema-level rule is NOT a client-facing default. It
+   * only attaches the worker's IAM `mutate` access to the API surface; the
+   * worker calls `publishReportUpdate` with `authMode: 'iam'` on that grant.
    */
   .authorization((allow) => [allow.resource(classifyReportFn).to(['mutate'])]);
 

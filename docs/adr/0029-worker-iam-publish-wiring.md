@@ -1,10 +1,23 @@
 # ADR-0029: Wiring the triage worker as the IAM-only publisher
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR-0030](0030-publish-mutation-requires-operation-auth-rule.md)
+  (Decision 1 only — the rule-less/`allow.resource`-only auth model does not deploy; Decisions
+  2–5 stand)
 - **Date:** 2026-07-22
 - **Deciders:** Team (CRIS-19)
 - **Refines:** ADR-0009 (public projection + write-then-publish real-time)
+- **Superseded-by:** ADR-0030 (operation-level auth rule reinstated)
 - **Anticipates:** CRIS-28 (AppSync subscriptions), CRIS-24 (Cognito roles/authorization)
+
+> **Superseded note (ADR-0030):** Decision 1 below asserts `publishReportUpdate` can be
+> rule-less, with auth supplied solely by the schema-level `allow.resource(classifyReportFn)`
+> grant. That does not deploy: Amplify Gen 2 requires every Lambda-backed custom operation to
+> declare its own per-operation auth rule, and `allow.resource` is siphoned into function-access
+> wiring rather than counted as the operation's auth. `ampx pipeline-deploy` fails synthesis
+> with `InvalidSchemaError: Custom operation publishReportUpdate requires both an authorization
+> rule and a handler reference`. ADR-0030 reinstates `allow.groups(['ADMIN'])` on the operation.
+> Everything else here (write-then-publish, data-client-over-IAM, best-effort publish, persisting
+> the AI `summary`) remains in force.
 
 ## Context
 
