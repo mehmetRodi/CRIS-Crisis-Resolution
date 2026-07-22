@@ -36,7 +36,7 @@ Two constraints shaped the design:
 
 ## Options considered
 
-- **Widen `PublicReport` to carry `version`.** Simplest, but pollutes the *public* projection
+- **Widen `PublicReport` to carry `version`.** Simplest, but pollutes the _public_ projection
   with an internal concurrency token and risks it leaking onto the map/public surfaces.
   Rejected — the projection's value is that it is a strict PII-free allow-list.
 - **Re-fetch the report inside the mutation wrapper to read a fresh version.** Removes the

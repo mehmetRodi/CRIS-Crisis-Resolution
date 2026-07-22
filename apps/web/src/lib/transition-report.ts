@@ -22,11 +22,7 @@ import { client } from './amplify';
 
 /** Stable, machine-readable failure codes the backend resolver emits (§5.3). */
 export type TransitionErrorCode =
-  | 'CONFLICT'
-  | 'FORBIDDEN'
-  | 'ILLEGAL_TRANSITION'
-  | 'NOT_FOUND'
-  | 'UNKNOWN';
+  'CONFLICT' | 'FORBIDDEN' | 'ILLEGAL_TRANSITION' | 'NOT_FOUND' | 'UNKNOWN';
 
 /** The codes the resolver prefixes onto its error messages, in match order. */
 const KNOWN_CODES: readonly Exclude<TransitionErrorCode, 'UNKNOWN'>[] = [

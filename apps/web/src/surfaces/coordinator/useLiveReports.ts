@@ -1,11 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getCurrentUser } from 'aws-amplify/auth';
-import {
-  toPublicReport,
-  type Category,
-  type ReportStatus,
-  type Urgency,
-} from '@crisismap/shared';
+import { toPublicReport, type Category, type ReportStatus, type Urgency } from '@crisismap/shared';
 
 import { client } from '../../lib/amplify';
 import type { Schema } from '../../../amplify/data/resource';

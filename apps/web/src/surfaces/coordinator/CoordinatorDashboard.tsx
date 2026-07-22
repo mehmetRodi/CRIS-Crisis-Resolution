@@ -323,8 +323,7 @@ function IncidentDetail({
   const isSubmitting =
     transition.status === 'submitting' && transition.reportId === incident.reportId;
   const showError = transition.status === 'error' && transition.reportId === incident.reportId;
-  const showSuccess =
-    transition.status === 'success' && transition.reportId === incident.reportId;
+  const showSuccess = transition.status === 'success' && transition.reportId === incident.reportId;
 
   return (
     <div className="space-y-3">

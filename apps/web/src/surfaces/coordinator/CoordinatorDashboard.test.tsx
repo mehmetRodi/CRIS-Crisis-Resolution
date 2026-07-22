@@ -138,9 +138,7 @@ describe('CoordinatorDashboard status transitions (CRIS-18)', () => {
   };
 
   it('offers only the transitions a coordinator may drive from the current status', () => {
-    render(
-      <CoordinatorDashboard onExit={() => {}} feed={readyFeed} onTransition={() => {}} />,
-    );
+    render(<CoordinatorDashboard onExit={() => {}} feed={readyFeed} onTransition={() => {}} />);
     // Select the incident to open the detail panel.
     fireEvent.click(screen.getByText(/report-a/));
     const detail = screen.getByRole('region', { name: /incident detail/i });
@@ -154,9 +152,7 @@ describe('CoordinatorDashboard status transitions (CRIS-18)', () => {
 
   it('calls onTransition with the target status, expected version, and note', () => {
     const onTransition = vi.fn();
-    render(
-      <CoordinatorDashboard onExit={() => {}} feed={readyFeed} onTransition={onTransition} />,
-    );
+    render(<CoordinatorDashboard onExit={() => {}} feed={readyFeed} onTransition={onTransition} />);
     fireEvent.click(screen.getByText(/report-a/));
     const detail = screen.getByRole('region', { name: /incident detail/i });
     fireEvent.change(within(detail).getByPlaceholderText(/reason recorded/i), {

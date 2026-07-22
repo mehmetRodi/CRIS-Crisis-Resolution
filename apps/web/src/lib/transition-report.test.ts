@@ -4,12 +4,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // mutation stub (and without importing real `amplify_outputs.json`).
 const updateReportStatus = vi.fn();
 vi.mock('./amplify', () => ({
-  client: { mutations: { updateReportStatus: (...args: unknown[]) => updateReportStatus(...args) } },
+  client: {
+    mutations: { updateReportStatus: (...args: unknown[]) => updateReportStatus(...args) },
+  },
 }));
 
-const { classifyTransitionError, transitionReportStatus, TransitionError } = await import(
-  './transition-report'
-);
+const { classifyTransitionError, transitionReportStatus, TransitionError } =
+  await import('./transition-report');
 
 beforeEach(() => {
   updateReportStatus.mockReset();
@@ -74,7 +75,9 @@ describe('transitionReportStatus', () => {
   it('throws a typed FORBIDDEN error when the role is not permitted', async () => {
     updateReportStatus.mockResolvedValue({
       data: null,
-      errors: [{ message: 'FORBIDDEN: RESPONDER is not permitted to perform AI_CLASSIFIED → REJECTED.' }],
+      errors: [
+        { message: 'FORBIDDEN: RESPONDER is not permitted to perform AI_CLASSIFIED → REJECTED.' },
+      ],
     });
 
     await expect(
