@@ -30,7 +30,8 @@ until CRIS-28.
    level:
 
    ```ts
-   const schema = a.schema({ /* … */ })
+   const schema = a
+     .schema({/* … */})
      .authorization((allow) => [allow.resource(classifyReportFn).to(['mutate'])]);
    ```
 
