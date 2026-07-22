@@ -1,16 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getCurrentUser } from 'aws-amplify/auth';
-import {
-  toPublicReport,
-  type Category,
-  type PublicReport,
-  type ReportStatus,
-  type Urgency,
-} from '@crisismap/shared';
+import { toPublicReport, type Category, type ReportStatus, type Urgency } from '@crisismap/shared';
 
 import { client } from '../../lib/amplify';
 import type { Schema } from '../../../amplify/data/resource';
-import type { IncidentFeedState } from './incidents';
+import type { CoordinatorIncident, IncidentFeedState } from './incidents';
 
 /**
  * Live incident feed for the coordinator dashboard (CRIS-12; read path from
@@ -33,22 +27,31 @@ import type { IncidentFeedState } from './incidents';
 /** How many reports to pull for the queue. Bounded until pagination (CRIS-22). */
 const READ_LIMIT = 250;
 
-/** Map a raw AppSync `Report` to the redacted, PII-free projection the UI uses. */
-function toRedactedIncident(report: Schema['Report']['type']): PublicReport {
-  return toPublicReport({
-    id: report.id,
-    status: (report.status ?? 'NEW') as ReportStatus,
-    category: report.category as Category | null,
-    urgency: report.urgency as Urgency | null,
-    priorityScore: report.priorityScore,
-    priorityBand: report.priorityBand,
-    lat: report.lat,
-    lng: report.lng,
-    geohash: report.geohash,
-    geohashPrefix: report.geohashPrefix,
-    regionId: report.regionId,
-    createdAt: report.createdAt,
-  });
+/**
+ * Map a raw AppSync `Report` to the redacted projection the UI uses, plus the
+ * optimistic-lock `version` a coordinator needs to drive a transition (CRIS-18).
+ * PII is still stripped by `toPublicReport`; `version` is a concurrency token,
+ * not reporter data, and rides alongside the public fields (see
+ * `CoordinatorIncident`).
+ */
+function toRedactedIncident(report: Schema['Report']['type']): CoordinatorIncident {
+  return {
+    ...toPublicReport({
+      id: report.id,
+      status: (report.status ?? 'NEW') as ReportStatus,
+      category: report.category as Category | null,
+      urgency: report.urgency as Urgency | null,
+      priorityScore: report.priorityScore,
+      priorityBand: report.priorityBand,
+      lat: report.lat,
+      lng: report.lng,
+      geohash: report.geohash,
+      geohashPrefix: report.geohashPrefix,
+      regionId: report.regionId,
+      createdAt: report.createdAt,
+    }),
+    version: report.version ?? 0,
+  };
 }
 
 export interface LiveReportsFeed {

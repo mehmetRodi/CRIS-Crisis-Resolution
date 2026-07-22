@@ -43,3 +43,4 @@ behind the code — essential when refactoring or extending the system.
 | [0025](0025-maplibre-base-map.md)                             | MapLibre base map (env tile source, lazy-loaded)     | Accepted                         |
 | [0026](0026-bedrock-triage-agent.md)                          | Bedrock Triage Agent (tool-using classifier)         | Accepted                         |
 | [0027](0027-amazon-location-places-geocoding.md)              | Amazon Location Places geocoding + shared geohash    | Accepted                         |
+| [0028](0028-coordinator-status-transition-wiring.md)          | Coordinator status-transition wiring (frontend)      | Accepted                         |

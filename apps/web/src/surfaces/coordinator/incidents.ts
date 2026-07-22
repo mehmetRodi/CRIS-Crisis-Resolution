@@ -16,6 +16,21 @@ import { Category, PriorityBand, priorityBandForScore, type PublicReport } from 
  */
 
 /**
+ * A redacted incident enriched with the operational fields an authenticated
+ * coordinator needs to act on it (CRIS-18). `PublicReport` is deliberately the
+ * PII-free *public* projection (map + public queries), so it omits the
+ * optimistic-lock `version` that `updateReportStatus` requires (§5.3). `version`
+ * is not PII — it is a concurrency token — so rather than widen `PublicReport`
+ * (and risk it leaking to the public surfaces), the coordinator read attaches it
+ * here. Everything that consumes `PublicReport` still accepts a
+ * `CoordinatorIncident` unchanged, since it is a strict superset.
+ */
+export interface CoordinatorIncident extends PublicReport {
+  /** Optimistic-lock version, passed back as `expectedVersion` on a transition. */
+  version: number;
+}
+
+/**
  * The dashboard's incident feed as a state machine. The presentational
  * component renders one branch per state; `idle` is the default (pre-wired
  * shell) so the component renders without a backend session in unit tests.
@@ -32,7 +47,7 @@ export type IncidentFeedState =
   | { status: 'loading' }
   | { status: 'unauthenticated' }
   | { status: 'error'; message: string }
-  | { status: 'ready'; incidents: PublicReport[] };
+  | { status: 'ready'; incidents: CoordinatorIncident[] };
 
 /**
  * The priority band to display for an incident. Prefer the persisted
@@ -88,9 +103,11 @@ export function countByCategory(
 /**
  * Incidents ordered for the coordinator queue: highest `priorityScore` first,
  * unscored incidents last, ties broken by most-recently reported. Returns a new
- * array — the input is not mutated.
+ * array — the input is not mutated. Generic over the incident type so a
+ * `CoordinatorIncident` keeps its `version` through the sort (the queue selects a
+ * row and hands its `version` to `updateReportStatus`).
  */
-export function sortByPriority(incidents: readonly PublicReport[]): PublicReport[] {
+export function sortByPriority<T extends PublicReport>(incidents: readonly T[]): T[] {
   return [...incidents].sort((a, b) => {
     const scoreA = a.priorityScore ?? -1;
     const scoreB = b.priorityScore ?? -1;
