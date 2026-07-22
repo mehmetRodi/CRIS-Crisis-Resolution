@@ -170,12 +170,21 @@ function buildDeps(): WorkerDeps {
     if (!value) throw new Error(`missing required env var: ${key}`);
     return value;
   };
+  const modelId = env('BEDROCK_MODEL_ID');
+  // TODO(CRIS-21): when GEOCODING_ENABLED=true, swap in the Amazon Location
+  // place-index geocoder; the agent's geocode_location tool is wired regardless.
+  const geocoder = createNullGeocoder();
   return {
     store: createDynamoStore({
       report: env('REPORT_TABLE_NAME'),
       reportEvent: env('REPORT_EVENT_TABLE_NAME'),
     }),
-    classifier: createBedrockClassifier({ modelId: env('BEDROCK_MODEL_ID') }),
+    // Tool-using Triage Agent (§5.5, CRIS-20), degrading to the MVP single-call
+    // classifier (CRIS-10) when agent orchestration is unavailable.
+    triage: createTriageAgent({
+      primary: createBedrockTriageAgent({ modelId, geocoder }),
+      fallback: createBedrockClassifier({ modelId }),
+    }),
   };
 }
 
