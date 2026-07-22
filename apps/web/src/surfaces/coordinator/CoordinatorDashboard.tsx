@@ -30,8 +30,7 @@ import { IncidentMap } from '../map/IncidentMap';
  * `idle`, which reproduces the original shell (placeholders, "—" metrics) so
  * the component renders with no backend session — the state unit tests rely on
  * this. When no coordinator is signed in the route passes `unauthenticated`,
- * and the queue shows a sign-in prompt rather than erroring (reads are gated
- * until CRIS-7 lands).
+ * and the queue shows a sign-in prompt rather than erroring.
  *
  * Region → owning ticket (Fig 11 interaction map):
  *   - Filters (category / status / region)        → CRIS-22 (facets read-only)
@@ -43,8 +42,8 @@ import { IncidentMap } from '../map/IncidentMap';
  *   - Live-update push (subscriptions)             → CRIS-28
  *
  * This is a one-shot read with a manual refresh, NOT a live subscription — the
- * "live updates" indicator stays disconnected until CRIS-28. Auth/role-gating
- * of the route is CRIS-7.
+ * "live updates" indicator stays disconnected until CRIS-28. Authentication
+ * exists, but coordinator-group enforcement at the route boundary is deferred.
  */
 
 interface CoordinatorDashboardProps {
@@ -236,7 +235,7 @@ function feedBody(
     case 'unauthenticated':
       return (
         <RegionMessage>
-          Sign in as a coordinator to view live incidents. Authentication lands with CRIS-7.
+          Sign in to view incidents. Coordinator role enforcement is not wired yet.
         </RegionMessage>
       );
     case 'error':

@@ -3,13 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from './AuthContext';
 
 /**
- * Placeholder application shell.
+ * Application landing page.
  *
- * This is intentionally a static landing surface for the scaffold. The web SPA
+ * This landing surface links to the implemented web routes. The web SPA
  * serves coordinators/responders/volunteers; the mobile app (`apps/mobile`,
  * CRIS-6 — see ADR 0020) is the primary citizen channel, with `/report` as a
- * web emergency fallback (ADR 0021). Remaining surfaces are stubs, each built
- * by its owning ticket:
+ * web emergency fallback (ADR 0021). Surface ownership:
  *   - Coordinator dashboard     → CRIS-12 (shell landed at /coordinator; ADR-0022)
  *   - Live map                  → CRIS-13 (base map at /map; ADR-0025)
  *   - Volunteer task board      → CRIS-4 epic (E4)

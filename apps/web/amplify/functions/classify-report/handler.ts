@@ -158,9 +158,9 @@ export async function processRecord(
     streamEventId,
   });
 
-  // TODO(CRIS-19): call the IAM-only `publishReportUpdate` mutation so subscribed
-  // clients update in near real time (§5.3). Durable write above is independent
-  // of AppSync availability.
+  // TODO: authorize and call `publishReportUpdate`, then enable the custom
+  // subscriptions so clients update in near real time (§5.3). Durable write
+  // above remains independent of AppSync availability.
   log({ event: 'classify.done', reportId, band: scoring.priorityBand, status });
 }
 

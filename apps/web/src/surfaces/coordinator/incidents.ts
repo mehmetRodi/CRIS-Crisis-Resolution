@@ -23,7 +23,7 @@ import { Category, PriorityBand, priorityBandForScore, type PublicReport } from 
  *   idle            → not yet wired to a data source (default / shell)
  *   loading         → a read is in flight
  *   unauthenticated → no coordinator session; reads are gated (graceful degrade
- *                     until sign-in lands with CRIS-7)
+ *                     when there is no authenticated session)
  *   error           → the read failed or was rejected (e.g. wrong role)
  *   ready           → incidents loaded (possibly empty)
  */

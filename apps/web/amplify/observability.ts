@@ -168,7 +168,7 @@ export function addObservability(props: ObservabilityProps): Topic {
   register(
     lambdaErrorAlarm(scope, 'PublishReportUpdateErrors', functions.publishReportUpdate, {
       description:
-        'publishReportUpdate resolver errors — real-time fan-out to subscribers degraded (§3.2 p95 < 2 s).',
+        'publishReportUpdate resolver errors; full subscription fan-out is not wired yet.',
     }),
   );
 
