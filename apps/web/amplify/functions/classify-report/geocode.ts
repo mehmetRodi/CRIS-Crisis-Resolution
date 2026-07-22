@@ -93,9 +93,7 @@ export interface AmazonLocationGeocoderConfig {
  * throws, which the agent treats as "geocoding unavailable" and proceeds
  * unlocated (§5.4.4).
  */
-export function createAmazonLocationGeocoder(
-  config: AmazonLocationGeocoderConfig = {},
-): Geocoder {
+export function createAmazonLocationGeocoder(config: AmazonLocationGeocoderConfig = {}): Geocoder {
   const client = config.client ?? new GeoPlacesClient({});
   const minMatchScore = config.minMatchScore ?? MIN_MATCH_SCORE;
   const log = config.log ?? (() => {});

@@ -39,9 +39,13 @@ export const classifyReport = defineFunction({
     // with no IAM change (the grant is a `claude-*` family wildcard). NO
     // secrets/PII in env.
     BEDROCK_MODEL_ID: 'eu.anthropic.claude-haiku-4-5-20251001-v1:0',
-    // Feature flag for the CRIS-21 Amazon Location geocoder behind the Triage
-    // Agent's geocode_location tool. Off until the place index exists; the agent
-    // still offers the tool but every lookup returns "unavailable" (CRIS-20).
-    GEOCODING_ENABLED: 'false',
+    // Feature flag for the Amazon Location geocoder behind the Triage Agent's
+    // geocode_location tool (CRIS-21, ADR-0027). On → the worker resolves
+    // described locations via the Amazon Location Places `Geocode` API and
+    // derives the geohash locally; off → every lookup returns "unavailable" and
+    // reports stay unlocated (the tool-use path still runs). A kill switch: flip
+    // to 'false' to shed the geocoding dependency without a code change if the
+    // Places API degrades — reports are still classified and never lost (§5.4.4).
+    GEOCODING_ENABLED: 'true',
   },
 });

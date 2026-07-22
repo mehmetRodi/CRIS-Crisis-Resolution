@@ -171,9 +171,13 @@ function buildDeps(): WorkerDeps {
     return value;
   };
   const modelId = env('BEDROCK_MODEL_ID');
-  // TODO(CRIS-21): when GEOCODING_ENABLED=true, swap in the Amazon Location
-  // place-index geocoder; the agent's geocode_location tool is wired regardless.
-  const geocoder = createNullGeocoder();
+  // The agent's geocode_location tool is wired regardless; the flag chooses what
+  // backs it (CRIS-21, ADR-0027). When off, every lookup returns "unavailable"
+  // and reports stay unlocated — the tool-use path still runs.
+  const geocoder: Geocoder =
+    process.env.GEOCODING_ENABLED === 'true'
+      ? createAmazonLocationGeocoder()
+      : createNullGeocoder();
   return {
     store: createDynamoStore({
       report: env('REPORT_TABLE_NAME'),

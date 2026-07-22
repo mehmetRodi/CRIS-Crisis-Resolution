@@ -1,11 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { GeocodeCommand, type GeocodeCommandOutput } from '@aws-sdk/client-geo-places';
 import { encodeGeohash, geohashPrefix } from '@crisismap/shared';
-import {
-  createAmazonLocationGeocoder,
-  createNullGeocoder,
-  type GeoPlacesSend,
-} from './geocode';
+import { createAmazonLocationGeocoder, createNullGeocoder, type GeoPlacesSend } from './geocode';
 
 /* -------------------------------------------------------------------------- */
 /* Fakes                                                                       */
@@ -105,12 +101,16 @@ describe('createAmazonLocationGeocoder', () => {
       $metadata: {},
       ResultItems: [{ PlaceId: 'p1', PlaceType: 'Region', Title: 'X' }],
     } as GeocodeCommandOutput);
-    await expect(createAmazonLocationGeocoder({ client }).geocode('vague area')).resolves.toBeNull();
+    await expect(
+      createAmazonLocationGeocoder({ client }).geocode('vague area'),
+    ).resolves.toBeNull();
   });
 
   it('discards a low-confidence match below the score floor', async () => {
     const client = fakeClient(oneResult(29.0257, 40.9903, 0.3));
-    await expect(createAmazonLocationGeocoder({ client }).geocode('maybe here')).resolves.toBeNull();
+    await expect(
+      createAmazonLocationGeocoder({ client }).geocode('maybe here'),
+    ).resolves.toBeNull();
   });
 
   it('accepts a result that omits a match score (score is a guard, not required)', async () => {

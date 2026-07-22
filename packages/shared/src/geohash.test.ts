@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  encodeGeohash,
-  geohashPrefix,
-  GEOHASH_PREFIX_PRECISION,
-} from './geohash';
+import { encodeGeohash, geohashPrefix, GEOHASH_PREFIX_PRECISION } from './geohash';
 import { GEOHASH_PRECISION } from './domain';
 
 describe('encodeGeohash', () => {
