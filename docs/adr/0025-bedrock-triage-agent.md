@@ -59,7 +59,7 @@ and the geocoding _seam_; CRIS-21 fills that seam with the real place-index look
      coordinates; it delegates to an injected `Geocoder` (`geocode.ts`).
    - `submit_triage(...)` — the agent calls it once to emit the final triage; its `input_schema`
      is `TRIAGE_TOOL_INPUT_SCHEMA` (the CRIS-11 contract + `entities`).
-   `tool_choice: {type: 'any'}`, `MAX_TURNS = 4`, no `temperature`/`effort`.
+     `tool_choice: {type: 'any'}`, `MAX_TURNS = 4`, no `temperature`/`effort`.
 2. **Same validation/idempotency/failure contract.** The `submit_triage` input is re-validated
    with `parseClassification` (defense in depth). Invalid output gets **exactly one repair
    attempt**, then a `ClassificationError` propagates and the worker routes the report to
