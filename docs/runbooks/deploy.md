@@ -5,15 +5,16 @@ pipeline and the first-response for each observability alarm. The full incident/
 is CRIS-35; this is the deploy + alarm-triage subset.
 
 - **Deploy pipeline:** [ADR-0016](../adr/0016-continuous-deployment-ampx-pipeline-oidc.md)
+- **CI success gate:** [ADR-0018](../adr/0018-gate-deploy-on-ci-via-workflow-run.md)
 - **Observability:** [ADR-0015](../adr/0015-observability-xray-cloudwatch-alarms.md)
 
 ---
 
 ## 1. Continuous deployment
 
-The backend deploys via `.github/workflows/deploy.yml` (`ampx pipeline-deploy`) on push to
-`main` and on manual dispatch. **It is dormant until an operator opts in** — the job is skipped
-(green) unless `AWS_DEPLOY_ENABLED` is `true`.
+The backend deploys via `.github/workflows/deploy.yml` (`ampx pipeline-deploy`) after the CI
+workflow succeeds for `main`, or on manual dispatch. **It is dormant until an operator opts
+in** — the job is skipped (green) unless `AWS_DEPLOY_ENABLED` is `true`.
 
 ### One-time AWS setup
 
@@ -46,7 +47,7 @@ Also confirm Bedrock model access is enabled for `BEDROCK_MODEL_ID`
 
 ### Deploy
 
-- **Automatic:** merge to `main`.
+- **Automatic:** merge to `main`; deployment begins only after that commit's CI run succeeds.
 - **Manual:** Actions → **Deploy** → _Run workflow_.
 
 > First deploy note (ADR-0013): enabling the Report DynamoDB stream changes the table's
@@ -66,7 +67,8 @@ follow-up (CRIS-29/35).
 - **Traces:** X-Ray is active on AppSync + all four Lambdas. Use the X-Ray service map to
   locate latency across AppSync → Lambda → DynamoDB/Bedrock.
 - **Dashboard:** CloudWatch → Dashboards → `CrisisMap-<stackName>`. One screen for the §3.2
-  SLAs (submission p95 < 800 ms, classification p95 < 15 s, real-time p95 < 2 s, 99.9%).
+  service targets (submission p95 < 800 ms, classification p95 < 15 s, real-time p95 < 2 s,
+  99.9%). The real-time widgets remain dormant until worker fan-out and subscriptions are wired.
 - **Alarms → SNS:** all alarms publish to the ops topic `OpsAlarmTopic`. **Subscribe an
   endpoint post-deploy** (it is environment-specific, so it is not in code):
   ```bash
@@ -84,7 +86,7 @@ follow-up (CRIS-29/35).
 | `ClassifyWorkerThrottles`   | Worker hitting the concurrency ceiling under load                        | Review reserved concurrency vs the 1,000 writes/min target (§3.2); raise account concurrency if needed. |
 | `SubmitReportErrors`        | Citizens may be unable to file reports (availability, §3.2)              | Check `submit-report` logs, DynamoDB throttling/conditional-check failures, AppSync health.             |
 | `TransitionReportErrors`    | Coordinator status transitions failing                                   | Check `transition-report` logs — often a version conflict (`CONFLICT`) or an invalid transition.        |
-| `PublishReportUpdateErrors` | Real-time fan-out degraded (§3.2 p95 < 2 s)                              | Check `publish-report-update` logs and AppSync subscription health.                                     |
+| `PublishReportUpdateErrors` | Publish resolver failures; full fan-out is not wired yet                 | Check `publish-report-update` logs. Once subscriptions land, also check AppSync subscription health.    |
 
 All alarms use `treatMissingData: NOT_BREACHING`, so an idle environment does not page. Both
 ALARM and OK transitions notify the topic, so recovery is visible too.
