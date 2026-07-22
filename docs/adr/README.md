@@ -41,3 +41,4 @@ behind the code — essential when refactoring or extending the system.
 | [0023](0023-coordinator-dashboard-live-read-path.md)          | Coordinator dashboard live incident read path        | Accepted                         |
 | [0024](0024-optional-auth-and-anonymous-guest-access.md)      | Optional Cognito sign-in + anonymous guest access    | Accepted                         |
 | [0025](0025-maplibre-base-map.md)                             | MapLibre base map (env tile source, lazy-loaded)     | Accepted                         |
+| [0026](0026-bedrock-triage-agent.md)                          | Bedrock Triage Agent (tool-using classifier)         | Accepted                         |

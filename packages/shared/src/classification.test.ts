@@ -5,15 +5,19 @@ import {
   CLASSIFICATION_CONFIDENCE_THRESHOLD,
   CLASSIFICATION_CONTRACT_VERSION,
   CLASSIFICATION_JSON_SCHEMA,
+  CLASSIFICATION_MAX_ENTITY_CHARS,
+  CLASSIFICATION_MAX_ENTITY_ITEMS,
   CLASSIFICATION_MAX_SUMMARY_CHARS,
   ClassificationContractError,
   MANUAL_ADJUSTMENT_LIMIT,
   parseClassification,
+  parseEntities,
   RECENCY_HALF_LIFE_MINUTES,
   RECENCY_MAX_POINTS,
   scoreReport,
   SCORE_VERSION,
   shouldEscalateToVerification,
+  TRIAGE_TOOL_INPUT_SCHEMA,
   URGENCY_MAX_POINTS,
   type ClassificationResult,
 } from './classification';
@@ -79,6 +83,67 @@ describe('classification contract (§2.2)', () => {
     expect([...CLASSIFICATION_JSON_SCHEMA.required].sort()).toEqual(
       Object.keys(CLASSIFICATION_JSON_SCHEMA.properties).sort(),
     );
+  });
+
+  it('bumps the contract version to 2 for the entity-carrying triage payload', () => {
+    expect(CLASSIFICATION_CONTRACT_VERSION).toBe(2);
+  });
+});
+
+describe('triage entities (§2.2, CRIS-20)', () => {
+  it('defaults to empty entities when the (single-call) producer omits them', () => {
+    // The CRIS-10 single-call classifier emits no `entities`; it must stay valid.
+    expect(parseClassification(rawClassification()).entities).toEqual({
+      peopleAffected: null,
+      infrastructure: [],
+      hazards: [],
+    });
+  });
+
+  it('parses well-formed entities from the triage agent', () => {
+    const entities = {
+      peopleAffected: 50,
+      infrastructure: ['north bridge', 'Route 9'],
+      hazards: ['road blocked'],
+    };
+    expect(parseClassification(rawClassification({ entities })).entities).toEqual(entities);
+  });
+
+  it('is lenient — never throws, normalizing junk to safe defaults', () => {
+    // Malformed entities must NOT fail the whole report to NEEDS_VERIFICATION.
+    const result = parseEntities({
+      peopleAffected: 'many',
+      infrastructure: 'not-an-array',
+      hazards: ['gas leak', 42, '', '  bridge  '],
+    });
+    expect(result.peopleAffected).toBeNull();
+    expect(result.infrastructure).toEqual([]);
+    // Non-strings dropped, blanks dropped, surviving strings trimmed.
+    expect(result.hazards).toEqual(['gas leak', 'bridge']);
+  });
+
+  it('rounds a fractional count and rejects a negative one', () => {
+    expect(parseEntities({ peopleAffected: 12.6 }).peopleAffected).toBe(13);
+    expect(parseEntities({ peopleAffected: -5 }).peopleAffected).toBeNull();
+  });
+
+  it('caps entity list length and per-item length (bloat defense)', () => {
+    const many = Array.from({ length: CLASSIFICATION_MAX_ENTITY_ITEMS + 5 }, (_, i) => `x${i}`);
+    const long = 'y'.repeat(CLASSIFICATION_MAX_ENTITY_CHARS + 50);
+    const result = parseEntities({ infrastructure: many, hazards: [long] });
+    expect(result.infrastructure).toHaveLength(CLASSIFICATION_MAX_ENTITY_ITEMS);
+    expect(result.hazards[0]).toHaveLength(CLASSIFICATION_MAX_ENTITY_CHARS);
+  });
+
+  it('triage tool schema is the base contract plus a required entities object', () => {
+    expect(TRIAGE_TOOL_INPUT_SCHEMA.properties.entities).toBeDefined();
+    expect(TRIAGE_TOOL_INPUT_SCHEMA.required).toContain('entities');
+    // Same strict-mode invariant as the base schema: required === property keys.
+    expect([...TRIAGE_TOOL_INPUT_SCHEMA.required].sort()).toEqual(
+      Object.keys(TRIAGE_TOOL_INPUT_SCHEMA.properties).sort(),
+    );
+    // Reuses the shared enums (not a divergent copy).
+    expect(TRIAGE_TOOL_INPUT_SCHEMA.properties.category.enum).toEqual(Object.values(Category));
   });
 });
 

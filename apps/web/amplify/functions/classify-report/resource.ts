@@ -5,12 +5,15 @@ import { defineFunction } from '@aws-amplify/backend';
  *
  * Consumes the classification SQS queue (fed by the Report DynamoDB stream via
  * an EventBridge Pipe — wired in `backend.ts`), claims the report
- * (NEW → PROCESSING via an optimistic-lock conditional write), calls Bedrock
- * under the JSON-only contract (`@crisismap/shared` classification schema),
- * scores deterministically (§5.4.2), writes the result back conditionally, and —
- * once CRIS-19 lands — calls the IAM-only `publishReportUpdate` mutation so
- * subscribers update in near real time. A Bedrock/parse failure leaves the
- * report as NEEDS_VERIFICATION, never lost (§5.4.4).
+ * (NEW → PROCESSING via an optimistic-lock conditional write), runs the Bedrock
+ * **Triage Agent** (§5.5, CRIS-20, ADR-0026) — a tool-using agent that emits the
+ * JSON-only contract (`@crisismap/shared` triage schema) and calls a geocoding
+ * tool when coordinates are missing, degrading to the MVP single-call classifier
+ * if agent orchestration is unavailable — scores deterministically (§5.4.2),
+ * writes the result back conditionally, and — once CRIS-19 lands — calls the
+ * IAM-only `publishReportUpdate` mutation so subscribers update in near real
+ * time. A triage/parse failure leaves the report as NEEDS_VERIFICATION, never
+ * lost (§5.4.4).
  *
  * The SQS event-source mapping and least-privilege IAM (Bedrock, SQS, and direct
  * DynamoDB writes granted via `grantReadWriteData`/`grantWriteData`) are attached
@@ -18,7 +21,7 @@ import { defineFunction } from '@aws-amplify/backend';
  * added with CDK.
  *
  * timeout: 60 s gives headroom over the §3.2 p95 < 15 s classification target
- * for the one Bedrock repair attempt + (future) geocode call.
+ * for the agent's multi-turn tool loop (geocode + submit + one repair).
  */
 export const classifyReport = defineFunction({
   name: 'classify-report',
@@ -36,8 +39,9 @@ export const classifyReport = defineFunction({
     // with no IAM change (the grant is a `claude-*` family wildcard). NO
     // secrets/PII in env.
     BEDROCK_MODEL_ID: 'eu.anthropic.claude-haiku-4-5-20251001-v1:0',
-    // Feature flag for the CRIS-13 Amazon Location geocoder. Off until the place
-    // index exists; the worker leaves location unresolved meanwhile.
+    // Feature flag for the CRIS-21 Amazon Location geocoder behind the Triage
+    // Agent's geocode_location tool. Off until the place index exists; the agent
+    // still offers the tool but every lookup returns "unavailable" (CRIS-20).
     GEOCODING_ENABLED: 'false',
   },
 });

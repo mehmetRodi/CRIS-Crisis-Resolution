@@ -74,6 +74,12 @@ const schema = a.schema({
       urgency: a.enum(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']),
       /** Model confidence in [0,1]. Low confidence routes to NEEDS_VERIFICATION. */
       confidence: a.float(),
+      /**
+       * Entities extracted by the Bedrock Triage Agent (§2.2, CRIS-20):
+       * peopleAffected + infrastructure/hazards. Coordinator-internal triage
+       * context (design doc Fig 2) — intentionally NOT projected to PublicReport.
+       */
+      entities: a.json(),
 
       // --- Deterministic priority (§5.4.2). Never raw model output. ----------
       priorityScore: a.float(),

@@ -5,8 +5,10 @@ import {
   scoreReport,
   shouldEscalateToVerification,
 } from '@crisismap/shared';
-import { createBedrockClassifier, type Classifier } from './bedrock';
-import { createDynamoStore, type LocationResult, type ReportStore } from './store';
+import { createBedrockClassifier } from './bedrock';
+import { createBedrockTriageAgent, createTriageAgent, type TriageAgent } from './agent';
+import { createNullGeocoder } from './geocode';
+import { createDynamoStore, type ReportStore } from './store';
 
 /**
  * classify-report worker (design doc §3, §5.4; CRIS-10).
@@ -16,9 +18,16 @@ import { createDynamoStore, type LocationResult, type ReportStore } from './stor
  * is unit-tested with fakes (see handler.test.ts), while the exported `handler`
  * wires the real Bedrock + DynamoDB implementations from the environment.
  *
+ * Classification is done by the Bedrock **Triage Agent** (§5.5, CRIS-20,
+ * ADR-0026): a tool-using agent that extracts category/urgency/entities/summary
+ * and resolves location via a geocoding tool, degrading to the MVP single-call
+ * classifier when agent orchestration is unavailable. The worker is agnostic to
+ * which path ran — it consumes a {@link TriageAgent}.
+ *
  * Scoring is the deterministic §5.4.2 formula from `@crisismap/shared`
- * (`scoreReport`, ADR-0010); a low-confidence or model-flagged classification is
- * escalated to NEEDS_VERIFICATION (§2.6) while still recording the AI result.
+ * (`scoreReport`, ADR-0010) — the ranking authority, never a model opinion; a
+ * low-confidence or model-flagged classification is escalated to
+ * NEEDS_VERIFICATION (§2.6) while still recording the AI result.
  */
 
 /** SQS payload projected by the EventBridge Pipe input transformer (IDs only, no PII). */
@@ -30,14 +39,9 @@ export interface ClassificationMessage {
 
 export interface WorkerDeps {
   store: ReportStore;
-  classifier: Classifier;
+  triage: TriageAgent;
   /** Structured-log sink; defaults to console. Override in tests. */
   log?: (entry: Record<string, unknown>) => void;
-}
-
-/** Geocode seam. TODO(CRIS-13): call Amazon Location; derive geohash/geohashPrefix. */
-function geocode(): LocationResult {
-  return {};
 }
 
 /** Parses the SQS body into a validated message, or null if malformed (poison). */
@@ -106,11 +110,12 @@ export async function processRecord(
   }
   const claimedVersion = report.version + 1;
 
-  let classification;
+  let triage;
   try {
-    classification = await deps.classifier.classify(report.text);
+    triage = await deps.triage.triage(report.text);
   } catch (err) {
-    // Bedrock/parse failure ⇒ NEEDS_VERIFICATION, never lost (§5.4.4).
+    // Triage failure (agent + fallback both failed contract validation) ⇒
+    // NEEDS_VERIFICATION, never lost (§5.4.4).
     log({
       event: 'classify.failed',
       reportId,
@@ -124,6 +129,8 @@ export async function processRecord(
     });
     return;
   }
+
+  const { classification, location } = triage;
 
   // Deterministic, explainable priority (§5.4.2, ADR-0010).
   const scoring = scoreReport({
@@ -145,7 +152,9 @@ export async function processRecord(
     priorityBand: scoring.priorityBand,
     scoreVersion: scoring.scoreVersion,
     scoreBreakdown: scoring.breakdown,
-    location: geocode(), // stub (CRIS-13); dedupe likewise deferred.
+    // Location resolved by the Triage Agent's geocode tool (§5.5), or {} when it
+    // stayed unresolved (GEOCODING_ENABLED=false until CRIS-21). Dedupe deferred.
+    location: location ?? {},
     streamEventId,
   });
 
@@ -161,12 +170,21 @@ function buildDeps(): WorkerDeps {
     if (!value) throw new Error(`missing required env var: ${key}`);
     return value;
   };
+  const modelId = env('BEDROCK_MODEL_ID');
+  // TODO(CRIS-21): when GEOCODING_ENABLED=true, swap in the Amazon Location
+  // place-index geocoder; the agent's geocode_location tool is wired regardless.
+  const geocoder = createNullGeocoder();
   return {
     store: createDynamoStore({
       report: env('REPORT_TABLE_NAME'),
       reportEvent: env('REPORT_EVENT_TABLE_NAME'),
     }),
-    classifier: createBedrockClassifier({ modelId: env('BEDROCK_MODEL_ID') }),
+    // Tool-using Triage Agent (§5.5, CRIS-20), degrading to the MVP single-call
+    // classifier (CRIS-10) when agent orchestration is unavailable.
+    triage: createTriageAgent({
+      primary: createBedrockTriageAgent({ modelId, geocoder }),
+      fallback: createBedrockClassifier({ modelId }),
+    }),
   };
 }
 

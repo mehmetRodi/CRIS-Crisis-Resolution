@@ -37,8 +37,13 @@ import { Category, PriorityBand, priorityBandForScore, Urgency } from './domain'
  * Version of the classification JSON contract. Persisted on the report so a
  * later contract change is detectable and reprocessable. Bump on any
  * breaking change to `ClassificationResult` / `CLASSIFICATION_JSON_SCHEMA`.
+ *
+ * v2 (CRIS-20): the Bedrock Triage Agent adds an `entities` object (§2.2) —
+ * people affected + infrastructure/hazards extracted from the report. The
+ * single-call classifier (CRIS-10) still emits v1 fields; `parseClassification`
+ * defaults `entities` to empty for those, so both producers are contract-valid.
  */
-export const CLASSIFICATION_CONTRACT_VERSION = 1;
+export const CLASSIFICATION_CONTRACT_VERSION = 2;
 
 /**
  * Version of the deterministic scoring formula (weights + band cutoffs).
@@ -69,8 +74,9 @@ export interface ClassificationResult {
   confidence: number;
   /**
    * Free-text location description extracted from the report (e.g.
-   * "near the north bridge on Route 9"). NOT geocoded — the geocode worker
-   * (CRIS-10) resolves this to coordinates. `null` when no location is stated.
+   * "near the north bridge on Route 9"). NOT itself coordinates — the Triage
+   * Agent's geocode tool (CRIS-20 seam / CRIS-21 Amazon Location) resolves it.
+   * `null` when no location is stated.
    */
   locationHint: string | null;
   /** Short, PII-free summary for coordinator triage. */
@@ -82,6 +88,30 @@ export interface ClassificationResult {
    * or possibly a hoax. Forces NEEDS_VERIFICATION regardless of `confidence`.
    */
   needsHumanReview: boolean;
+  /**
+   * Salient entities extracted from the report (§2.2, CRIS-20) — the "number of
+   * people affected" and "specific infrastructure involved" the design calls
+   * out, surfaced on the coordinator incident-detail view (design doc Fig 2).
+   * Enrichment only: unlike the core fields it is parsed leniently and never
+   * feeds the deterministic score (that is CRIS-30's decision). Always present
+   * after {@link parseClassification} — empty for the single-call producer.
+   */
+  entities: TriageEntities;
+}
+
+/**
+ * PII-free entities the Triage Agent pulls out of a report for triage context
+ * (§2.2). Model-derived and untrusted; treat as display metadata, never as an
+ * authority for routing. All fields are optional/absent-tolerant — a report is
+ * never rejected over malformed entities (see {@link parseEntities}).
+ */
+export interface TriageEntities {
+  /** Estimated people affected / at risk (§2.2; "Affected People" in Fig 4). `null` when not stated. */
+  peopleAffected: number | null;
+  /** Specific infrastructure involved, e.g. "north bridge", "power substation" (§2.2). */
+  infrastructure: string[];
+  /** Other salient hazards/impacts mentioned (e.g. "gas leak", "road blocked"). */
+  hazards: string[];
 }
 
 /**
@@ -95,6 +125,10 @@ export const CLASSIFICATION_CONFIDENCE_THRESHOLD = 0.6;
 export const CLASSIFICATION_MAX_SUMMARY_CHARS = 500;
 export const CLASSIFICATION_MAX_RATIONALE_CHARS = 500;
 export const CLASSIFICATION_MAX_LOCATION_HINT_CHARS = 300;
+
+/** Caps on the entity lists (CRIS-20) — same prompt-injection-bloat defense as above. */
+export const CLASSIFICATION_MAX_ENTITY_ITEMS = 12;
+export const CLASSIFICATION_MAX_ENTITY_CHARS = 120;
 
 /**
  * JSON Schema for the contract — usable directly as a Claude structured-output
@@ -125,6 +159,41 @@ export const CLASSIFICATION_JSON_SCHEMA = {
   ],
 } as const;
 
+/** JSON Schema for the `entities` object (CRIS-20). No exotic constraints — see below. */
+export const TRIAGE_ENTITIES_JSON_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    peopleAffected: { type: ['integer', 'null'] },
+    infrastructure: {
+      type: 'array',
+      items: { type: 'string', maxLength: CLASSIFICATION_MAX_ENTITY_CHARS },
+    },
+    hazards: {
+      type: 'array',
+      items: { type: 'string', maxLength: CLASSIFICATION_MAX_ENTITY_CHARS },
+    },
+  },
+  required: ['peopleAffected', 'infrastructure', 'hazards'],
+} as const;
+
+/**
+ * Input schema for the Triage Agent's `submit_triage` tool (CRIS-20). It is the
+ * base classification contract plus `entities`, so the tool-using agent emits
+ * one structured payload validated by the same {@link parseClassification}. The
+ * single-call fallback keeps using {@link CLASSIFICATION_JSON_SCHEMA} (no
+ * entities) — both are contract-valid because entity parsing is lenient.
+ */
+export const TRIAGE_TOOL_INPUT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    ...CLASSIFICATION_JSON_SCHEMA.properties,
+    entities: TRIAGE_ENTITIES_JSON_SCHEMA,
+  },
+  required: [...CLASSIFICATION_JSON_SCHEMA.required, 'entities'],
+} as const;
+
 /** Thrown when a model response violates the contract. Caller routes to NEEDS_VERIFICATION. */
 export class ClassificationContractError extends Error {
   constructor(message: string) {
@@ -140,6 +209,39 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** Normalize an untrusted value into a bounded list of trimmed, capped strings. */
+function toEntityList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  for (const item of value) {
+    if (out.length >= CLASSIFICATION_MAX_ENTITY_ITEMS) break;
+    if (typeof item !== 'string') continue;
+    const trimmed = item.trim();
+    if (trimmed) out.push(trimmed.slice(0, CLASSIFICATION_MAX_ENTITY_CHARS));
+  }
+  return out;
+}
+
+/**
+ * Normalize an untrusted `entities` value into {@link TriageEntities}. Lenient
+ * by design — entities are enrichment, not a safety-critical field, so a
+ * malformed/absent value yields empty entities rather than failing the whole
+ * report to NEEDS_VERIFICATION. Never throws.
+ */
+export function parseEntities(raw: unknown): TriageEntities {
+  const obj = isRecord(raw) ? raw : {};
+  const people = obj.peopleAffected;
+  const peopleAffected =
+    typeof people === 'number' && Number.isFinite(people) && people >= 0
+      ? Math.round(people)
+      : null;
+  return {
+    peopleAffected,
+    infrastructure: toEntityList(obj.infrastructure),
+    hazards: toEntityList(obj.hazards),
+  };
+}
+
 /**
  * Validate and normalize a raw model response into a {@link ClassificationResult}.
  * Enforces enum membership, `confidence ∈ [0, 1]`, field presence, and length
@@ -152,7 +254,16 @@ export function parseClassification(raw: unknown): ClassificationResult {
     throw new ClassificationContractError('classification response is not an object');
   }
 
-  const { category, urgency, confidence, locationHint, summary, rationale, needsHumanReview } = raw;
+  const {
+    category,
+    urgency,
+    confidence,
+    locationHint,
+    summary,
+    rationale,
+    needsHumanReview,
+    entities,
+  } = raw;
 
   if (typeof category !== 'string' || !CATEGORY_VALUES.has(category)) {
     throw new ClassificationContractError(`invalid category: ${String(category)}`);
@@ -193,6 +304,7 @@ export function parseClassification(raw: unknown): ClassificationResult {
     summary: summary.slice(0, CLASSIFICATION_MAX_SUMMARY_CHARS),
     rationale: rationale.slice(0, CLASSIFICATION_MAX_RATIONALE_CHARS),
     needsHumanReview,
+    entities: parseEntities(entities),
   };
 }
 
