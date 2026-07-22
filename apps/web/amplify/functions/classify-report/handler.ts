@@ -7,7 +7,7 @@ import {
 } from '@crisismap/shared';
 import { createBedrockClassifier } from './bedrock';
 import { createBedrockTriageAgent, createTriageAgent, type TriageAgent } from './agent';
-import { createNullGeocoder } from './geocode';
+import { createAmazonLocationGeocoder, createNullGeocoder, type Geocoder } from './geocode';
 import { createDynamoStore, type ReportStore } from './store';
 
 /**

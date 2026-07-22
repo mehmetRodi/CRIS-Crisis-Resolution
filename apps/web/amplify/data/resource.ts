@@ -501,18 +501,18 @@ const schema = a.schema({
     .authorization((allow) => [allow.groups(['ADMIN'])]),
 
   /*
-   * TODO(CRIS-19): Real-time subscriptions temporarily disabled to unblock the
+   * TODO(CRIS-28): Real-time subscriptions are temporarily disabled. Amplify
    * backend deploy. Amplify Gen 2 requires every custom subscription to declare a
    * `.handler()` (an AppSync JS resolver that sets the subscription filter via
    * `util.transform.toSubscriptionFilter`) in addition to its auth rule — these
    * had auth rules but no handler, so synthesis failed with InvalidSchemaError.
    *
-   * Re-enable as part of CRIS-19 by adding `.handler(a.handler.custom({ entry }))`
+   * Re-enable as part of CRIS-28 by adding `.handler(a.handler.custom({ entry }))`
    * to each, implementing the filter resolvers, and adding `@aws-appsync/utils`
    * for resolver types. The `publishReportUpdate` mutation + `PublicReport` type
    * above remain valid and stay enabled.
    *
-   *   // Live map: every redacted update. TODO(CRIS-13/CRIS-7): extend to guests.
+   *   // Live map: every redacted update. TODO(CRIS-28/CRIS-24): define guest policy.
    *   onReportUpdate: a
    *     .subscription()
    *     .for(a.ref('publishReportUpdate'))

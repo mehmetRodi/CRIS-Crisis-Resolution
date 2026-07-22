@@ -41,7 +41,7 @@ export interface ReportRecord {
   lastProcessedEventId?: string | null;
 }
 
-/** Resolved location, all optional — populated by the CRIS-13 geocode seam. */
+/** Resolved location, all optional — populated by the CRIS-21 geocoder. */
 export interface LocationResult {
   lat?: number;
   lng?: number;
