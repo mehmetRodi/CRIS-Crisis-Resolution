@@ -1,12 +1,12 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { Category, PriorityBand, type PublicReport } from '@crisismap/shared';
+import { Category, PriorityBand } from '@crisismap/shared';
 // The "Live map" region now mounts a real MapLibre map (CRIS-13); MapLibre is
 // stubbed globally in vitest.setup.ts (WebGL is absent in jsdom).
 import { CoordinatorDashboard } from './CoordinatorDashboard';
-import type { IncidentFeedState } from './incidents';
+import type { CoordinatorIncident, IncidentFeedState } from './incidents';
 
-function incident(overrides: Partial<PublicReport> = {}): PublicReport {
+function incident(overrides: Partial<CoordinatorIncident> = {}): CoordinatorIncident {
   return {
     reportId: 'report-0001',
     status: 'AI_CLASSIFIED',
@@ -22,6 +22,7 @@ function incident(overrides: Partial<PublicReport> = {}): PublicReport {
     regionId: 'region-a',
     createdAt: '2026-07-15T10:00:00Z',
     updatedAt: null,
+    version: 2,
     ...overrides,
   };
 }
