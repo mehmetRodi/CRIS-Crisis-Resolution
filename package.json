@@ -13,6 +13,7 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
+    "build:ci": "npm run build:ci --workspaces --if-present",
     "dev": "npm run dev --workspace @crisismap/web",
     "dev:mobile": "npm run start --workspace @crisismap/mobile",
     "typecheck": "npm run typecheck --workspaces --if-present",
@@ -20,6 +21,7 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "format:check:ci": "git ls-files -z --cached --others --exclude-standard | xargs -0 prettier --check --ignore-unknown",
     "test": "npm run test --workspaces --if-present"
   },
   "dependencies": {
