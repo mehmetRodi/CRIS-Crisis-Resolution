@@ -282,7 +282,9 @@ describe('processRecord', () => {
 
       // Must NOT throw: a rejection here would re-drive the SQS message and
       // reprocess an already-classified report.
-      await expect(processRecord(deps(store, fakeAgent(), publisher), message)).resolves.toBeUndefined();
+      await expect(
+        processRecord(deps(store, fakeAgent(), publisher), message),
+      ).resolves.toBeUndefined();
       expect(persisted).toHaveLength(1);
     });
   });
