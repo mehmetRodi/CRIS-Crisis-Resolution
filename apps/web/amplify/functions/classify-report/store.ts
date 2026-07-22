@@ -18,9 +18,10 @@ import {
  * Durable persistence for the classification worker.
  *
  * Per design doc §5.3 the worker writes to DynamoDB **directly** (keeping the
- * durable write independent of AppSync availability). A separate future step
- * will fan the redacted update out through `publishReportUpdate`; that notify
- * integration remains an unwired seam in the handler. IAM for these table writes is granted in `backend.ts` via
+ * durable write independent of AppSync availability), and only *then* fans the
+ * redacted update out through `publishReportUpdate` (a best-effort call in the
+ * handler, CRIS-19) — so a publish failure never rolls back the durable write.
+ * IAM for these table writes is granted in `backend.ts` via
  * `grantReadWriteData`; table names arrive as environment variables. There is no
  * separate `PublicReport` projection table in the current schema (it is a
  * customType returned by `publishReportUpdate`), so the worker writes only the
@@ -120,6 +121,8 @@ export function createDynamoStore(
         status: Item.status as string,
         text: Item.text as string,
         lastProcessedEventId: (Item.lastProcessedEventId as string | undefined) ?? null,
+        createdAt: (Item.createdAt as string | undefined) ?? null,
+        regionId: (Item.regionId as string | undefined) ?? null,
       };
     },
 
@@ -159,6 +162,7 @@ export function createDynamoStore(
         '#cat = :cat',
         'urgency = :urg',
         'confidence = :conf',
+        'summary = :summary',
         'entities = :entities',
         'priorityScore = :score',
         'priorityBand = :band',
@@ -172,6 +176,9 @@ export function createDynamoStore(
         ':cat': classification.category,
         ':urg': classification.urgency,
         ':conf': classification.confidence,
+        // Short, PII-free AI summary (§2.2). The one classification field safe to
+        // surface publicly; persisted so the projection carries it (CRIS-19).
+        ':summary': classification.summary,
         // Extracted entities (§2.2, CRIS-20) — coordinator-internal, never in PublicReport.
         ':entities': classification.entities,
         ':score': input.priorityScore,
@@ -224,6 +231,7 @@ export function createDynamoStore(
               category: classification.category,
               urgency: classification.urgency,
               confidence: classification.confidence,
+              summary: classification.summary,
               entities: classification.entities,
               priorityScore: input.priorityScore,
               priorityBand: input.priorityBand,
