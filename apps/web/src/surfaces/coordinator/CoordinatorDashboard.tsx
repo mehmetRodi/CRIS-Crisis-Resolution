@@ -1,8 +1,10 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import {
+  canActorTransition,
   Category,
   PriorityBand,
   ReportStatus,
+  STATUS_TRANSITIONS,
   UserRole,
   type PublicReport,
 } from '@crisismap/shared';
@@ -12,8 +14,10 @@ import {
   countByCategory,
   countUnscored,
   sortByPriority,
+  type CoordinatorIncident,
   type IncidentFeedState,
 } from './incidents';
+import type { TransitionRequest, TransitionUiState } from './useReportTransition';
 import { IncidentMap } from '../map/IncidentMap';
 
 /**
@@ -37,7 +41,8 @@ import { IncidentMap } from '../map/IncidentMap';
  *   - Live map (Amazon Location + MapLibre)        → CRIS-13 (base map ✓)
  *   - Priority-ordered incident queue              → live here; filters CRIS-22
  *   - Incident detail (summary / score / timeline) → CRIS-23
- *   - Guarded response actions                     → CRIS-32
+ *   - Status transitions (verify/reject/resolve …) → CRIS-18 (wired here)
+ *   - Guarded response actions (assign team, merge) → CRIS-32
  *   - Recent activity (audit timeline)             → CRIS-28
  *   - Live-update push (subscriptions)             → CRIS-28
  *
@@ -54,6 +59,15 @@ interface CoordinatorDashboardProps {
   feed?: IncidentFeedState;
   /** Re-run the read. Rendered as a header button when the feed is live. */
   onRefresh?: () => void;
+  /**
+   * Apply a status transition for the selected incident (CRIS-18). Injected by
+   * the route wrapper (which owns `useReportTransition`) so this component stays
+   * presentational. When omitted, the incident-detail panel keeps its disabled
+   * placeholder actions (the pre-wired shell).
+   */
+  onTransition?: (request: TransitionRequest) => void;
+  /** Lifecycle of the in-flight/last transition, for inline feedback (CRIS-18). */
+  transition?: TransitionUiState;
 }
 
 /** A metric tile in the top command strip (Fig 1: "incident metrics"). */
