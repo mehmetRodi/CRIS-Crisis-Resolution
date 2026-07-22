@@ -484,15 +484,15 @@ const schema = a.schema({
    * redacted update out to subscribers — keeping the durable write independent
    * of AppSync availability.
    *
-   * CRIS-19: authorized ONLY to the `classify-report` worker's execution role
-   * via `allow.resource` (the framework-blessed way to let a backend function
-   * call an operation over IAM auth). No user, group, or guest can invoke it —
-   * it is internal-only. Dropping the previous ADMIN rule closes the last
-   * client-facing door on the real-time channel (ADR-0029). `allow.resource`
-   * only adds a `classify-report → data` edge (an `appsync:GraphQL` grant on the
-   * worker's role plus endpoint/introspection env injection), matching the
-   * direction of the worker's existing table grants — so it introduces no
-   * cross-stack cycle (see backend.ts).
+   * CRIS-19: this operation declares NO per-operation `allow` rule, so no user,
+   * group, or guest can invoke it — it is internal-only. The sole caller is the
+   * `classify-report` worker, granted at the SCHEMA level via
+   * `allow.resource(classifyReportFn).to(['mutate'])` (see the schema
+   * `.authorization()` below). `allow.resource` is only expressible at schema
+   * scope (Amplify grants function access to the API, not to a single field),
+   * which is why the grant lives there and this operation is left rule-less.
+   * Dropping the previous ADMIN rule closes the last client-facing door on the
+   * real-time channel (ADR-0029).
    *
    * The argument list is exactly the public fields, so PII has no wire
    * representation on this path — the type system is the redaction guarantee,
@@ -517,8 +517,7 @@ const schema = a.schema({
       updatedAt: a.datetime(),
     })
     .returns(a.ref('PublicReport'))
-    .handler(a.handler.function(publishReportUpdateFn))
-    .authorization((allow) => [allow.resource(classifyReportFn).to(['mutate'])]),
+    .handler(a.handler.function(publishReportUpdateFn)),
 
   /*
    * TODO(CRIS-28): Real-time subscriptions are temporarily disabled. Amplify
@@ -555,7 +554,26 @@ const schema = a.schema({
    *     .handler(a.handler.custom({ entry: './subscriptions/by-status.js' }))
    *     .authorization((allow) => [allow.authenticated()]),
    */
-});
+})
+  /**
+   * Schema-level function access (CRIS-19, ADR-0029). `allow.resource` can ONLY
+   * be declared here, not on an individual model or operation — Amplify grants a
+   * function access to the API surface, then scopes it by operation *type*. We
+   * grant the `classify-report` worker `mutate` so it can call the internal
+   * `publishReportUpdate` after its durable write.
+   *
+   * Consequence to accept: this is an API-wide `mutate` grant, so the worker's
+   * role could also technically call `submitReport`/`updateReportStatus` over
+   * IAM — Amplify offers no field-scoped function grant. The blast radius is
+   * bounded (the worker is trusted internal code and only ever calls
+   * `publishReportUpdate`), and every model mutation still enforces its own
+   * optimistic-lock/role guards. Revisit if a tighter per-field grant appears.
+   *
+   * All models and the other custom operations declare their own per-op rules,
+   * so this schema-level rule is NOT a client-facing default for them; it only
+   * supplies auth for the otherwise rule-less `publishReportUpdate`.
+   */
+  .authorization((allow) => [allow.resource(classifyReportFn).to(['mutate'])]);
 
 export type Schema = ClientSchema<typeof schema>;
 
