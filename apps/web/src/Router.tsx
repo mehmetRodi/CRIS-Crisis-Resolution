@@ -8,6 +8,7 @@ import SignupPage from './SignupPage';
 import ConfirmSignupPage from './ConfirmSignupPage';
 import { CoordinatorDashboard } from './surfaces/coordinator/CoordinatorDashboard';
 import { useLiveReports } from './surfaces/coordinator/useLiveReports';
+import { useReportTransition } from './surfaces/coordinator/useReportTransition';
 
 /**
  * Web routes. The web SPA is chiefly the coordinator/responder/volunteer
@@ -27,7 +28,21 @@ import { useLiveReports } from './surfaces/coordinator/useLiveReports';
 function CoordinatorRoute() {
   const navigate = useNavigate();
   const { state, refresh } = useLiveReports();
-  return <CoordinatorDashboard onExit={() => navigate('/')} feed={state} onRefresh={refresh} />;
+  // CRIS-18: guarded status transitions. Re-read the feed after any successful
+  // transition so the queue reflects the new status and a fresh optimistic-lock
+  // version (§5.3).
+  const { state: transition, transition: applyTransition } = useReportTransition({
+    onSuccess: refresh,
+  });
+  return (
+    <CoordinatorDashboard
+      onExit={() => navigate('/')}
+      feed={state}
+      onRefresh={refresh}
+      onTransition={(request) => void applyTransition(request)}
+      transition={transition}
+    />
+  );
 }
 
 export function Router() {

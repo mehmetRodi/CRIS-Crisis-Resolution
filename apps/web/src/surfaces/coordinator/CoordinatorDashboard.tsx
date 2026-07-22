@@ -177,11 +177,36 @@ function formatReported(createdAt: string | null): string {
 }
 
 /** One row of the priority queue. Renders only redacted, PII-free fields. */
-function IncidentRow({ incident }: { incident: PublicReport }) {
+function IncidentRow({
+  incident,
+  selected,
+  onSelect,
+}: {
+  incident: PublicReport;
+  selected: boolean;
+  onSelect: () => void;
+}) {
   const band = bandOf(incident);
   const badge = (band && BAND_BADGE.get(band)) ?? 'bg-slate-100 text-slate-600';
   return (
-    <tr className="border-t border-slate-100 hover:bg-slate-50">
+    <tr
+      // Selecting a row opens it in the incident-detail panel, where CRIS-18
+      // status transitions are applied. Full row-selection UX (multi-select,
+      // detail view) is CRIS-22/23; this is the minimal selection the transition
+      // wiring needs. Keyboard-operable for accessibility (CRIS-27).
+      aria-selected={selected}
+      tabIndex={0}
+      onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
+      className={`cursor-pointer border-t border-slate-100 ${
+        selected ? 'bg-sky-50 ring-1 ring-inset ring-sky-300' : 'hover:bg-slate-50'
+      }`}
+    >
       <td className="whitespace-nowrap px-3 py-2">
         <span className={`rounded px-1.5 py-0.5 text-xs font-semibold ${badge}`}>
           {band ?? '—'}
@@ -203,7 +228,15 @@ function IncidentRow({ incident }: { incident: PublicReport }) {
 }
 
 /** The priority-ordered incident table (design doc §2.4). */
-function IncidentQueue({ incidents }: { incidents: PublicReport[] }) {
+function IncidentQueue({
+  incidents,
+  selectedReportId,
+  onSelect,
+}: {
+  incidents: CoordinatorIncident[];
+  selectedReportId: string | null;
+  onSelect: (reportId: string) => void;
+}) {
   if (incidents.length === 0) {
     return (
       <RegionMessage>No incidents yet. New reports will appear here as they arrive.</RegionMessage>
@@ -225,10 +258,145 @@ function IncidentQueue({ incidents }: { incidents: PublicReport[] }) {
         </thead>
         <tbody>
           {sortByPriority(incidents).map((incident) => (
-            <IncidentRow key={incident.reportId} incident={incident} />
+            <IncidentRow
+              key={incident.reportId}
+              incident={incident}
+              selected={incident.reportId === selectedReportId}
+              onSelect={() => onSelect(incident.reportId)}
+            />
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+/** Human label for a `from → to` status move shown on the transition button. */
+function transitionLabel(from: ReportStatus, to: ReportStatus): string {
+  switch (to) {
+    case ReportStatus.VERIFIED:
+      return 'Verify';
+    case ReportStatus.REJECTED:
+      return 'Reject';
+    case ReportStatus.NEEDS_VERIFICATION:
+      return 'Send to verification';
+    case ReportStatus.RESOLVED:
+      return 'Resolve';
+    case ReportStatus.IN_PROGRESS:
+      return from === ReportStatus.RESOLVED ? 'Reopen' : 'Start response';
+    default:
+      return `→ ${to}`;
+  }
+}
+
+/**
+ * The status transitions a coordinator may drive from `from` (CRIS-18). The
+ * structurally-legal moves come from `STATUS_TRANSITIONS`; `canActorTransition`
+ * narrows them to the coordinator's authority. This mirrors the server's
+ * `TRANSITION_ROLES` so the UI only offers moves the resolver will accept — but
+ * the resolver remains the real gate (a `FORBIDDEN` still surfaces as an error).
+ * SYSTEM-only moves (NEW→PROCESSING, classification) never appear here.
+ */
+function coordinatorTransitions(from: ReportStatus): ReportStatus[] {
+  return STATUS_TRANSITIONS[from].filter((to) =>
+    canActorTransition(UserRole.COORDINATOR, from, to),
+  );
+}
+
+/**
+ * Incident-detail panel with the CRIS-18 status-transition controls. Presented
+ * for the selected incident; the richer detail (AI summary, score breakdown,
+ * timeline) is CRIS-23, and assignment/merge actions are CRIS-32.
+ */
+function IncidentDetail({
+  incident,
+  onTransition,
+  transition,
+}: {
+  incident: CoordinatorIncident;
+  onTransition: (request: TransitionRequest) => void;
+  transition: TransitionUiState;
+}) {
+  const [note, setNote] = useState('');
+  const from = incident.status;
+  const moves = coordinatorTransitions(from);
+  const isSubmitting =
+    transition.status === 'submitting' && transition.reportId === incident.reportId;
+  const showError = transition.status === 'error' && transition.reportId === incident.reportId;
+  const showSuccess =
+    transition.status === 'success' && transition.reportId === incident.reportId;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <span className="font-mono text-xs text-slate-500">{incident.reportId}</span>
+        <span className="rounded bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
+          {from}
+        </span>
+      </div>
+
+      {incident.summary ? (
+        <p className="text-sm text-slate-600">{incident.summary}</p>
+      ) : (
+        <p className="text-xs text-slate-400">
+          No AI summary yet. Summary, score breakdown, and timeline land in CRIS-23.
+        </p>
+      )}
+
+      {moves.length > 0 ? (
+        <>
+          <label className="block">
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Note (optional)
+            </span>
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              rows={2}
+              placeholder="Reason recorded on the audit trail"
+              className="w-full rounded border border-slate-300 px-2 py-1 text-xs text-slate-700 focus:border-sky-400 focus:outline-none"
+            />
+          </label>
+          <div className="flex flex-wrap gap-2">
+            {moves.map((to) => (
+              <button
+                key={to}
+                type="button"
+                disabled={isSubmitting}
+                onClick={() =>
+                  onTransition({
+                    reportId: incident.reportId,
+                    toStatus: to,
+                    expectedVersion: incident.version,
+                    note: note.trim() ? note.trim() : undefined,
+                  })
+                }
+                className="rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {transitionLabel(from, to)}
+              </button>
+            ))}
+          </div>
+        </>
+      ) : (
+        <p className="text-xs text-slate-400">
+          No status actions available from <span className="font-semibold">{from}</span>.
+        </p>
+      )}
+
+      {isSubmitting ? <p className="text-xs text-slate-500">Applying…</p> : null}
+      {showSuccess ? (
+        <p className="text-xs text-emerald-600" role="status">
+          Updated to {transition.toStatus}.
+        </p>
+      ) : null}
+      {showError ? (
+        <p className="text-xs text-red-600" role="alert">
+          {transition.code === 'CONFLICT'
+            ? 'This report changed since you loaded it. Refresh and try again.'
+            : transition.message}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -239,7 +407,7 @@ function IncidentQueue({ incidents }: { incidents: PublicReport[] }) {
  */
 function feedBody(
   feed: IncidentFeedState,
-  ready: (incidents: PublicReport[]) => ReactNode,
+  ready: (incidents: CoordinatorIncident[]) => ReactNode,
 ): ReactNode {
   switch (feed.status) {
     case 'idle':
@@ -284,11 +452,19 @@ export function CoordinatorDashboard({
   onExit,
   feed = { status: 'idle' },
   onRefresh,
+  onTransition,
+  transition = { status: 'idle' },
 }: CoordinatorDashboardProps) {
   const counts = feed.status === 'ready' ? countByBand(feed.incidents) : null;
   const unscored = feed.status === 'ready' ? countUnscored(feed.incidents) : 0;
   const categories = feed.status === 'ready' ? countByCategory(feed.incidents) : [];
   const isLive = feed.status !== 'idle';
+
+  // Which incident the detail panel + CRIS-18 transition controls act on. Pure
+  // view state (not a data source), so it lives in the presentational component.
+  const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
+  const incidents = feed.status === 'ready' ? feed.incidents : [];
+  const selectedIncident = incidents.find((i) => i.reportId === selectedReportId) ?? null;
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900">
@@ -426,8 +602,12 @@ export function CoordinatorDashboard({
               hint="De-duplicated, priority-ordered incident table with row selection"
               className="min-h-[16rem]"
             >
-              {feedBody(feed, (incidents) => (
-                <IncidentQueue incidents={incidents} />
+              {feedBody(feed, (rows) => (
+                <IncidentQueue
+                  incidents={rows}
+                  selectedReportId={selectedReportId}
+                  onSelect={setSelectedReportId}
+                />
               ))}
             </Region>
           </div>
@@ -439,28 +619,46 @@ export function CoordinatorDashboard({
               hint="Selected incident: AI summary, score breakdown, and timeline"
               className="min-h-[12rem]"
             >
-              <div className="space-y-3">
-                <p className="text-sm text-slate-500">No incident selected.</p>
-                <p className="text-xs text-slate-400">
-                  Selecting a row in the queue opens summary, score breakdown, and timeline here
-                  (CRIS-23).
-                </p>
-                {/* Guarded response actions (verify / assign / merge / resolve) — CRIS-32. */}
-                <div className="flex flex-wrap gap-2 pt-1">
-                  {['Verify', 'Reject', 'Assign team', 'Resolve'].map((action) => (
-                    <button
-                      key={action}
-                      type="button"
-                      disabled
-                      className="cursor-not-allowed rounded border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-400"
-                      title="Guarded actions are built in CRIS-32"
-                    >
-                      {action}
-                    </button>
-                  ))}
+              {selectedIncident && onTransition ? (
+                // CRIS-18: status transitions for the selected incident. The
+                // richer detail (score breakdown, timeline) is CRIS-23; assign/
+                // merge actions are CRIS-32.
+                <IncidentDetail
+                  incident={selectedIncident}
+                  onTransition={onTransition}
+                  transition={transition}
+                />
+              ) : (
+                <div className="space-y-3">
+                  <p className="text-sm text-slate-500">
+                    {isLive ? 'Select an incident to view actions.' : 'No incident selected.'}
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    Selecting a row in the queue opens summary, score breakdown, and timeline here
+                    (CRIS-23).
+                  </p>
+                  {/* Placeholder actions until an incident is selected. Live
+                      status transitions (Verify / Reject / Resolve …) are wired
+                      in the panel above once a row is selected (CRIS-18);
+                      assignment / merge remain CRIS-32. */}
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {['Verify', 'Reject', 'Assign team', 'Resolve'].map((action) => (
+                      <button
+                        key={action}
+                        type="button"
+                        disabled
+                        className="cursor-not-allowed rounded border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-400"
+                        title="Select an incident to enable status actions (CRIS-18); assignment is CRIS-32"
+                      >
+                        {action}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-xs text-slate-400">
+                    Assignment and merge actions are built in CRIS-32.
+                  </p>
                 </div>
-                <p className="text-xs text-slate-400">Actions are guarded and wired in CRIS-32.</p>
-              </div>
+              )}
             </Region>
 
             <Region
