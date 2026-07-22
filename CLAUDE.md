@@ -9,16 +9,23 @@ reports from citizens and field personnel into structured, geolocated, priority-
 incidents on a live map, and routes targeted alerts to response teams. It stays available
 even when individual AI/geocoding/notification dependencies are degraded.
 
-The authoritative design is `crisismap.pdf` (the design document). Architecture and
-decisions are summarized in [`docs/architecture.md`](docs/architecture.md) and recorded as
-ADRs in [`docs/adr/`](docs/adr/). **When you make a design decision, add an ADR.**
+The current, versioned architecture is summarized in
+[`docs/architecture.md`](docs/architecture.md), with decisions recorded as ADRs in
+[`docs/adr/`](docs/adr/). A local `crisismap.pdf`, when supplied, is product-design context;
+it is not currently a versioned repository artifact. **When you make a design decision, add
+an ADR.**
 
-## Current state: scaffold
+## Current state: active MVP implementation
 
-This repo currently contains the **project scaffold only** — structure, tooling, docs, and
-CI. No cloud resources are deployed. Backend resources are _defined_ (Amplify Gen 2) but
-intentionally minimal stubs marked `TODO(CRIS-xx)`. Do **not** implement epic features while
-"scaffolding"; each feature has an owning ticket (see below).
+Implemented foundations include mobile and web report submission, optional Cognito sign-in
+and anonymous guest access, the DynamoDB data model, guarded submit/status mutations, the
+Streams → SQS → Lambda → Bedrock triage pipeline, deterministic scoring, dashboard reads,
+MapLibre base maps, CI/CD, and observability.
+
+Important deferred seams are listed in [`docs/architecture.md`](docs/architecture.md): media
+upload, real Amazon Location geocoding/map integration, worker-to-AppSync fan-out, custom
+subscriptions, deduplication, citizen alerts, interactive coordinator workflows, and security
+hardening. Do not infer the state of a deployed environment from the source tree.
 
 ## Repository map
 
@@ -28,7 +35,7 @@ intentionally minimal stubs marked `TODO(CRIS-xx)`. Do **not** implement epic fe
 │   ├── mobile/              # @crisismap/mobile — Expo + React Native (citizen reporting, CRIS-6)
 │   │   └── src/             # report form screen/components
 │   └── web/                 # @crisismap/web — Vite + React SPA (coordinator/responder/volunteer UI)
-│       ├── src/             # React app (placeholder shell today)
+│       ├── src/             # React routes, auth, reporting, dashboard, and map
 │       └── amplify/         # Amplify Gen 2 backend definition (shared by both clients)
 ├── packages/
 │   └── shared/              # @crisismap/shared — domain enums/types (source-only pkg)
@@ -37,9 +44,12 @@ intentionally minimal stubs marked `TODO(CRIS-xx)`. Do **not** implement epic fe
 │   ├── conventions.md       # coding/logging/testing conventions
 │   └── adr/                 # Architecture Decision Records (one file per decision)
 ├── .github/workflows/ci.yml # CI (CRIS-15)
+├── .github/workflows/deploy.yml # gated backend CD after successful CI
+├── scripts/aws/             # AWS account/team wiring helpers
+├── infra/bootstrap/         # GitHub OIDC deploy-role template
 ├── tsconfig.base.json       # shared TS compiler options
 ├── eslint.config.js         # flat ESLint config (repo-wide)
-└── crisismap.pdf            # design document (source of truth)
+└── crisismap.pdf            # optional local product-design context (not tracked)
 ```
 
 ## Tech stack (see design doc §4, ADR 0003, ADR 0020)
@@ -59,13 +69,13 @@ Run from the repo root (npm workspaces):
 | `npm install`                             | Install all workspace dependencies                |
 | `npm run dev`                             | Start the web app (Vite) at http://localhost:5173 |
 | `npm run dev:mobile`                      | Start the Expo dev server for the mobile app      |
-| `npm run build`                           | Build all workspaces                              |
+| `npm run build`                           | Build workspaces with a build script              |
 | `npm run typecheck`                       | Type-check all workspaces                         |
 | `npm run lint` / `npm run lint:fix`       | ESLint                                            |
 | `npm run format` / `npm run format:check` | Prettier                                          |
-| `npm test`                                | Run unit tests (Vitest)                           |
+| `npm test`                                | Test workspaces with a test script                |
 
-Backend (not part of the scaffold; requires AWS credentials):
+Personal backend sandbox (requires short-lived AWS credentials):
 
 ```bash
 cd apps/web
@@ -81,14 +91,16 @@ npx ampx sandbox        # stand up a personal dev backend
   update `packages/shared/src/domain.ts` and the Amplify `data` schema together.
 - **Never log or send PII to prompts.** Reporter identity/contact is protected (design doc
   §5.4.1, §5.6). Classification jobs carry IDs + trace metadata only.
-- **Every mutating operation is version-checked and audited** (design doc §5.1). Don't add
-  status transitions outside `STATUS_TRANSITIONS`.
+- **Custom domain mutations are version-checked and audited where applicable** (design doc
+  §5.1). Don't add status transitions outside `STATUS_TRANSITIONS`. Generated model mutations
+  still exist under coarse model authorization and are not a substitute for guarded resolvers.
 - **Document decisions as ADRs.** New decision → new numbered file in `docs/adr/`. Never edit
   a decided ADR; supersede it with a new one.
 
 ## Ticket ownership (Sprint 1 epics)
 
-Keep new work in its owning ticket so the scaffold boundary stays clean.
+Keep new work in its owning ticket. This table records ownership, not completion status; use
+`docs/architecture.md` for the current implementation state.
 
 | Epic                            | Tickets                                                              |
 | ------------------------------- | -------------------------------------------------------------------- |
@@ -97,8 +109,6 @@ Keep new work in its owning ticket so the scaffold boundary stays clean.
 | E3 AI Triage & Prioritization   | CRIS-10 (Streams→SQS→Lambda), CRIS-11 (classification JSON contract) |
 | E4 Coordinator & Volunteer UI   | CRIS-12 (dashboard shell), CRIS-13 (MapLibre base map)               |
 | E5 Infra, Security, Alerts & QA | CRIS-14 (IaC baseline), CRIS-15 (CI + observability)                 |
-
-This scaffold delivers the tooling/skeleton portion of **CRIS-14** and **CRIS-15**.
 
 ## Ticket ownership (Sprint 2 epics)
 

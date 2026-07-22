@@ -6,68 +6,75 @@ geolocated, priority-ranked incidents on a live map, and routes targeted alerts 
 teams — while staying available even when individual AI, geocoding, or notification
 dependencies are degraded.
 
-> **Status: scaffold.** This repo currently contains project structure, tooling, docs, and CI.
-> No cloud resources are deployed yet. Feature work is tracked per ticket (CRIS-6…15).
+> **Status: active MVP implementation.** The repository contains working mobile and web
+> clients, an Amplify Gen 2 backend, the asynchronous Bedrock triage pipeline, CI/CD, and an
+> observability baseline. Some target capabilities remain intentionally deferred; see the
+> [current implementation matrix](docs/architecture.md#4-current-implementation-status).
 
 ## Architecture at a glance
 
-Serverless AWS. A React SPA talks to a single AppSync GraphQL API (with subscriptions) backed
-by DynamoDB; expensive AI work runs asynchronously (DynamoDB Streams → SQS → Lambda → Bedrock)
-so the write path stays fast (report `NEW` ack < 800 ms) and resilient (a report is never lost
-if AI/geocoding/alerts are down). See **[docs/architecture.md](docs/architecture.md)** and the
-design document `crisismap.pdf`.
+Serverless AWS. The Expo mobile app and React SPA use an AppSync GraphQL API backed by
+DynamoDB. Expensive AI work runs asynchronously through DynamoDB Streams → EventBridge Pipes
+→ SQS → Lambda → Bedrock, keeping it off the report-submission path. Real-time subscriptions,
+Amazon Location integration, deduplication, media upload, and citizen alerts are not fully
+wired yet. See **[docs/architecture.md](docs/architecture.md)** for the distinction between the
+current implementation and target architecture.
 
 ## Tech stack
 
 | Layer           | Choice                                                                                                           |
 | --------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Frontend        | Vite + React SPA (TypeScript, Tailwind) — [ADR-0002](docs/adr/0002-frontend-vite-react-spa.md)                   |
+| Clients         | Expo + React Native mobile app; Vite + React SPA (TypeScript, Tailwind) — [ADR-0020](docs/adr/0020-react-native-mobile-app-for-citizen-reporting.md) |
 | Backend / IaC   | AWS Amplify Gen 2 + CDK escape hatches — [ADR-0003](docs/adr/0003-backend-amplify-gen2-with-cdk-escape-hatch.md) |
-| API + real-time | AppSync GraphQL + subscriptions                                                                                  |
+| API             | AppSync GraphQL; custom subscriptions are a deferred integration                                                  |
 | Data / storage  | DynamoDB (on-demand), S3                                                                                         |
 | Auth            | Amazon Cognito (groups + anonymous)                                                                              |
 | AI              | Amazon Bedrock (Claude)                                                                                          |
 | Async           | SQS + DynamoDB Streams; Lambda workers                                                                           |
-| Alerts          | Amazon SNS                                                                                                       |
-| Map             | MapLibre + Amazon Location Service                                                                               |
+| Alerts          | Amazon SNS for operations alarms; citizen proximity alerts are deferred                                           |
+| Map             | MapLibre with a configurable style URL; Amazon Location integration is deferred                                   |
 | Monorepo        | npm workspaces — [ADR-0001](docs/adr/0001-monorepo-npm-workspaces.md)                                            |
 
 ## Repository layout
 
 ```
 apps/web/            Vite + React SPA (frontend) — includes amplify/ (Gen 2 backend)
+apps/mobile/         Expo + React Native citizen-reporting app
 packages/shared/     @crisismap/shared — domain enums/types shared across layers
-docs/                architecture.md, conventions.md, adr/ (decision records)
-.github/workflows/   CI
+docs/                architecture, conventions, runbooks, and ADRs
+scripts/aws/         one-time AWS account/team wiring helpers
+infra/bootstrap/     GitHub OIDC deploy-role template
+.github/workflows/   CI and gated backend deployment
 ```
 
 ## Prerequisites
 
 - **Node 22** (see `.nvmrc`; `nvm use`). Node ≥ 20 works.
 - npm 10+ (bundled with Node).
-- For backend deploy later: an AWS account and credentials (`aws configure` / SSO).
+- For a personal backend sandbox: an AWS account and short-lived SSO credentials.
 
 ## Getting started
 
 ```bash
 npm install          # install all workspaces
 npm run dev          # start the web app at http://localhost:5173
+npm run dev:mobile   # start the Expo development server
 ```
 
 Common commands (run from the repo root):
 
 | Command                           | Description               |
 | --------------------------------- | ------------------------- |
-| `npm run build`                   | Build all workspaces      |
+| `npm run build`                   | Build workspaces that expose a build script |
 | `npm run typecheck`               | Type-check all workspaces |
 | `npm run lint` / `lint:fix`       | ESLint                    |
 | `npm run format` / `format:check` | Prettier                  |
-| `npm test`                        | Unit tests (Vitest)       |
+| `npm test`                        | Test workspaces that expose a test script   |
 
-## Backend (not yet deployed)
+## Personal backend sandbox
 
-The Amplify Gen 2 backend is _defined_ in `apps/web/amplify/` as minimal stubs, but nothing is
-provisioned by the scaffold. Once you have AWS credentials configured:
+The Amplify Gen 2 backend is defined in `apps/web/amplify/`. With short-lived AWS credentials
+configured, provision an isolated personal environment with:
 
 ```bash
 cd apps/web
@@ -75,6 +82,9 @@ npx ampx sandbox     # provisions a personal dev backend + writes amplify_output
 ```
 
 `amplify_outputs.json` and `.amplify/` are generated and git-ignored.
+Production deployment is separately gated through `.github/workflows/deploy.yml`; see the
+[deploy runbook](docs/runbooks/deploy.md). Source control alone does not establish whether a
+shared environment is currently active.
 
 ## Contributing
 
