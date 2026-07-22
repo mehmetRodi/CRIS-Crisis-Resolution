@@ -8,12 +8,14 @@ import {
 } from '@crisismap/shared';
 import { parseMessage, processRecord, type WorkerDeps } from './handler';
 import type {
+  LocationResult,
   MarkNeedsVerificationInput,
   PersistClassificationInput,
   ReportRecord,
   ReportStore,
 } from './store';
-import { ClassificationError, type Classifier } from './bedrock';
+import { ClassificationError } from './bedrock';
+import type { TriageAgent, TriageResult } from './agent';
 
 const CLASSIFICATION: ClassificationResult = {
   contractVersion: CLASSIFICATION_CONTRACT_VERSION,
@@ -24,7 +26,10 @@ const CLASSIFICATION: ClassificationResult = {
   summary: 'Injured people at a clinic.',
   rationale: 'Multiple casualties reported at a medical facility.',
   needsHumanReview: false,
+  entities: { peopleAffected: 4, infrastructure: ['downtown clinic'], hazards: [] },
 };
+
+const LOCATION: LocationResult = { lat: 40.71, lng: -74.0, geohash: 'dr5reg', geohashPrefix: 'dr5re' };
 
 function fakeStore(report: ReportRecord | null, claim = true) {
   const persisted: PersistClassificationInput[] = [];
@@ -42,8 +47,10 @@ function fakeStore(report: ReportRecord | null, claim = true) {
   return { store, persisted, flagged };
 }
 
-function fakeClassifier(impl?: Classifier['classify']): Classifier {
-  return { classify: vi.fn(impl ?? (async () => CLASSIFICATION)) };
+function fakeAgent(impl?: TriageAgent['triage']): TriageAgent {
+  return {
+    triage: vi.fn(impl ?? (async (): Promise<TriageResult> => ({ classification: CLASSIFICATION, location: null }))),
+  };
 }
 
 const NEW_REPORT: ReportRecord = {
@@ -55,9 +62,9 @@ const NEW_REPORT: ReportRecord = {
 };
 
 const message = { reportId: 'r1', version: 3, streamEventId: 'evt-1' };
-const deps = (store: ReportStore, classifier: Classifier): WorkerDeps => ({
+const deps = (store: ReportStore, triage: TriageAgent): WorkerDeps => ({
   store,
-  classifier,
+  triage,
   log: () => {},
 });
 
@@ -84,9 +91,9 @@ describe('parseMessage', () => {
 describe('processRecord', () => {
   it('classifies a NEW report and persists the deterministic score', async () => {
     const { store, persisted, flagged } = fakeStore(NEW_REPORT);
-    const classifier = fakeClassifier();
+    const agent = fakeAgent();
 
-    await processRecord(deps(store, classifier), message);
+    await processRecord(deps(store, agent), message);
 
     expect(store.claimProcessing).toHaveBeenCalledWith('r1', 3);
     expect(persisted).toHaveLength(1);
@@ -100,14 +107,29 @@ describe('processRecord', () => {
       priorityBand: 'P0',
     });
     expect(persisted[0].scoreBreakdown.urgencyWeight).toBe(5);
+    // Entities extracted by the Triage Agent are carried through to the store (CRIS-20).
+    expect(persisted[0].classification.entities.peopleAffected).toBe(4);
     expect(flagged).toHaveLength(0);
+  });
+
+  it('persists the location resolved by the Triage Agent geocode tool (§5.5)', async () => {
+    const { store, persisted } = fakeStore(NEW_REPORT);
+    const agent = fakeAgent(async () => ({ classification: CLASSIFICATION, location: LOCATION }));
+
+    await processRecord(deps(store, agent), message);
+
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0].location).toEqual(LOCATION);
   });
 
   it('escalates a model-flagged classification to NEEDS_VERIFICATION but still records it (§2.6)', async () => {
     const { store, persisted, flagged } = fakeStore(NEW_REPORT);
-    const classifier = fakeClassifier(async () => ({ ...CLASSIFICATION, needsHumanReview: true }));
+    const agent = fakeAgent(async () => ({
+      classification: { ...CLASSIFICATION, needsHumanReview: true },
+      location: null,
+    }));
 
-    await processRecord(deps(store, classifier), message);
+    await processRecord(deps(store, agent), message);
 
     expect(persisted).toHaveLength(1);
     expect(persisted[0].status).toBe(ReportStatus.NEEDS_VERIFICATION);
@@ -116,9 +138,12 @@ describe('processRecord', () => {
 
   it('escalates a low-confidence classification to NEEDS_VERIFICATION (§2.6)', async () => {
     const { store, persisted } = fakeStore(NEW_REPORT);
-    const classifier = fakeClassifier(async () => ({ ...CLASSIFICATION, confidence: 0.2 }));
+    const agent = fakeAgent(async () => ({
+      classification: { ...CLASSIFICATION, confidence: 0.2 },
+      location: null,
+    }));
 
-    await processRecord(deps(store, classifier), message);
+    await processRecord(deps(store, agent), message);
 
     expect(persisted).toHaveLength(1);
     expect(persisted[0].status).toBe(ReportStatus.NEEDS_VERIFICATION);
@@ -126,38 +151,39 @@ describe('processRecord', () => {
 
   it('is idempotent when the stream event was already applied', async () => {
     const { store, persisted } = fakeStore({ ...NEW_REPORT, lastProcessedEventId: 'evt-1' });
-    await processRecord(deps(store, fakeClassifier()), message);
+    await processRecord(deps(store, fakeAgent()), message);
     expect(store.claimProcessing).not.toHaveBeenCalled();
     expect(persisted).toHaveLength(0);
   });
 
   it('skips reports that are no longer NEW', async () => {
     const { store, persisted } = fakeStore({ ...NEW_REPORT, status: ReportStatus.AI_CLASSIFIED });
-    await processRecord(deps(store, fakeClassifier()), message);
+    await processRecord(deps(store, fakeAgent()), message);
     expect(store.claimProcessing).not.toHaveBeenCalled();
     expect(persisted).toHaveLength(0);
   });
 
   it('does nothing when the claim race is lost', async () => {
     const { store, persisted } = fakeStore(NEW_REPORT, false);
-    await processRecord(deps(store, fakeClassifier()), message);
+    await processRecord(deps(store, fakeAgent()), message);
     expect(persisted).toHaveLength(0);
   });
 
   it('is a no-op when the report no longer exists', async () => {
     const { store, persisted } = fakeStore(null);
-    await processRecord(deps(store, fakeClassifier()), message);
+    await processRecord(deps(store, fakeAgent()), message);
     expect(store.claimProcessing).not.toHaveBeenCalled();
     expect(persisted).toHaveLength(0);
   });
 
-  it('marks NEEDS_VERIFICATION when classification fails (§5.4.4)', async () => {
+  it('marks NEEDS_VERIFICATION when triage fails (§5.4.4)', async () => {
     const { store, persisted, flagged } = fakeStore(NEW_REPORT);
-    const classifier = fakeClassifier(async () => {
+    // Both the agent and its single-call fallback failed contract validation.
+    const agent = fakeAgent(async () => {
       throw new ClassificationError(['invalid category: ...']);
     });
 
-    await processRecord(deps(store, classifier), message);
+    await processRecord(deps(store, agent), message);
 
     expect(persisted).toHaveLength(0);
     expect(flagged).toHaveLength(1);
