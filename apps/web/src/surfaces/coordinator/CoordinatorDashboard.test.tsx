@@ -130,3 +130,70 @@ describe('CoordinatorDashboard live feed', () => {
     expect(onRefresh).toHaveBeenCalledOnce();
   });
 });
+
+describe('CoordinatorDashboard status transitions (CRIS-18)', () => {
+  const readyFeed: IncidentFeedState = {
+    status: 'ready',
+    incidents: [incident({ reportId: 'report-abc', status: 'AI_CLASSIFIED', version: 3 })],
+  };
+
+  it('offers only the transitions a coordinator may drive from the current status', () => {
+    render(
+      <CoordinatorDashboard onExit={() => {}} feed={readyFeed} onTransition={() => {}} />,
+    );
+    // Select the incident to open the detail panel.
+    fireEvent.click(screen.getByText(/report-a/));
+    const detail = screen.getByRole('region', { name: /incident detail/i });
+    // AI_CLASSIFIED → VERIFIED / NEEDS_VERIFICATION / REJECTED are coordinator moves.
+    expect(within(detail).getByRole('button', { name: 'Verify' })).toBeEnabled();
+    expect(within(detail).getByRole('button', { name: 'Reject' })).toBeEnabled();
+    expect(within(detail).getByRole('button', { name: /send to verification/i })).toBeEnabled();
+    // Not reachable from AI_CLASSIFIED.
+    expect(within(detail).queryByRole('button', { name: 'Resolve' })).not.toBeInTheDocument();
+  });
+
+  it('calls onTransition with the target status, expected version, and note', () => {
+    const onTransition = vi.fn();
+    render(
+      <CoordinatorDashboard onExit={() => {}} feed={readyFeed} onTransition={onTransition} />,
+    );
+    fireEvent.click(screen.getByText(/report-a/));
+    const detail = screen.getByRole('region', { name: /incident detail/i });
+    fireEvent.change(within(detail).getByPlaceholderText(/reason recorded/i), {
+      target: { value: 'corroborated by responder' },
+    });
+    fireEvent.click(within(detail).getByRole('button', { name: 'Verify' }));
+    expect(onTransition).toHaveBeenCalledWith({
+      reportId: 'report-abc',
+      toStatus: 'VERIFIED',
+      expectedVersion: 3,
+      note: 'corroborated by responder',
+    });
+  });
+
+  it('surfaces a CONFLICT with a refresh hint', () => {
+    render(
+      <CoordinatorDashboard
+        onExit={() => {}}
+        feed={readyFeed}
+        onTransition={() => {}}
+        transition={{
+          status: 'error',
+          reportId: 'report-abc',
+          toStatus: 'VERIFIED',
+          code: 'CONFLICT',
+          message: 'refetch and retry.',
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByText(/report-a/));
+    expect(screen.getByRole('alert')).toHaveTextContent(/refresh and try again/i);
+  });
+
+  it('keeps actions disabled in the shell when no transition handler is wired', () => {
+    render(<CoordinatorDashboard onExit={() => {}} feed={readyFeed} />);
+    fireEvent.click(screen.getByText(/report-a/));
+    // Without onTransition the detail panel stays a placeholder.
+    expect(screen.getByRole('button', { name: 'Verify' })).toBeDisabled();
+  });
+});
