@@ -23,7 +23,7 @@ Streams → SQS → Lambda → Bedrock triage pipeline, deterministic scoring, d
 MapLibre base maps, CI/CD, and observability.
 
 Important deferred seams are listed in [`docs/architecture.md`](docs/architecture.md): media
-upload, wiring/IAM for the Amazon Location geocoder, Amazon Location map tiles,
+upload, IAM completion for the Amazon Location geocoder, Amazon Location map tiles,
 worker-to-AppSync fan-out, custom subscriptions, deduplication, citizen alerts, interactive
 coordinator workflows, and security hardening. Do not infer the state of a deployed
 environment from the source tree.
