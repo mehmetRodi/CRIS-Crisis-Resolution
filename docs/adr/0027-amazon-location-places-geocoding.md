@@ -40,9 +40,10 @@ Use the Amazon Location Places `Geocode` API through `@aws-sdk/client-geo-places
 - Keep a null-geocoder implementation behind `GEOCODING_ENABLED` so deployments can disable
   Places safely.
 
-The geocoder implementation and tests may land before runtime selection and IAM. Until the
-worker selects it and receives the required Places permission, deployed classification remains
-in null-geocoder mode; the living implementation matrix must state that explicitly.
+The worker now selects the geocoder from `GEOCODING_ENABLED` (default `'true'`), its role is
+granted `geo-places:Geocode` (`backend.ts`), and `@aws-sdk/client-geo-places` is a dependency.
+The flag is a kill switch: setting it to `'false'` drops back to null-geocoder mode — reports
+are still classified and never lost (§5.4.4) — without a code change if Places degrades.
 
 ## Consequences
 

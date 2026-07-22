@@ -152,8 +152,9 @@ export async function processRecord(
     priorityBand: scoring.priorityBand,
     scoreVersion: scoring.scoreVersion,
     scoreBreakdown: scoring.breakdown,
-    // Location resolved by the Triage Agent's geocode tool (§5.5), or {} when it
-    // stayed unresolved (GEOCODING_ENABLED=false until CRIS-21). Dedupe deferred.
+    // Location resolved by the Triage Agent's geocode tool (Amazon Location,
+    // §5.5/CRIS-21), or {} when it stayed unresolved (no place matched, a weak
+    // match, geocoding disabled/unavailable). Dedupe deferred.
     location: location ?? {},
     streamEventId,
   });
