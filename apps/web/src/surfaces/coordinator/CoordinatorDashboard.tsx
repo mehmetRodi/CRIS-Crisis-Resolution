@@ -235,7 +235,7 @@ function feedBody(
     case 'unauthenticated':
       return (
         <RegionMessage>
-          Sign in to view incidents. Coordinator role enforcement is not wired yet.
+          Sign in as a coordinator to view incidents. Route-level role enforcement is not wired yet.
         </RegionMessage>
       );
     case 'error':

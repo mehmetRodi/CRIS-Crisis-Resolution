@@ -241,6 +241,19 @@ worker.addToRolePolicy(
   }),
 );
 
+// Amazon Location geocoding (CRIS-21, ADR-0027) — the Triage Agent's
+// geocode_location tool resolves described places via the standalone Places
+// `Geocode` API. The standalone geo-places/geo-routes/geo-maps APIs are
+// resource-less (no place-index ARN to scope to, unlike legacy Location), so
+// the action can only be granted against `*`; it is a single read-only verb.
+// The client runs in `eu-central-1` (ADR-0017), keeping lookups in the EU.
+worker.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['geo-places:Geocode'],
+    resources: ['*'],
+  }),
+);
+
 // Table names the worker resolves at runtime (no secrets/PII).
 backend.classifyReport.addEnvironment('REPORT_TABLE_NAME', reportTable.tableName);
 backend.classifyReport.addEnvironment('REPORT_EVENT_TABLE_NAME', tables['ReportEvent'].tableName);

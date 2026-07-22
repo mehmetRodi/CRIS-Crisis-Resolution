@@ -92,7 +92,11 @@ describe('createAmazonLocationGeocoder', () => {
   });
 
   it('returns null when the API finds no match', async () => {
-    const client = fakeClient({ $metadata: {}, ResultItems: [] } as GeocodeCommandOutput);
+    const client = fakeClient({
+      $metadata: {},
+      PricingBucket: 'test',
+      ResultItems: [],
+    } as GeocodeCommandOutput);
     await expect(createAmazonLocationGeocoder({ client }).geocode('nowhere')).resolves.toBeNull();
   });
 
