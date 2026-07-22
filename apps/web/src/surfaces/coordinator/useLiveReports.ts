@@ -43,6 +43,9 @@ function toRedactedIncident(report: Schema['Report']['type']): CoordinatorIncide
       urgency: report.urgency as Urgency | null,
       priorityScore: report.priorityScore,
       priorityBand: report.priorityBand,
+      // AI summary now persisted by the triage worker (CRIS-19); the map/queue
+      // shows this, never the untrusted raw `text` (§5.6).
+      summary: report.summary,
       lat: report.lat,
       lng: report.lng,
       geohash: report.geohash,
