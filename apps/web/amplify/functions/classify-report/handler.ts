@@ -19,7 +19,7 @@ import { createDynamoStore, type ReportStore } from './store';
  * wires the real Bedrock + DynamoDB implementations from the environment.
  *
  * Classification is done by the Bedrock **Triage Agent** (§5.5, CRIS-20,
- * ADR-0025): a tool-using agent that extracts category/urgency/entities/summary
+ * ADR-0026): a tool-using agent that extracts category/urgency/entities/summary
  * and resolves location via a geocoding tool, degrading to the MVP single-call
  * classifier when agent orchestration is unavailable. The worker is agnostic to
  * which path ran — it consumes a {@link TriageAgent}.

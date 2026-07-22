@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import { AuthProvider } from './AuthContext';
 import App from './App';
 import { ReportPage } from './screens/ReportPage';
+import { MapPage } from './screens/MapPage';
 import LoginPage from './LoginPage';
 import SignupPage from './SignupPage';
 import ConfirmSignupPage from './ConfirmSignupPage';
@@ -13,8 +14,9 @@ import { useLiveReports } from './surfaces/coordinator/useLiveReports';
  * surface, but `/report` is a citizen emergency-fallback form so anyone with a
  * browser can file a report without installing the mobile app (ADR-0021;
  * mobile remains the primary citizen channel per ADR-0020). The coordinator
- * dashboard shell mounts at `/coordinator` (CRIS-12, ADR-0022); the map route
- * is added by CRIS-13. Route-level auth/role-gating arrives with CRIS-7.
+ * dashboard shell mounts at `/coordinator` (CRIS-12, ADR-0022); the full-screen
+ * live map mounts at `/map` (CRIS-13, ADR-0025). Route-level auth/role-gating
+ * arrives with CRIS-7.
  */
 
 /**
@@ -38,6 +40,7 @@ export function Router() {
           <Route path="/signup" element={<SignupPage />} />
           <Route path="/confirm-signup" element={<ConfirmSignupPage />} />
           <Route path="/report" element={<ReportPage />} />
+          <Route path="/map" element={<MapPage />} />
           <Route path="/coordinator" element={<CoordinatorRoute />} />
         </Routes>
       </AuthProvider>

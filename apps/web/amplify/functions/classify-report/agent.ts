@@ -34,7 +34,7 @@ import type { LocationResult } from './store';
  * Determinism/cost: `temperature`/`top_p`/`top_k` are rejected by the current
  * Claude models and `effort` is unsupported on the Haiku triage tier, so
  * determinism comes from the strict tool schema + app-side re-validation
- * (defense in depth) rather than a sampling knob. See ADR-0025.
+ * (defense in depth) rather than a sampling knob. See ADR-0026.
  *
  * Bedrock InvokeModel (Anthropic Messages API body) is reused from CRIS-10
  * (ADR-0013) rather than adopting a new SDK, keeping IAM and wiring unchanged.
@@ -277,7 +277,7 @@ const TOOLS = [
  * Builds a {@link TriageAgent} backed by Bedrock InvokeModel + tool use. The
  * client is constructed lazily so importing this module (e.g. in tests) needs
  * no AWS credentials. `tool_choice: any` forces a tool call each turn (no prose
- * rambling); NO `temperature`/`effort` (see the module note + ADR-0025).
+ * rambling); NO `temperature`/`effort` (see the module note + ADR-0026).
  */
 export function createBedrockTriageAgent(config: BedrockTriageAgentConfig): TriageAgent {
   const client = config.client ?? new BedrockRuntimeClient({});

@@ -6,7 +6,7 @@ import { defineFunction } from '@aws-amplify/backend';
  * Consumes the classification SQS queue (fed by the Report DynamoDB stream via
  * an EventBridge Pipe — wired in `backend.ts`), claims the report
  * (NEW → PROCESSING via an optimistic-lock conditional write), runs the Bedrock
- * **Triage Agent** (§5.5, CRIS-20, ADR-0025) — a tool-using agent that emits the
+ * **Triage Agent** (§5.5, CRIS-20, ADR-0026) — a tool-using agent that emits the
  * JSON-only contract (`@crisismap/shared` triage schema) and calls a geocoding
  * tool when coordinates are missing, degrading to the MVP single-call classifier
  * if agent orchestration is unavailable — scores deterministically (§5.4.2),

@@ -14,6 +14,7 @@ import {
   sortByPriority,
   type IncidentFeedState,
 } from './incidents';
+import { IncidentMap } from '../map/IncidentMap';
 
 /**
  * Coordinator dashboard (CRIS-12 shell + live read path).
@@ -34,7 +35,7 @@ import {
  *
  * Region → owning ticket (Fig 11 interaction map):
  *   - Filters (category / status / region)        → CRIS-22 (facets read-only)
- *   - Live map (Amazon Location + MapLibre)        → CRIS-13
+ *   - Live map (Amazon Location + MapLibre)        → CRIS-13 (base map ✓)
  *   - Priority-ordered incident queue              → live here; filters CRIS-22
  *   - Incident detail (summary / score / timeline) → CRIS-23
  *   - Guarded response actions                     → CRIS-32
@@ -401,7 +402,11 @@ export function CoordinatorDashboard({
               ticket="CRIS-13"
               hint="Amazon Location + MapLibre incident map with category-coloured markers"
               className="min-h-[20rem]"
-            />
+            >
+              {/* Base map only (CRIS-13). Category-coloured incident markers and
+                  viewport-driven fetching land with CRIS-22. */}
+              <IncidentMap className="h-80 w-full overflow-hidden rounded-md border border-slate-200" />
+            </Region>
             <Region
               title="Priority incident queue"
               ticket="CRIS-22"

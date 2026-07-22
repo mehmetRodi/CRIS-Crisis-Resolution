@@ -1,4 +1,4 @@
-# ADR-0025: Bedrock Triage Agent (tool-using classifier)
+# ADR-0026: Bedrock Triage Agent (tool-using classifier)
 
 - **Status:** Accepted
 - **Date:** 2026-07-22
