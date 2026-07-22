@@ -2,6 +2,7 @@ import { a, defineData, type ClientSchema } from '@aws-amplify/backend';
 import { submitReport as submitReportFn } from '../functions/submit-report/resource';
 import { transitionReport as transitionReportFn } from '../functions/transition-report/resource';
 import { publishReportUpdate as publishReportUpdateFn } from '../functions/publish-report-update/resource';
+import { classifyReport as classifyReportFn } from '../functions/classify-report/resource';
 
 /**
  * GraphQL data model (AppSync + DynamoDB) — design doc §5.1, §5.2, §5.3.
@@ -21,8 +22,9 @@ import { publishReportUpdate as publishReportUpdateFn } from '../functions/publi
  * Custom API status:
  *   - `submitReport` implements the guarded, idempotent create path (CRIS-9).
  *   - `updateReportStatus` implements the guarded transition engine (CRIS-18).
- *   - `PublicReport` and `publishReportUpdate` are defined, but worker IAM
- *     authorization, worker invocation, and custom subscriptions remain deferred.
+ *   - `publishReportUpdate` is the internal, IAM-only fan-out mutation the triage
+ *     worker calls after its durable write (CRIS-19, ADR-0009/0029). Custom
+ *     subscriptions that consume it remain deferred to CRIS-28.
  *
  * ENUM SYNC: `a.enum()` requires literal arrays, so the members below are
  * duplicated from `@crisismap/shared` (the source of truth). When you change an
@@ -72,6 +74,14 @@ const schema = a.schema({
       urgency: a.enum(['CRITICAL', 'HIGH', 'MEDIUM', 'LOW']),
       /** Model confidence in [0,1]. Low confidence routes to NEEDS_VERIFICATION. */
       confidence: a.float(),
+      /**
+       * Short, PII-free AI summary for coordinator triage (§2.2, CRIS-20). The
+       * ONE classification field safe to surface publicly — the map/PublicReport
+       * shows this, never the untrusted raw `text` (§5.6). Persisted so the
+       * projection carries a summary on BOTH the query and the CRIS-19 real-time
+       * publish paths, not only in the transient worker invocation.
+       */
+      summary: a.string(),
       /**
        * Entities extracted by the Bedrock Triage Agent (§2.2, CRIS-20):
        * peopleAffected + infrastructure/hazards. Coordinator-internal triage
@@ -468,15 +478,25 @@ const schema = a.schema({
   }),
 
   /**
-   * Intended internal mutation for driving subscriptions (§5.3). AppSync
+   * Internal mutation for driving subscriptions (§5.3, ADR-0009). AppSync
    * subscriptions fire on mutations, not on raw DynamoDB writes, so the async
-   * worker will write the report durably and then call this to fan the redacted
-   * update out to subscribers — keeping the durable write independent of AppSync
-   * availability.
+   * triage worker writes the report durably and then calls this to fan the
+   * redacted update out to subscribers — keeping the durable write independent
+   * of AppSync availability.
    *
-   * Restricted to ADMIN at the client boundary today. TODO: grant the
-   * classification worker's IAM role via a schema-level `allow.resource(worker)`
-   * so it becomes the real (internal-only) caller, and drop the ADMIN rule.
+   * CRIS-19: authorized ONLY to the `classify-report` worker's execution role
+   * via `allow.resource` (the framework-blessed way to let a backend function
+   * call an operation over IAM auth). No user, group, or guest can invoke it —
+   * it is internal-only. Dropping the previous ADMIN rule closes the last
+   * client-facing door on the real-time channel (ADR-0029). `allow.resource`
+   * only adds a `classify-report → data` edge (an `appsync:GraphQL` grant on the
+   * worker's role plus endpoint/introspection env injection), matching the
+   * direction of the worker's existing table grants — so it introduces no
+   * cross-stack cycle (see backend.ts).
+   *
+   * The argument list is exactly the public fields, so PII has no wire
+   * representation on this path — the type system is the redaction guarantee,
+   * not a runtime filter (§5.6).
    */
   publishReportUpdate: a
     .mutation()
@@ -498,7 +518,7 @@ const schema = a.schema({
     })
     .returns(a.ref('PublicReport'))
     .handler(a.handler.function(publishReportUpdateFn))
-    .authorization((allow) => [allow.groups(['ADMIN'])]),
+    .authorization((allow) => [allow.resource(classifyReportFn).to(['mutate'])]),
 
   /*
    * TODO(CRIS-28): Real-time subscriptions are temporarily disabled. Amplify

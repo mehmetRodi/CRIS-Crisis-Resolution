@@ -39,6 +39,10 @@ export interface ReportRecord {
   status: string;
   text: string;
   lastProcessedEventId?: string | null;
+  /** Submit timestamp — copied verbatim into the published projection (CRIS-19). */
+  createdAt?: string | null;
+  /** Operational region — the projection/subscription filter key (CRIS-19). */
+  regionId?: string | null;
 }
 
 /** Resolved location, all optional — populated by the CRIS-21 geocoder. */
