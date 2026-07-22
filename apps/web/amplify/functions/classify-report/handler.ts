@@ -31,6 +31,12 @@ import type { Publisher } from './publish';
  * (`scoreReport`, ADR-0010) — the ranking authority, never a model opinion; a
  * low-confidence or model-flagged classification is escalated to
  * NEEDS_VERIFICATION (§2.6) while still recording the AI result.
+ *
+ * After the durable write, the worker fans the redacted `PublicReport` out via
+ * the internal IAM-only `publishReportUpdate` mutation (§5.3, CRIS-19,
+ * ADR-0009/0029) so subscribers update in near real time — a best-effort call
+ * (an injected {@link Publisher}) that never rolls back the durable write. The
+ * subscriptions that consume it are enabled in CRIS-28.
  */
 
 /** SQS payload projected by the EventBridge Pipe input transformer (IDs only, no PII). */
