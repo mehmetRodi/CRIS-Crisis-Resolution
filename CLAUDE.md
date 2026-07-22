@@ -23,9 +23,10 @@ Streams → SQS → Lambda → Bedrock triage pipeline, deterministic scoring, d
 MapLibre base maps, CI/CD, and observability.
 
 Important deferred seams are listed in [`docs/architecture.md`](docs/architecture.md): media
-upload, real Amazon Location geocoding/map integration, worker-to-AppSync fan-out, custom
-subscriptions, deduplication, citizen alerts, interactive coordinator workflows, and security
-hardening. Do not infer the state of a deployed environment from the source tree.
+upload, wiring/IAM for the Amazon Location geocoder, Amazon Location map tiles,
+worker-to-AppSync fan-out, custom subscriptions, deduplication, citizen alerts, interactive
+coordinator workflows, and security hardening. Do not infer the state of a deployed
+environment from the source tree.
 
 ## Repository map
 
@@ -56,9 +57,10 @@ hardening. Do not infer the state of a deployed environment from the source tree
 
 **Cross-platform clients:** React Native (Expo) mobile app for citizen reporting ·
 Vite + React SPA for the coordinator/responder/volunteer web UI · TypeScript everywhere ·
-AWS Amplify Gen 2 (Cognito, AppSync GraphQL + subscriptions, DynamoDB, S3) with CDK escape
-hatches for the async pipeline · Bedrock (Claude) for classification · SQS + DynamoDB
-Streams · Lambda · SNS · MapLibre + Amazon Location.
+AWS Amplify Gen 2 (Cognito, AppSync GraphQL, DynamoDB, S3) with CDK escape hatches for the
+async pipeline · Bedrock (Claude) for classification · SQS + DynamoDB Streams · Lambda · SNS
+· MapLibre · Amazon Location integration in progress. Custom AppSync subscriptions are not
+currently enabled.
 
 ## Commands
 
