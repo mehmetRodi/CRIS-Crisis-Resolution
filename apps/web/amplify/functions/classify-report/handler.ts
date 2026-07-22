@@ -5,8 +5,10 @@ import {
   scoreReport,
   shouldEscalateToVerification,
 } from '@crisismap/shared';
-import { createBedrockClassifier, type Classifier } from './bedrock';
-import { createDynamoStore, type LocationResult, type ReportStore } from './store';
+import { createBedrockClassifier } from './bedrock';
+import { createBedrockTriageAgent, createTriageAgent, type TriageAgent } from './agent';
+import { createNullGeocoder } from './geocode';
+import { createDynamoStore, type ReportStore } from './store';
 
 /**
  * classify-report worker (design doc §3, §5.4; CRIS-10).
