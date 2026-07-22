@@ -1,9 +1,9 @@
 /**
  * Resolves the MapLibre style the base map renders from (CRIS-13, ADR-0025).
  *
- * The design target is **Amazon Location Service** (design doc §4, §2.4), but ALS
- * needs a deployed backend plus Cognito / API-key auth that arrive with CRIS-24
- * and CRIS-7. Until then the base map renders from a free, no-key public style so
+ * The design target is **Amazon Location Service** (design doc §4, §2.4), but its
+ * map resource and browser authorization are not wired yet. Until then the base
+ * map renders from a free, no-key public style so
  * the surface is real and manually verifiable today. When `VITE_MAP_STYLE_URL` is
  * set — the deployed ALS style descriptor, once it exists — it takes precedence
  * with no code change. This is the single seam where the tile source is chosen.

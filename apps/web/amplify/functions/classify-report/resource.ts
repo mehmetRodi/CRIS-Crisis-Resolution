@@ -10,9 +10,9 @@ import { defineFunction } from '@aws-amplify/backend';
  * JSON-only contract (`@crisismap/shared` triage schema) and calls a geocoding
  * tool when coordinates are missing, degrading to the MVP single-call classifier
  * if agent orchestration is unavailable — scores deterministically (§5.4.2),
- * writes the result back conditionally, and — once CRIS-19 lands — calls the
- * IAM-only `publishReportUpdate` mutation so subscribers update in near real
- * time. A triage/parse failure leaves the report as NEEDS_VERIFICATION, never
+ * writes the result back conditionally. Worker invocation of
+ * `publishReportUpdate` and custom subscriptions remain deferred. A triage/parse
+ * failure leaves the report as NEEDS_VERIFICATION, never
  * lost (§5.4.4).
  *
  * The SQS event-source mapping and least-privilege IAM (Bedrock, SQS, and direct
@@ -39,9 +39,13 @@ export const classifyReport = defineFunction({
     // with no IAM change (the grant is a `claude-*` family wildcard). NO
     // secrets/PII in env.
     BEDROCK_MODEL_ID: 'eu.anthropic.claude-haiku-4-5-20251001-v1:0',
-    // Feature flag for the CRIS-21 Amazon Location geocoder behind the Triage
-    // Agent's geocode_location tool. Off until the place index exists; the agent
-    // still offers the tool but every lookup returns "unavailable" (CRIS-20).
-    GEOCODING_ENABLED: 'false',
+    // Feature flag for the Amazon Location geocoder behind the Triage Agent's
+    // geocode_location tool (CRIS-21, ADR-0027). On → the worker resolves
+    // described locations via the Amazon Location Places `Geocode` API and
+    // derives the geohash locally; off → every lookup returns "unavailable" and
+    // reports stay unlocated (the tool-use path still runs). A kill switch: flip
+    // to 'false' to shed the geocoding dependency without a code change if the
+    // Places API degrades — reports are still classified and never lost (§5.4.4).
+    GEOCODING_ENABLED: 'true',
   },
 });

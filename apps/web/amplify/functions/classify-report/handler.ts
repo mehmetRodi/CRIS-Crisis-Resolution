@@ -7,7 +7,7 @@ import {
 } from '@crisismap/shared';
 import { createBedrockClassifier } from './bedrock';
 import { createBedrockTriageAgent, createTriageAgent, type TriageAgent } from './agent';
-import { createNullGeocoder } from './geocode';
+import { createAmazonLocationGeocoder, createNullGeocoder, type Geocoder } from './geocode';
 import { createDynamoStore, type ReportStore } from './store';
 
 /**
@@ -152,15 +152,16 @@ export async function processRecord(
     priorityBand: scoring.priorityBand,
     scoreVersion: scoring.scoreVersion,
     scoreBreakdown: scoring.breakdown,
-    // Location resolved by the Triage Agent's geocode tool (§5.5), or {} when it
-    // stayed unresolved (GEOCODING_ENABLED=false until CRIS-21). Dedupe deferred.
+    // Location resolved by the Triage Agent's geocode tool (Amazon Location,
+    // §5.5/CRIS-21), or {} when it stayed unresolved (no place matched, a weak
+    // match, geocoding disabled/unavailable). Dedupe deferred.
     location: location ?? {},
     streamEventId,
   });
 
-  // TODO(CRIS-19): call the IAM-only `publishReportUpdate` mutation so subscribed
-  // clients update in near real time (§5.3). Durable write above is independent
-  // of AppSync availability.
+  // TODO: authorize and call `publishReportUpdate`, then enable the custom
+  // subscriptions so clients update in near real time (§5.3). Durable write
+  // above remains independent of AppSync availability.
   log({ event: 'classify.done', reportId, band: scoring.priorityBand, status });
 }
 
@@ -171,9 +172,13 @@ function buildDeps(): WorkerDeps {
     return value;
   };
   const modelId = env('BEDROCK_MODEL_ID');
-  // TODO(CRIS-21): when GEOCODING_ENABLED=true, swap in the Amazon Location
-  // place-index geocoder; the agent's geocode_location tool is wired regardless.
-  const geocoder = createNullGeocoder();
+  // The agent's geocode_location tool is wired regardless; the flag chooses what
+  // backs it (CRIS-21, ADR-0027). When off, every lookup returns "unavailable"
+  // and reports stay unlocated — the tool-use path still runs.
+  const geocoder: Geocoder =
+    process.env.GEOCODING_ENABLED === 'true'
+      ? createAmazonLocationGeocoder()
+      : createNullGeocoder();
   return {
     store: createDynamoStore({
       report: env('REPORT_TABLE_NAME'),

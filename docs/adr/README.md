@@ -42,3 +42,4 @@ behind the code — essential when refactoring or extending the system.
 | [0024](0024-optional-auth-and-anonymous-guest-access.md)      | Optional Cognito sign-in + anonymous guest access    | Accepted                         |
 | [0025](0025-maplibre-base-map.md)                             | MapLibre base map (env tile source, lazy-loaded)     | Accepted                         |
 | [0026](0026-bedrock-triage-agent.md)                          | Bedrock Triage Agent (tool-using classifier)         | Accepted                         |
+| [0027](0027-amazon-location-places-geocoding.md)              | Amazon Location Places geocoding + shared geohash    | Accepted                         |

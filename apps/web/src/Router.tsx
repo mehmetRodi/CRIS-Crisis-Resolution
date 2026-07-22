@@ -15,14 +15,14 @@ import { useLiveReports } from './surfaces/coordinator/useLiveReports';
  * browser can file a report without installing the mobile app (ADR-0021;
  * mobile remains the primary citizen channel per ADR-0020). The coordinator
  * dashboard shell mounts at `/coordinator` (CRIS-12, ADR-0022); the full-screen
- * live map mounts at `/map` (CRIS-13, ADR-0025). Route-level auth/role-gating
- * arrives with CRIS-7.
+ * live map mounts at `/map` (CRIS-13, ADR-0025). Authentication routes exist;
+ * coordinator group enforcement at the route boundary remains deferred.
  */
 
 /**
  * Wires the presentational dashboard to its data source and router. The live
  * incident feed (`useLiveReports`) degrades gracefully to an `unauthenticated`
- * state until sign-in lands (CRIS-7); `onExit` navigates home (ADR-0022).
+ * state when there is no session; `onExit` navigates home (ADR-0022).
  */
 function CoordinatorRoute() {
   const navigate = useNavigate();

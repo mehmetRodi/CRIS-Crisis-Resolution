@@ -19,11 +19,11 @@ import type { IncidentFeedState } from './incidents';
  * layer never holds reporter PII or the untrusted raw body (design doc §5.6).
  *
  * Reads are gated behind an authenticated Cognito user (`allow.authenticated`
- * on the `Report` model). Sign-in is not built yet (CRIS-7), so this hook
- * DEGRADES GRACEFULLY: if there is no session it resolves to `unauthenticated`
+ * on the `Report` model). Sign-in is available; if there is no session this hook
+ * degrades gracefully by resolving to `unauthenticated`
  * rather than throwing, and the dashboard shows a "sign in as a coordinator"
- * prompt instead of an error. Once sign-in lands, the same code path returns
- * live incidents with no change here.
+ * prompt instead of an error. Group enforcement remains a separate route/API
+ * authorization concern.
  *
  * This is a one-shot read plus manual `refresh` — NOT a live subscription.
  * Real-time push (AppSync subscriptions) is owned by CRIS-28; the dashboard's
@@ -63,8 +63,7 @@ export function useLiveReports(): LiveReportsFeed {
   const load = useCallback(async () => {
     setState({ status: 'loading' });
 
-    // Reads require a signed-in coordinator. No session → graceful degrade,
-    // not an error (sign-in arrives with CRIS-7).
+    // Reads require a signed-in user. No session → graceful degrade, not an error.
     try {
       await getCurrentUser();
     } catch {

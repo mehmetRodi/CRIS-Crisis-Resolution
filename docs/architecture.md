@@ -1,14 +1,16 @@
 # CrisisMap AI — Architecture Overview
 
-A living companion to the design document (`crisismap.pdf`). The PDF is the authoritative
-narrative; this file is the quick, code-adjacent reference and is updated as the system
-evolves. Decisions are recorded in [`adr/`](adr/).
+A living, code-adjacent reference for the versioned repository. A local `crisismap.pdf`, when
+supplied, provides product-design context but is not currently tracked. Accepted decisions are
+recorded in [`adr/`](adr/). This document distinguishes the target design from what is wired
+today.
 
-## 1. System shape (design doc §3)
+## 1. Target system shape (design doc §3)
 
-CrisisMap AI is a **serverless AWS application**. Clients talk to a single AppSync GraphQL
-API backed by DynamoDB. Expensive AI work is pushed onto an asynchronous queue so the write
-path stays fast and resilient.
+CrisisMap AI is designed as a **serverless AWS application**. Clients talk to a single AppSync
+GraphQL API backed by DynamoDB. Expensive AI work is pushed onto an asynchronous queue so the
+write path stays fast and resilient. The diagram is the end-state design; consult the current
+implementation matrix below before assuming a component is operational.
 
 ```
         ┌──────────────────────────────────────────────┐
@@ -39,7 +41,7 @@ path stays fast and resilient.
         └──────────────────────────┘        └───────────────┘
 ```
 
-### Flow (design doc §3, Fig 9)
+### Target flow (design doc §3, Fig 9)
 
 1. Client submits a report through AppSync → written durably to DynamoDB → returned
    immediately as `NEW` (p95 < 800 ms).
@@ -66,7 +68,10 @@ NEW → PROCESSING → AI_CLASSIFIED → VERIFIED → IN_PROGRESS → RESOLVED
                     REJECTED (terminal)
 ```
 
-## 3. Key design guarantees (design doc §1.1, §3.2)
+## 3. Design guarantees and service targets (design doc §1.1, §3.2)
+
+These are requirements for the completed system, not claims that every path is implemented or
+that the latency objectives have been measured in a deployed environment.
 
 - A report is **never lost** once acknowledged, even if AI/geocoding/notifications are down
   (bounded retries, DLQs, defined terminal states; a Bedrock failure ⇒ `NEEDS_VERIFICATION`).
@@ -76,24 +81,24 @@ NEW → PROCESSING → AI_CLASSIFIED → VERIFIED → IN_PROGRESS → RESOLVED
 - Priority is a **deterministic, explainable** score in [0, 10] mapped to bands P0–P3 — never
   raw model output.
 
-## 4. How the current scaffold maps to the target
+## 4. Current implementation status
 
-| Target component                     | Scaffold status                                                                                                                                                                                                                                                                                                                                                                           |
-| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| React Native citizen app             | `apps/mobile` — Expo app with the citizen report form (CRIS-6 ✓ UI, ADR-0020); submit wiring per CRIS-9, GPS/media per CRIS-16/17                                                                                                                                                                                                                                                         |
-| React SPA client (web)               | `apps/web` — landing + coordinator dashboard shell at `/coordinator` (CRIS-12 ✓, ADR-0022), `/report` web fallback (CRIS-6, ADR-0021), and live base map at `/map` (CRIS-13 ✓, ADR-0025). Routing via React Router (ADR-0021); auth-gating per CRIS-7                                                                                                                                     |
-| Cognito auth                         | `apps/web/amplify/auth` — User Pool (email/password, 5 groups) + guest Identity Pool for anonymous submission (CRIS-7, ADR-0024)                                                                                                                                                                                                                                                          |
-| AppSync + DynamoDB                   | `apps/web/amplify/data` — MVP model: 11 entities, 6 GSIs (CRIS-8)                                                                                                                                                                                                                                                                                                                         |
-| Write path (`submitReport`)          | `amplify/functions/submit-report` — durable NEW + idempotency (CRIS-9)                                                                                                                                                                                                                                                                                                                    |
-| State machine mutations              | `amplify/functions/transition-report` — guarded transitions (CRIS-18)                                                                                                                                                                                                                                                                                                                     |
-| Public projection + real-time        | `PublicReport` + `publishReportUpdate` + subscriptions (CRIS-19)                                                                                                                                                                                                                                                                                                                          |
-| AI classification contract + scoring | `packages/shared/src/classification.ts` — versioned JSON contract (v2 adds triage `entities`, CRIS-20) + deterministic [0,10] scoring & `ScoreBreakdown` (CRIS-11 ✓, ADR-0010)                                                                                                                                                                                                            |
-| Streams→SQS→Lambda→Bedrock           | `amplify/functions/classify-report` — Streams→Pipe→SQS(+DLQ)→Lambda + Bedrock **Triage Agent** (tool-using: extracts entities, calls a geocoding tool, degrades to the single-call classifier; CRIS-20 ✓, ADR-0026) over the CRIS-10 pipeline (ADR-0013). Seams: `publishReportUpdate` fan-out (CRIS-19), Amazon Location geocoding behind the agent's tool (CRIS-21), dedupe, SNS alerts |
-| S3 media                             | `apps/web/amplify/storage` — stub bucket                                                                                                                                                                                                                                                                                                                                                  |
-| MapLibre + Amazon Location           | `apps/web/src/surfaces/map` — interactive base map, lazy-loaded, in the dashboard "Live map" region + `/map` route (CRIS-13 ✓, ADR-0025). Tile source resolves via `VITE_MAP_STYLE_URL` (public demo style today; Amazon Location wires in with CRIS-24). Incident markers/clustering per CRIS-22                                                                                         |
-| Shared domain vocabulary             | `packages/shared` — statuses, roles, bands, categories + verification/assignment/alert/audit enums (CRIS-8); report-form draft/validation core shared by clients (CRIS-6)                                                                                                                                                                                                                 |
-| CI                                   | `.github/workflows/ci.yml` — format/lint/typecheck/build/test; `deploy.yml` = `ampx pipeline-deploy` via OIDC, dormant until AWS wired (CRIS-14 ✓/CRIS-15, ADR-0016; setup in `docs/runbooks/deploy.md`)                                                                                                                                                                                  |
-| Observability (CloudWatch/X-Ray)     | wired (CRIS-15 ✓, ADR-0015): X-Ray active on AppSync + all Lambdas; `amplify/observability.ts` — CloudWatch alarms (DLQ/queue-age/errors/throttles) + SLA dashboard + ops SNS topic; structured JSON logs in handlers                                                                                                                                                                     |
+| Component                            | Current state                                                                                                                                                                                                                                                                                                                                             |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| React Native citizen app             | `apps/mobile` has optional sign-in, an Expo report form, image selection, and guest/authenticated `submitReport` wiring. GPS/location input and S3 media upload remain deferred.                                                                                                                                                                          |
+| React SPA client                     | `apps/web` has landing, sign-in/sign-up/confirmation, `/report`, `/coordinator`, and `/map` routes. The coordinator route requires a session to read data but does not yet enforce a Cognito group at the route boundary.                                                                                                                                 |
+| Cognito auth                         | `apps/web/amplify/auth` defines email sign-in, five groups, and guest Identity Pool access. Web and mobile authentication UI exists; automatic group assignment and route-level role gates remain deferred.                                                                                                                                               |
+| AppSync + DynamoDB                   | `apps/web/amplify/data` defines 11 persistent models, six `Report` GSIs, custom mutations, and a `PublicReport` type. Model authorization remains coarse; generated model operations still coexist with guarded custom mutations.                                                                                                                         |
+| Write path (`submitReport`)          | `amplify/functions/submit-report` performs a durable `NEW` create, audit append, and client-request-id idempotency.                                                                                                                                                                                                                                       |
+| State transition mutation            | `amplify/functions/transition-report` implements role-checked, version-checked status transitions with audit events.                                                                                                                                                                                                                                      |
+| Public projection + real-time        | `PublicReport` and `publishReportUpdate` are defined, but the mutation is currently ADMIN-authorized, the classifier does not call it, and custom subscriptions are disabled. Dashboard data is a one-shot authenticated `Report.list` read with local redaction.                                                                                         |
+| AI classification contract + scoring | `packages/shared/src/classification.ts` contains the versioned v2 triage contract, entity extraction shape, deterministic scoring, and `ScoreBreakdown`.                                                                                                                                                                                                  |
+| Async Bedrock pipeline               | DynamoDB Stream → EventBridge Pipe → SQS (+ DLQ) → Lambda → Bedrock Triage Agent is wired. The worker selects the Amazon Location Places geocoder by default, has the `geo-places:Geocode` grant, and derives geohashes through shared code; the feature flag provides a null-geocoder fallback. Deduplication and citizen-alert enqueueing are deferred. |
+| S3 media                             | `apps/web/amplify/storage` defines a coarse report-media bucket access rule. Presigned upload, quarantine, stricter ownership, and signed delivery are deferred.                                                                                                                                                                                          |
+| Map                                  | `apps/web/src/surfaces/map` provides a lazy-loaded MapLibre base map using `VITE_MAP_STYLE_URL` or public demo tiles. Amazon Location map tiles and incident markers/clustering are not wired; backend Places geocoding is tracked separately above.                                                                                                      |
+| Shared domain vocabulary             | `packages/shared` provides statuses, roles, bands, categories, classification/scoring, authentication rules, and report-form validation used across clients and backend.                                                                                                                                                                                  |
+| CI/CD                                | `ci.yml` runs formatting, lint, typecheck, build, and available workspace tests. After successful `main` CI, `deploy.yml` can run `ampx pipeline-deploy` through OIDC when `AWS_DEPLOY_ENABLED=true`; source control does not reveal whether it is enabled.                                                                                               |
+| Observability                        | AppSync and four Lambdas have X-Ray tracing; CloudWatch alarms, an SLA dashboard, structured logs, and an ops SNS topic are defined. Real-time fan-out metrics remain dormant until that path is connected.                                                                                                                                               |
 
 ## 5. Deferred to later phases (design doc §1.2, §4)
 

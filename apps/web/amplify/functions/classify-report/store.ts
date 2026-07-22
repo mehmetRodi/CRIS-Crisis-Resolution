@@ -18,10 +18,9 @@ import {
  * Durable persistence for the classification worker.
  *
  * Per design doc §5.3 the worker writes to DynamoDB **directly** (keeping the
- * durable write independent of AppSync availability) and, separately, fans the
- * redacted update out to subscribers via the IAM-only `publishReportUpdate`
- * mutation — that notify step is owned by CRIS-19 and left as a seam in the
- * handler. IAM for these table writes is granted in `backend.ts` via
+ * durable write independent of AppSync availability). A separate future step
+ * will fan the redacted update out through `publishReportUpdate`; that notify
+ * integration remains an unwired seam in the handler. IAM for these table writes is granted in `backend.ts` via
  * `grantReadWriteData`; table names arrive as environment variables. There is no
  * separate `PublicReport` projection table in the current schema (it is a
  * customType returned by `publishReportUpdate`), so the worker writes only the
@@ -42,7 +41,7 @@ export interface ReportRecord {
   lastProcessedEventId?: string | null;
 }
 
-/** Resolved location, all optional — populated by the CRIS-13 geocode seam. */
+/** Resolved location, all optional — populated by the CRIS-21 geocoder. */
 export interface LocationResult {
   lat?: number;
   lng?: number;

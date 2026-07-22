@@ -18,14 +18,11 @@ import { publishReportUpdate as publishReportUpdateFn } from '../functions/publi
  * work-queues, map-viewport by geohash, duplicate-group lookup, and team task
  * board.
  *
- * What is intentionally NOT here yet (owned by later E2 tickets):
- * TODO(CRIS-9):  `submitReport` mutation + optimistic-lock conditional create,
- *   with client-request-id idempotency (`IdempotencyRecord`).
- * TODO(CRIS-18): state-machine mutations (`updateReportStatus`, `verifyReport`,
- *   `assignReport`, `resolveReport`) — role + `expectedVersion` conditional
- *   writes that append an immutable `ReportEvent` per transition (§5.1).
- * TODO(CRIS-19): the redacted `PublicReport` projection and the IAM-only
- *   `publishReportUpdate` mutation that drives subscriptions (§5.3).
+ * Custom API status:
+ *   - `submitReport` implements the guarded, idempotent create path (CRIS-9).
+ *   - `updateReportStatus` implements the guarded transition engine (CRIS-18).
+ *   - `PublicReport` and `publishReportUpdate` are defined, but worker IAM
+ *     authorization, worker invocation, and custom subscriptions remain deferred.
  *
  * ENUM SYNC: `a.enum()` requires literal arrays, so the members below are
  * duplicated from `@crisismap/shared` (the source of truth). When you change an
@@ -34,8 +31,9 @@ import { publishReportUpdate as publishReportUpdateFn } from '../functions/publi
  *
  * AUTH: model-level rules below are coarse role gates for the data model. The
  * resolver-layer guarantees the design depends on — ownership/region/version
- * checks, prompt-safe redaction, and the public projection — are enforced by the
- * custom resolvers in CRIS-9/18/19, not by these rules alone.
+ * checks, prompt-safe redaction, and the public projection — must be enforced by
+ * custom resolvers, not inferred from these rules alone. Generated model
+ * operations still coexist with the guarded mutations pending auth hardening.
  */
 const schema = a.schema({
   /* ---------------------------------------------------------------------- */
@@ -141,8 +139,9 @@ const schema = a.schema({
       // 6) Team task board, highest priority first.
       index('assignedTeamId').sortKeys(['priorityScore']).queryField('reportsByTeam'),
     ])
-    // Coarse role gate. Direct client writes are replaced by the guarded custom
-    // mutations in CRIS-9/18; reads are redacted via PublicReport in CRIS-19.
+    // Coarse role gate. Clients should use the guarded CRIS-9/18 mutations, but
+    // generated model operations still exist for the allowed groups. Public-facing
+    // reads must use PublicReport; authenticated internal reads currently remain.
     .authorization((allow) => [
       allow.groups(['COORDINATOR', 'ADMIN']),
       allow.groups(['RESPONDER', 'VOLUNTEER']).to(['read']),
@@ -469,13 +468,13 @@ const schema = a.schema({
   }),
 
   /**
-   * IAM-only internal mutation that drives subscriptions (§5.3). AppSync
+   * Intended internal mutation for driving subscriptions (§5.3). AppSync
    * subscriptions fire on mutations, not on raw DynamoDB writes, so the async
-   * worker writes the report durably and then calls this to fan the redacted
+   * worker will write the report durably and then call this to fan the redacted
    * update out to subscribers — keeping the durable write independent of AppSync
    * availability.
    *
-   * Restricted to ADMIN at the client boundary today. TODO(CRIS-10): grant the
+   * Restricted to ADMIN at the client boundary today. TODO: grant the
    * classification worker's IAM role via a schema-level `allow.resource(worker)`
    * so it becomes the real (internal-only) caller, and drop the ADMIN rule.
    */
@@ -502,18 +501,18 @@ const schema = a.schema({
     .authorization((allow) => [allow.groups(['ADMIN'])]),
 
   /*
-   * TODO(CRIS-19): Real-time subscriptions temporarily disabled to unblock the
+   * TODO(CRIS-28): Real-time subscriptions are temporarily disabled. Amplify
    * backend deploy. Amplify Gen 2 requires every custom subscription to declare a
    * `.handler()` (an AppSync JS resolver that sets the subscription filter via
    * `util.transform.toSubscriptionFilter`) in addition to its auth rule — these
    * had auth rules but no handler, so synthesis failed with InvalidSchemaError.
    *
-   * Re-enable as part of CRIS-19 by adding `.handler(a.handler.custom({ entry }))`
+   * Re-enable as part of CRIS-28 by adding `.handler(a.handler.custom({ entry }))`
    * to each, implementing the filter resolvers, and adding `@aws-appsync/utils`
    * for resolver types. The `publishReportUpdate` mutation + `PublicReport` type
    * above remain valid and stay enabled.
    *
-   *   // Live map: every redacted update. TODO(CRIS-13/CRIS-7): extend to guests.
+   *   // Live map: every redacted update. TODO(CRIS-28/CRIS-24): define guest policy.
    *   onReportUpdate: a
    *     .subscription()
    *     .for(a.ref('publishReportUpdate'))

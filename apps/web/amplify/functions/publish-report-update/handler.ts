@@ -1,16 +1,15 @@
 /**
  * publishReportUpdate resolver (design doc §5.3) — CRIS-19.
  *
- * The internal, IAM-only "notify subscribers" mutation. AppSync subscriptions
- * fire on AppSync *mutations*, not on raw DynamoDB writes — so the async worker
- * (CRIS-10) writes the report durably and *then* calls this mutation to fan the
- * redacted update out to subscribed clients (p95 < 2 s, §3.2). Keeping the
- * durable write independent of AppSync availability is the whole point.
+ * Intended "notify subscribers" mutation. AppSync subscriptions fire on
+ * AppSync *mutations*, not on raw DynamoDB writes. Today this resolver has an
+ * ADMIN schema rule; worker authorization/invocation and subscriptions remain
+ * deferred. Keeping the durable worker write independent of AppSync
+ * availability remains the design requirement.
  *
  * This is a passthrough: its arguments are already the redacted `PublicReport`
- * shape (produced by `toPublicReport` at the caller). Because the GraphQL
- * argument type contains only public fields, reporter identity/contact/notes and
- * the raw report text physically cannot travel this channel (§5.6).
+ * shape. Because the GraphQL argument type contains only public fields, reporter
+ * identity/contact/notes and raw report text cannot travel this channel (§5.6).
  */
 import type { AppSyncResolverHandler } from 'aws-lambda';
 import type {

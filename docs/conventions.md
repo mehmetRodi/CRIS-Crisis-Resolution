@@ -26,8 +26,11 @@ Shared conventions for CrisisMap AI. Keep this current; it is the reference for 
 - **No PII in logs or prompts.** Reporter identity and contact data are protected. Async
   classification jobs carry only IDs and trace metadata, never raw contact info.
 - Treat user-submitted report text as **untrusted** in prompts (prompt-injection defense).
-- Contact data is KMS-encrypted and excluded from public projections; a separate
-  `PublicReport` type guarantees identity/contact/internal notes can't leak.
+- Contact data must be encrypted at rest and excluded from prompts and public projections.
+  Public-facing APIs must return the separate `PublicReport` shape rather than relying on UI
+  redaction. The current authenticated dashboard still reads `Report` under coarse model
+  authorization and redacts locally; treat that as an internal MVP path pending authorization
+  hardening, not as the public security boundary.
 - Mutations use **optimistic concurrency**: require `expectedVersion` + conditional write;
   a conflict returns a machine-readable `CONFLICT` error.
 
@@ -69,7 +72,8 @@ rationale in ADR-0011):
 ## Testing
 
 - **Vitest** for unit tests, co-located as `*.test.ts(x)` next to the code.
-- Every workspace exposes a `test` script; CI runs `npm test` across all workspaces.
+- CI runs `npm test` across workspaces that expose a `test` script. The mobile workspace does
+  not currently expose one; add a mobile test script when its test harness lands.
 - Domain logic (state machine, scoring) must have unit tests — it's the safety-critical core.
 - **Unit tests assert in-memory shapes and will not catch DynamoDB/GraphQL contract breaks**
   (see ADR-0011). Before a write path is "done", smoke-test it end-to-end against a sandbox

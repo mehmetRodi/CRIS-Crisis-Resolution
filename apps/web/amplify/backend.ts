@@ -29,12 +29,12 @@ import { addObservability } from './observability';
  * rather than in each function's `resource.ts`, because the DynamoDB tables
  * don't exist until the data schema is synthesized. The worker classifies
  * (Bedrock), scores, and writes results back durably (direct-to-DynamoDB, §5.3);
- * fanning the redacted update out to subscribers via `publishReportUpdate`
- * (CRIS-19) and SNS proximity alerts remain deferred seams.
+ * Worker invocation of `publishReportUpdate`, custom subscriptions, and SNS
+ * proximity alerts remain deferred seams.
  *
- * Nothing here is deployed by the scaffold. Run `npx ampx sandbox` from
- * `apps/web` (with AWS credentials + Bedrock model access) to stand up a
- * personal dev environment. NOTE: enabling the stream changes the table's
+ * Run `npx ampx sandbox` from `apps/web` (with AWS credentials + Bedrock model
+ * access) to stand up a personal dev environment. Source control does not
+ * establish whether a shared environment is active. NOTE: enabling the stream changes the table's
  * custom-resource update path — deploy on a fresh sandbox first (ADR-0013).
  */
 const backend = defineBackend({
@@ -215,8 +215,8 @@ worker.addEventSource(
 classificationQueue.grantConsumeMessages(worker);
 
 // Durable direct-to-DynamoDB writes (§5.3): read+write Report, append audit
-// events. The redacted public projection is fanned out via publishReportUpdate
-// (CRIS-19), not written to a table here.
+// events. The redacted public projection is not written to a table; worker
+// invocation of publishReportUpdate remains deferred.
 reportTable.grantReadWriteData(worker);
 tables['ReportEvent'].grantWriteData(worker);
 
@@ -238,6 +238,19 @@ worker.addToRolePolicy(
       `arn:aws:bedrock:${backend.stack.region}:${backend.stack.account}:inference-profile/eu.anthropic.claude-*`,
       'arn:aws:bedrock:eu-*::foundation-model/anthropic.claude-*',
     ],
+  }),
+);
+
+// Amazon Location geocoding (CRIS-21, ADR-0027) — the Triage Agent's
+// geocode_location tool resolves described places via the standalone Places
+// `Geocode` API. The standalone geo-places/geo-routes/geo-maps APIs are
+// resource-less (no place-index ARN to scope to, unlike legacy Location), so
+// the action can only be granted against `*`; it is a single read-only verb.
+// The client runs in `eu-central-1` (ADR-0017), keeping lookups in the EU.
+worker.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['geo-places:Geocode'],
+    resources: ['*'],
   }),
 );
 

@@ -1,9 +1,9 @@
 name: CI
 
 # CRIS-15 — CI baseline. Runs on every PR and on pushes to main.
-# No AWS credentials and no deploy in this workflow: the scaffold does not
-# provision cloud resources. A deploy job (ampx pipeline-deploy) is added when
-# the backend becomes real (CRIS-14).
+# No AWS credentials and no deploy in this workflow. The separate Deploy
+# workflow listens for a successful `main` CI run and, when explicitly enabled,
+# runs `ampx pipeline-deploy` through GitHub OIDC (ADR-0018).
 
 on:
   push:
