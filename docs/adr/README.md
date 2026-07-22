@@ -44,3 +44,4 @@ behind the code — essential when refactoring or extending the system.
 | [0026](0026-bedrock-triage-agent.md)                          | Bedrock Triage Agent (tool-using classifier)         | Accepted                         |
 | [0027](0027-amazon-location-places-geocoding.md)              | Amazon Location Places geocoding + shared geohash    | Accepted                         |
 | [0028](0028-coordinator-status-transition-wiring.md)          | Coordinator status-transition wiring (frontend)      | Accepted                         |
+| [0029](0029-worker-iam-publish-wiring.md)                     | Triage worker as IAM-only publisher (CRIS-19)        | Accepted                         |
