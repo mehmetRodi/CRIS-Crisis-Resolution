@@ -4,11 +4,14 @@ import {
   ReportStatus,
   scoreReport,
   shouldEscalateToVerification,
+  toPublicReport,
+  type PublicReport,
 } from '@crisismap/shared';
 import { createBedrockClassifier } from './bedrock';
 import { createBedrockTriageAgent, createTriageAgent, type TriageAgent } from './agent';
 import { createAmazonLocationGeocoder, createNullGeocoder, type Geocoder } from './geocode';
 import { createDynamoStore, type ReportStore } from './store';
+import type { Publisher } from './publish';
 
 /**
  * classify-report worker (design doc §3, §5.4; CRIS-10).
@@ -28,6 +31,12 @@ import { createDynamoStore, type ReportStore } from './store';
  * (`scoreReport`, ADR-0010) — the ranking authority, never a model opinion; a
  * low-confidence or model-flagged classification is escalated to
  * NEEDS_VERIFICATION (§2.6) while still recording the AI result.
+ *
+ * After the durable write, the worker fans the redacted `PublicReport` out via
+ * the internal IAM-only `publishReportUpdate` mutation (§5.3, CRIS-19,
+ * ADR-0009/0029) so subscribers update in near real time — a best-effort call
+ * (an injected {@link Publisher}) that never rolls back the durable write. The
+ * subscriptions that consume it are enabled in CRIS-28.
  */
 
 /** SQS payload projected by the EventBridge Pipe input transformer (IDs only, no PII). */
@@ -40,6 +49,8 @@ export interface ClassificationMessage {
 export interface WorkerDeps {
   store: ReportStore;
   triage: TriageAgent;
+  /** Fans the redacted result out to AppSync subscribers after the durable write (CRIS-19). */
+  publisher: Publisher;
   /** Structured-log sink; defaults to console. Override in tests. */
   log?: (entry: Record<string, unknown>) => void;
 }
@@ -65,6 +76,31 @@ export function parseMessage(body: string): ClassificationMessage | null {
     return null;
   }
   return { reportId, version: versionNum, streamEventId };
+}
+
+/**
+ * Fan the redacted projection out to subscribers (§5.3, CRIS-19) — best-effort.
+ * The durable DynamoDB write has already committed, so a publish failure must
+ * NOT propagate: throwing would re-drive the SQS message and reprocess an
+ * already-classified report (wasteful, and eventually DLQ). Subscribers instead
+ * reconcile on their next read/refetch. `toPublicReport` builds the payload from
+ * the `PUBLIC_REPORT_FIELDS` allow-list, so no PII can leak onto this channel.
+ */
+async function publishUpdate(
+  deps: WorkerDeps,
+  report: PublicReport,
+  log: (entry: Record<string, unknown>) => void,
+): Promise<void> {
+  try {
+    await deps.publisher.publishUpdate(report);
+    log({ event: 'publish.done', reportId: report.reportId, status: report.status });
+  } catch (err) {
+    log({
+      event: 'publish.failed',
+      reportId: report.reportId,
+      reason: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 /**
@@ -127,6 +163,20 @@ export async function processRecord(
       reason: 'classification_failed',
       streamEventId,
     });
+    // Still fan out: a report awaiting human review is exactly what coordinators
+    // need to see promptly. No classification ran, so the projection carries only
+    // the status + location context that already existed.
+    await publishUpdate(
+      deps,
+      toPublicReport({
+        id: reportId,
+        status: ReportStatus.NEEDS_VERIFICATION,
+        regionId: report.regionId,
+        createdAt: report.createdAt,
+        updatedAt: new Date().toISOString(),
+      }),
+      log,
+    );
     return;
   }
 
@@ -159,19 +209,43 @@ export async function processRecord(
     streamEventId,
   });
 
-  // TODO: authorize and call `publishReportUpdate`, then enable the custom
-  // subscriptions so clients update in near real time (§5.3). Durable write
-  // above remains independent of AppSync availability.
+  // Fan the redacted result out to subscribers (§5.3, CRIS-19). The durable
+  // write above already committed, so this is best-effort. The custom
+  // subscriptions that consume `publishReportUpdate` are enabled in CRIS-28.
+  await publishUpdate(
+    deps,
+    toPublicReport({
+      id: reportId,
+      status,
+      category: classification.category,
+      urgency: classification.urgency,
+      priorityScore: scoring.priorityScore,
+      priorityBand: scoring.priorityBand,
+      summary: classification.summary,
+      lat: location?.lat,
+      lng: location?.lng,
+      geohash: location?.geohash,
+      geohashPrefix: location?.geohashPrefix,
+      regionId: report.regionId,
+      createdAt: report.createdAt,
+      updatedAt: new Date().toISOString(),
+    }),
+    log,
+  );
   log({ event: 'classify.done', reportId, band: scoring.priorityBand, status });
 }
 
-function buildDeps(): WorkerDeps {
+async function buildDeps(): Promise<WorkerDeps> {
   const env = (key: string): string => {
     const value = process.env[key];
     if (!value) throw new Error(`missing required env var: ${key}`);
     return value;
   };
   const modelId = env('BEDROCK_MODEL_ID');
+  // Dynamically imported so the AppSync/Amplify client (and its transitive deps)
+  // stays out of the unit-test import graph — processRecord is tested with an
+  // injected fake Publisher and never calls buildDeps().
+  const { createAppSyncPublisher } = await import('./publish');
   // The agent's geocode_location tool is wired regardless; the flag chooses what
   // backs it (CRIS-21, ADR-0027). When off, every lookup returns "unavailable"
   // and reports stay unlocated — the tool-use path still runs.
@@ -190,6 +264,8 @@ function buildDeps(): WorkerDeps {
       primary: createBedrockTriageAgent({ modelId, geocoder }),
       fallback: createBedrockClassifier({ modelId }),
     }),
+    // IAM-only fan-out to `publishReportUpdate` (CRIS-19, ADR-0009/0029).
+    publisher: createAppSyncPublisher(),
   };
 }
 
@@ -200,7 +276,7 @@ function buildDeps(): WorkerDeps {
  * failure so it retries and ultimately lands in the DLQ.
  */
 export const handler: SQSHandler = async (event) => {
-  const deps = buildDeps();
+  const deps = await buildDeps();
   const batchItemFailures: { itemIdentifier: string }[] = [];
 
   for (const record of event.Records) {

@@ -2,9 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   CLASSIFICATION_CONTRACT_VERSION,
   Category,
+  PUBLIC_REPORT_FIELDS,
   ReportStatus,
   Urgency,
   type ClassificationResult,
+  type PublicReport,
 } from '@crisismap/shared';
 import { parseMessage, processRecord, type WorkerDeps } from './handler';
 import type {
@@ -16,6 +18,7 @@ import type {
 } from './store';
 import { ClassificationError } from './bedrock';
 import type { TriageAgent, TriageResult } from './agent';
+import type { Publisher } from './publish';
 
 const CLASSIFICATION: ClassificationResult = {
   contractVersion: CLASSIFICATION_CONTRACT_VERSION,
@@ -61,18 +64,33 @@ function fakeAgent(impl?: TriageAgent['triage']): TriageAgent {
   };
 }
 
+/** Captures every published projection; `fail` makes the publish reject. */
+function fakePublisher(fail = false) {
+  const published: PublicReport[] = [];
+  const publisher: Publisher = {
+    publishUpdate: vi.fn(async (report: PublicReport) => {
+      if (fail) throw new Error('appsync unavailable');
+      published.push(report);
+    }),
+  };
+  return { publisher, published };
+}
+
 const NEW_REPORT: ReportRecord = {
   id: 'r1',
   version: 3,
   status: ReportStatus.NEW,
   text: 'people hurt at the clinic',
   lastProcessedEventId: null,
+  createdAt: '2026-07-22T00:00:00.000Z',
+  regionId: 'region-1',
 };
 
 const message = { reportId: 'r1', version: 3, streamEventId: 'evt-1' };
-const deps = (store: ReportStore, triage: TriageAgent): WorkerDeps => ({
+const deps = (store: ReportStore, triage: TriageAgent, publisher?: Publisher): WorkerDeps => ({
   store,
   triage,
+  publisher: publisher ?? fakePublisher().publisher,
   log: () => {},
 });
 
@@ -199,6 +217,75 @@ describe('processRecord', () => {
       reportId: 'r1',
       claimedVersion: 4,
       reason: 'classification_failed',
+    });
+  });
+
+  describe('real-time fan-out (§5.3, CRIS-19)', () => {
+    it('publishes the redacted projection after a successful classification', async () => {
+      const { store } = fakeStore(NEW_REPORT);
+      const { publisher, published } = fakePublisher();
+      const agent = fakeAgent(async () => ({ classification: CLASSIFICATION, location: LOCATION }));
+
+      await processRecord(deps(store, agent, publisher), message);
+
+      expect(published).toHaveLength(1);
+      expect(published[0]).toMatchObject({
+        reportId: 'r1',
+        status: ReportStatus.AI_CLASSIFIED,
+        category: Category.MEDICAL,
+        urgency: Urgency.CRITICAL,
+        priorityBand: 'P0',
+        // The AI summary is the one classification field safe to surface publicly.
+        summary: CLASSIFICATION.summary,
+        lat: LOCATION.lat,
+        geohash: LOCATION.geohash,
+        regionId: 'region-1',
+        createdAt: '2026-07-22T00:00:00.000Z',
+      });
+    });
+
+    it('never leaks PII onto the publish channel (only PUBLIC_REPORT_FIELDS)', async () => {
+      const { store } = fakeStore(NEW_REPORT);
+      const { publisher, published } = fakePublisher();
+
+      await processRecord(deps(store, fakeAgent(), publisher), message);
+
+      expect(published).toHaveLength(1);
+      // The projection carries exactly the allow-list — no text/reporter*/notes.
+      expect(Object.keys(published[0]).sort()).toEqual([...PUBLIC_REPORT_FIELDS].sort());
+    });
+
+    it('publishes a NEEDS_VERIFICATION update when triage fails', async () => {
+      const { store, flagged } = fakeStore(NEW_REPORT);
+      const { publisher, published } = fakePublisher();
+      const agent = fakeAgent(async () => {
+        throw new ClassificationError(['invalid category: ...']);
+      });
+
+      await processRecord(deps(store, agent, publisher), message);
+
+      expect(flagged).toHaveLength(1);
+      expect(published).toHaveLength(1);
+      expect(published[0]).toMatchObject({
+        reportId: 'r1',
+        status: ReportStatus.NEEDS_VERIFICATION,
+        // No classification ran — the enriched fields stay null.
+        category: null,
+        summary: null,
+        regionId: 'region-1',
+      });
+    });
+
+    it('swallows a publish failure — the durable write already succeeded', async () => {
+      const { store, persisted } = fakeStore(NEW_REPORT);
+      const { publisher } = fakePublisher(true); // publish rejects
+
+      // Must NOT throw: a rejection here would re-drive the SQS message and
+      // reprocess an already-classified report.
+      await expect(
+        processRecord(deps(store, fakeAgent(), publisher), message),
+      ).resolves.toBeUndefined();
+      expect(persisted).toHaveLength(1);
     });
   });
 });

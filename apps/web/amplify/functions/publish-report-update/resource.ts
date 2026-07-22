@@ -3,9 +3,9 @@ import { defineFunction } from '@aws-amplify/backend';
 /**
  * `publishReportUpdate` resolver function (CRIS-19, design doc §5.3).
  *
- * A stateless passthrough intended to turn an internal call into an AppSync
- * mutation so subscriptions fire. It is currently ADMIN-authorized and not
- * called by the worker. No table access — it never touches DynamoDB.
+ * A stateless passthrough that turns the triage worker's internal call into an
+ * AppSync mutation so subscriptions fire. Authorized only to the worker's IAM
+ * role (`allow.resource`, CRIS-19). No table access — it never touches DynamoDB.
  */
 export const publishReportUpdate = defineFunction({
   name: 'publish-report-update',

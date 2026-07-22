@@ -1,11 +1,14 @@
 /**
  * publishReportUpdate resolver (design doc §5.3) — CRIS-19.
  *
- * Intended "notify subscribers" mutation. AppSync subscriptions fire on
- * AppSync *mutations*, not on raw DynamoDB writes. Today this resolver has an
- * ADMIN schema rule; worker authorization/invocation and subscriptions remain
- * deferred. Keeping the durable worker write independent of AppSync
- * availability remains the design requirement.
+ * The "notify subscribers" mutation. AppSync subscriptions fire on AppSync
+ * *mutations*, not on raw DynamoDB writes, so the triage worker writes durably
+ * and then calls this to fan the update out. As of CRIS-19 it is authorized
+ * ONLY to the worker's IAM role (`allow.resource` in data/resource.ts) — no
+ * client can invoke it. The subscriptions that consume it are enabled in
+ * CRIS-28; until then this simply echoes the projection back to its caller.
+ * Keeping the durable worker write independent of AppSync availability remains
+ * the design requirement.
  *
  * This is a passthrough: its arguments are already the redacted `PublicReport`
  * shape. Because the GraphQL argument type contains only public fields, reporter
