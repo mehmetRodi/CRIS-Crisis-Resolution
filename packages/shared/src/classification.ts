@@ -467,3 +467,44 @@ export function scoreReport(input: ScoreInput): ScoringResult {
     breakdown,
   };
 }
+
+/** The five additive numeric factors every `ScoreBreakdown` must carry. */
+const SCORE_BREAKDOWN_FACTORS = [
+  'urgencyWeight',
+  'categoryWeight',
+  'recencyWeight',
+  'corroborationWeight',
+  'manualAdjustment',
+] as const;
+
+/**
+ * Parse a persisted `scoreBreakdown` (stored as `a.json()` on `Report`, so
+ * untyped at read time) back into a {@link ScoreBreakdown}, or `null` when it is
+ * absent/malformed. Unlike {@link scoreReport} — which produces the breakdown —
+ * this is the read-side counterpart the coordinator incident-detail view (CRIS-23)
+ * uses to render *why* a report ranks where it does.
+ *
+ * Strict on the five numeric factors (all must be finite numbers, since the UI
+ * renders each as a contribution to the score); lenient on the optional `notes`.
+ * A breakdown missing any factor is treated as absent rather than partially
+ * rendered — the detail view simply omits the "why" panel for that report.
+ * Never throws.
+ */
+export function parseScoreBreakdown(raw: unknown): ScoreBreakdown | null {
+  if (!isRecord(raw)) return null;
+  const factors: Record<string, number> = {};
+  for (const key of SCORE_BREAKDOWN_FACTORS) {
+    const value = raw[key];
+    if (typeof value !== 'number' || !Number.isFinite(value)) return null;
+    factors[key] = value;
+  }
+  const notes = typeof raw.notes === 'string' ? raw.notes : undefined;
+  return {
+    urgencyWeight: factors.urgencyWeight,
+    categoryWeight: factors.categoryWeight,
+    recencyWeight: factors.recencyWeight,
+    corroborationWeight: factors.corroborationWeight,
+    manualAdjustment: factors.manualAdjustment,
+    ...(notes !== undefined ? { notes } : {}),
+  };
+}
