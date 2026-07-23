@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { Category, PriorityBand, ReportStatus, type PublicReport } from '@crisismap/shared';
+import {
+  Category,
+  PriorityBand,
+  ReportEventType,
+  ReportStatus,
+  UserRole,
+  type PublicReport,
+} from '@crisismap/shared';
 import {
   applyFilters,
   bandOf,
@@ -11,8 +18,11 @@ import {
   matchesFilters,
   regionOptions,
   sortByPriority,
+  sortTimeline,
   toggleValue,
+  toTimelineEvent,
   type IncidentFilters,
+  type TimelineEvent,
 } from './incidents';
 
 /** Minimal PublicReport factory — only the fields the read-model reads. */
@@ -206,5 +216,87 @@ describe('toggleValue', () => {
     expect(toggleValue(input, 'c')).toEqual(['a', 'b', 'c']);
     expect(toggleValue(input, 'a')).toEqual(['b']);
     expect(input).toEqual(['a', 'b']);
+  });
+});
+
+describe('toTimelineEvent', () => {
+  it('projects a status-change event, extracting the operator note from detail', () => {
+    const event = toTimelineEvent({
+      eventId: 'evt-1',
+      type: ReportEventType.STATUS_CHANGED,
+      fromStatus: 'AI_CLASSIFIED',
+      toStatus: 'VERIFIED',
+      actorId: 'user-123',
+      actorRole: UserRole.COORDINATOR,
+      version: 3,
+      detail: { note: 'confirmed by field team' },
+      createdAt: '2026-07-15T11:00:00Z',
+    });
+    expect(event).toEqual<TimelineEvent>({
+      eventId: 'evt-1',
+      type: ReportEventType.STATUS_CHANGED,
+      fromStatus: 'AI_CLASSIFIED',
+      toStatus: 'VERIFIED',
+      actorRole: UserRole.COORDINATOR,
+      isSystem: false,
+      note: 'confirmed by field team',
+      version: 3,
+      createdAt: '2026-07-15T11:00:00Z',
+    });
+  });
+
+  it('flags SYSTEM actors and tolerates a missing/blank note', () => {
+    const event = toTimelineEvent({
+      eventId: 'evt-2',
+      type: ReportEventType.CLASSIFIED,
+      actorId: 'SYSTEM',
+      detail: { note: '   ' },
+    });
+    expect(event.isSystem).toBe(true);
+    expect(event.actorRole).toBeNull();
+    expect(event.note).toBeNull();
+  });
+
+  it('degrades an unknown type/role rather than dropping the entry', () => {
+    const event = toTimelineEvent({ eventId: 'evt-3', type: 'BOGUS', actorRole: 'WIZARD' });
+    expect(event.type).toBe(ReportEventType.STATUS_CHANGED);
+    expect(event.actorRole).toBeNull();
+    expect(event.note).toBeNull();
+  });
+
+  it('falls back to the record id when eventId is absent', () => {
+    expect(toTimelineEvent({ id: 'row-1' }).eventId).toBe('row-1');
+  });
+});
+
+describe('sortTimeline', () => {
+  const at = (eventId: string, createdAt: string | null, version: number): TimelineEvent => ({
+    eventId,
+    type: ReportEventType.STATUS_CHANGED,
+    fromStatus: null,
+    toStatus: null,
+    actorRole: null,
+    isSystem: false,
+    note: null,
+    version,
+    createdAt,
+  });
+
+  it('orders newest-first and does not mutate the input', () => {
+    const input = [
+      at('old', '2026-07-15T10:00:00Z', 1),
+      at('new', '2026-07-15T12:00:00Z', 3),
+      at('mid', '2026-07-15T11:00:00Z', 2),
+    ];
+    expect(sortTimeline(input).map((e) => e.eventId)).toEqual(['new', 'mid', 'old']);
+    expect(input[0]?.eventId).toBe('old');
+  });
+
+  it('breaks ties on the same timestamp by higher version', () => {
+    const ts = '2026-07-15T10:00:00Z';
+    expect(sortTimeline([at('v1', ts, 1), at('v2', ts, 2)]).map((e) => e.eventId)).toEqual([
+      'v2',
+      'v1',
+    ]);
   });
 });

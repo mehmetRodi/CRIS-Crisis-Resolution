@@ -1,10 +1,10 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { Category, PriorityBand } from '@crisismap/shared';
+import { Category, PriorityBand, ReportEventType } from '@crisismap/shared';
 // The "Live map" region now mounts a real MapLibre map (CRIS-13); MapLibre is
 // stubbed globally in vitest.setup.ts (WebGL is absent in jsdom).
 import { CoordinatorDashboard } from './CoordinatorDashboard';
-import type { CoordinatorIncident, IncidentFeedState } from './incidents';
+import type { CoordinatorIncident, IncidentFeedState, IncidentTimelineState } from './incidents';
 
 function incident(overrides: Partial<CoordinatorIncident> = {}): CoordinatorIncident {
   return {
@@ -23,6 +23,10 @@ function incident(overrides: Partial<CoordinatorIncident> = {}): CoordinatorInci
     createdAt: '2026-07-15T10:00:00Z',
     updatedAt: null,
     version: 2,
+    confidence: null,
+    scoreVersion: null,
+    scoreBreakdown: null,
+    entities: null,
     ...overrides,
   };
 }
@@ -251,10 +255,145 @@ describe('CoordinatorDashboard status transitions (CRIS-18)', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(/refresh and try again/i);
   });
 
-  it('keeps actions disabled in the shell when no transition handler is wired', () => {
+  it('keeps actions disabled when no transition handler is wired', () => {
     render(<CoordinatorDashboard onExit={() => {}} feed={readyFeed} />);
     fireEvent.click(screen.getByText(/report-a/));
-    // Without onTransition the detail panel stays a placeholder.
+    // Without onTransition the detail panel shows the read-only detail plus the
+    // disabled action placeholders (live transitions arrive with onTransition).
     expect(screen.getByRole('button', { name: 'Verify' })).toBeDisabled();
+  });
+});
+
+describe('CoordinatorDashboard incident detail (CRIS-23)', () => {
+  const detail = () => screen.getByRole('region', { name: /incident detail/i });
+
+  function renderSelected(
+    overrides: Partial<CoordinatorIncident> = {},
+    props: { timeline?: IncidentTimelineState } = {},
+  ) {
+    const feed: IncidentFeedState = {
+      status: 'ready',
+      incidents: [incident({ reportId: 'report-detail', ...overrides })],
+    };
+    render(
+      <CoordinatorDashboard
+        onExit={() => {}}
+        feed={feed}
+        onTransition={() => {}}
+        timeline={props.timeline}
+      />,
+    );
+    fireEvent.click(screen.getByText(/report-d/));
+  }
+
+  it('shows the classification snapshot with confidence as a percentage', () => {
+    renderSelected({ category: Category.MEDICAL, urgency: 'HIGH', confidence: 0.8 });
+    expect(within(detail()).getByText('MEDICAL')).toBeInTheDocument();
+    expect(within(detail()).getByText('HIGH')).toBeInTheDocument();
+    expect(within(detail()).getByText('80%')).toBeInTheDocument();
+  });
+
+  it('renders the explainable score breakdown factors', () => {
+    renderSelected({
+      scoreBreakdown: {
+        urgencyWeight: 3.5,
+        categoryWeight: 3,
+        recencyWeight: 1.2,
+        corroborationWeight: 0.5,
+        manualAdjustment: 0,
+      },
+    });
+    expect(within(detail()).getByText(/why this priority/i)).toBeInTheDocument();
+    // "Corroboration" / "Recency" only appear in the score breakdown ("Urgency"
+    // and "Category" also label the classification snapshot above).
+    expect(within(detail()).getByText('Corroboration')).toBeInTheDocument();
+    expect(within(detail()).getByText('Recency')).toBeInTheDocument();
+    expect(within(detail()).getByText('+3.50')).toBeInTheDocument();
+  });
+
+  it('surfaces a non-zero manual adjustment separately', () => {
+    renderSelected({
+      scoreBreakdown: {
+        urgencyWeight: 2,
+        categoryWeight: 1,
+        recencyWeight: 0,
+        corroborationWeight: 0,
+        manualAdjustment: -1.5,
+      },
+    });
+    expect(within(detail()).getByText(/manual adjustment/i)).toBeInTheDocument();
+    expect(within(detail()).getByText('-1.50')).toBeInTheDocument();
+  });
+
+  it('renders extracted entities (people affected, infrastructure, hazards)', () => {
+    renderSelected({
+      entities: {
+        peopleAffected: 12,
+        infrastructure: ['north bridge'],
+        hazards: ['gas leak'],
+      },
+    });
+    expect(within(detail()).getByText('12')).toBeInTheDocument();
+    expect(within(detail()).getByText('north bridge')).toBeInTheDocument();
+    expect(within(detail()).getByText('gas leak')).toBeInTheDocument();
+  });
+
+  it('renders the audit timeline newest-first with actor and note', () => {
+    const timeline: IncidentTimelineState = {
+      status: 'ready',
+      events: [
+        {
+          eventId: 'evt-2',
+          type: ReportEventType.STATUS_CHANGED,
+          fromStatus: 'AI_CLASSIFIED',
+          toStatus: 'VERIFIED',
+          actorRole: 'COORDINATOR',
+          isSystem: false,
+          note: 'confirmed by field team',
+          version: 3,
+          createdAt: '2026-07-15T11:00:00Z',
+        },
+        {
+          eventId: 'evt-1',
+          type: ReportEventType.SUBMITTED,
+          fromStatus: null,
+          toStatus: 'NEW',
+          actorRole: null,
+          isSystem: true,
+          note: null,
+          version: 1,
+          createdAt: '2026-07-15T10:00:00Z',
+        },
+      ],
+    };
+    renderSelected({}, { timeline });
+    expect(within(detail()).getByText(/AI_CLASSIFIED → VERIFIED/)).toBeInTheDocument();
+    expect(within(detail()).getByText('COORDINATOR')).toBeInTheDocument();
+    expect(within(detail()).getByText(/confirmed by field team/)).toBeInTheDocument();
+    expect(within(detail()).getByText(/report submitted/i)).toBeInTheDocument();
+    expect(within(detail()).getByText('System')).toBeInTheDocument();
+  });
+
+  it('shows a loading state while the timeline is in flight', () => {
+    renderSelected({}, { timeline: { status: 'loading' } });
+    expect(within(detail()).getByText(/loading timeline/i)).toBeInTheDocument();
+  });
+
+  it('surfaces a timeline read error', () => {
+    renderSelected({}, { timeline: { status: 'error', message: 'timeline unavailable' } });
+    expect(within(detail()).getByText(/timeline unavailable/i)).toBeInTheDocument();
+  });
+
+  it('notifies the parent of the selected incident', () => {
+    const onSelectIncident = vi.fn();
+    const feed: IncidentFeedState = {
+      status: 'ready',
+      incidents: [incident({ reportId: 'report-detail' })],
+    };
+    render(
+      <CoordinatorDashboard onExit={() => {}} feed={feed} onSelectIncident={onSelectIncident} />,
+    );
+    fireEvent.click(screen.getByText(/report-d/));
+    expect(onSelectIncident).toHaveBeenCalledWith('report-detail');
   });
 });
