@@ -64,7 +64,13 @@ Two data-shape facts drove the design:
    (raw `actorId` reduced to `isSystem` + role; freeform `detail` narrowed to the known operator
    `note`). It is the _per-incident_ history — distinct from the dashboard-wide "Recent activity"
    stream still owned by CRIS-28. Like the feed, it is a one-shot read that degrades to
-   `unauthenticated`/`error` rather than throwing.
+   `unauthenticated`/`error` rather than throwing. The query uses an **explicit selection set**
+   (only the fields the projection maps) — not merely for economy but for correctness: the CRIS-18
+   resolver writes `ReportEvent` rows directly, bypassing Amplify's auto-managed `updatedAt`, which
+   is non-nullable in the generated schema; the default selection set therefore makes AppSync
+   reject the whole query. Not requesting `updatedAt` avoids that. The proper backend fix
+   (populate/relax `updatedAt` on the resolver write) is a CRIS-18 seam and would not repair rows
+   already written.
 4. **The dashboard stays presentational; selection stays internal.** Rather than lift selection to
    a controlled prop (which would break the component's standalone tests), the dashboard notifies
    the route wrapper via `onSelectIncident` and renders an injected `timeline` prop — mirroring the
