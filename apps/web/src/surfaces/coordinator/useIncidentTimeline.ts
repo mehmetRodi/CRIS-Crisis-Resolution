@@ -58,7 +58,10 @@ export function useIncidentTimeline(reportId: string | null): LiveIncidentTimeli
         { limit: TIMELINE_LIMIT },
       );
       if (errors && errors.length > 0) {
-        setState({ status: 'error', message: errors[0]?.message ?? 'Could not load the timeline.' });
+        setState({
+          status: 'error',
+          message: errors[0]?.message ?? 'Could not load the timeline.',
+        });
         return;
       }
       setState({ status: 'ready', events: sortTimeline((data ?? []).map(toTimelineEvent)) });

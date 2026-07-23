@@ -460,7 +460,9 @@ function clampPercent(value: number): number {
 /** A labelled section heading inside the incident-detail panel. */
 function DetailLabel({ children }: { children: ReactNode }) {
   return (
-    <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">{children}</p>
+    <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
+      {children}
+    </p>
   );
 }
 
@@ -670,7 +672,9 @@ function TimelineView({ timeline }: { timeline: IncidentTimelineState }) {
                   </span>
                 </div>
                 <p className="text-xs text-slate-400">{timelineActor(event)}</p>
-                {event.note ? <p className="mt-0.5 text-xs text-slate-500">“{event.note}”</p> : null}
+                {event.note ? (
+                  <p className="mt-0.5 text-xs text-slate-500">“{event.note}”</p>
+                ) : null}
               </li>
             ))}
           </ol>

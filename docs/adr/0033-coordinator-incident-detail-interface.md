@@ -36,7 +36,7 @@ Two data-shape facts drove the design:
   flow to the public map/query projection.
 - **Fetch the full `Report` again on selection (per-incident detail read).** Rejected for the
   report fields — the data is already in memory from the list read, so a second round-trip buys
-  nothing and adds a loading state. (This *is* the right shape for the timeline, which is not in
+  nothing and adds a loading state. (This _is_ the right shape for the timeline, which is not in
   memory — see the decision.)
 - **Carry the coordinator-internal fields on `CoordinatorIncident`; read the timeline separately
   (chosen).** `CoordinatorIncident` is already "`PublicReport` + the operational fields an
@@ -62,7 +62,7 @@ Two data-shape facts drove the design:
 3. **The per-incident timeline is a separate, bounded read** via `useIncidentTimeline`, which
    queries the `eventsByReport` index and projects each `ReportEvent` to a PII-free `TimelineEvent`
    (raw `actorId` reduced to `isSystem` + role; freeform `detail` narrowed to the known operator
-   `note`). It is the *per-incident* history — distinct from the dashboard-wide "Recent activity"
+   `note`). It is the _per-incident_ history — distinct from the dashboard-wide "Recent activity"
    stream still owned by CRIS-28. Like the feed, it is a one-shot read that degrades to
    `unauthenticated`/`error` rather than throwing.
 4. **The dashboard stays presentational; selection stays internal.** Rather than lift selection to
