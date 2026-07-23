@@ -131,6 +131,71 @@ describe('CoordinatorDashboard live feed', () => {
   });
 });
 
+describe('CoordinatorDashboard filters (CRIS-22)', () => {
+  const feed: IncidentFeedState = {
+    status: 'ready',
+    incidents: [
+      incident({ reportId: 'fire-1', category: Category.FIRE, regionId: 'region-a' }),
+      incident({ reportId: 'flood-1', category: Category.FLOOD, regionId: 'region-b' }),
+    ],
+  };
+
+  const filters = () => screen.getByRole('region', { name: /filters/i });
+  const queue = () => screen.getByRole('region', { name: /priority incident queue/i });
+
+  it('narrows the queue when a category facet is toggled', () => {
+    render(<CoordinatorDashboard onExit={() => {}} feed={feed} />);
+    expect(within(queue()).getByText('fire-1')).toBeInTheDocument();
+    expect(within(queue()).getByText('flood-1')).toBeInTheDocument();
+
+    fireEvent.click(within(filters()).getByRole('button', { name: 'FIRE' }));
+
+    expect(within(queue()).getByText('fire-1')).toBeInTheDocument();
+    expect(within(queue()).queryByText('flood-1')).not.toBeInTheDocument();
+    expect(within(queue()).getByText(/showing 1 of 2/i)).toBeInTheDocument();
+  });
+
+  it('reflects facet selection via aria-pressed', () => {
+    render(<CoordinatorDashboard onExit={() => {}} feed={feed} />);
+    expect(within(filters()).getByRole('button', { name: 'FIRE' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+    fireEvent.click(within(filters()).getByRole('button', { name: 'FIRE' }));
+    expect(within(filters()).getByRole('button', { name: 'FIRE' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
+  it('offers only regions present in the feed and filters by region', () => {
+    render(<CoordinatorDashboard onExit={() => {}} feed={feed} />);
+    expect(within(filters()).getByRole('button', { name: 'region-a' })).toBeInTheDocument();
+    expect(within(filters()).getByRole('button', { name: 'region-b' })).toBeInTheDocument();
+
+    fireEvent.click(within(filters()).getByRole('button', { name: 'region-a' }));
+    expect(within(queue()).getByText('fire-1')).toBeInTheDocument();
+    expect(within(queue()).queryByText('flood-1')).not.toBeInTheDocument();
+  });
+
+  it('shows a filter-specific empty state when nothing matches', () => {
+    render(<CoordinatorDashboard onExit={() => {}} feed={feed} />);
+    fireEvent.click(within(filters()).getByRole('button', { name: 'HAZMAT' }));
+    expect(
+      within(queue()).getByText(/no incidents match the current filters/i),
+    ).toBeInTheDocument();
+  });
+
+  it('restores the full queue when filters are cleared', () => {
+    render(<CoordinatorDashboard onExit={() => {}} feed={feed} />);
+    fireEvent.click(within(filters()).getByRole('button', { name: 'FIRE' }));
+    expect(within(queue()).queryByText('flood-1')).not.toBeInTheDocument();
+
+    fireEvent.click(within(filters()).getByRole('button', { name: /clear filters/i }));
+    expect(within(queue()).getByText('flood-1')).toBeInTheDocument();
+  });
+});
+
 describe('CoordinatorDashboard status transitions (CRIS-18)', () => {
   const readyFeed: IncidentFeedState = {
     status: 'ready',

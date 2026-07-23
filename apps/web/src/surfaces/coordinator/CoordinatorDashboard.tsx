@@ -9,13 +9,19 @@ import {
   type PublicReport,
 } from '@crisismap/shared';
 import {
+  applyFilters,
   bandOf,
   countByBand,
   countByCategory,
   countUnscored,
+  EMPTY_FILTERS,
+  filtersActive,
+  regionOptions,
   sortByPriority,
+  toggleValue,
   type CoordinatorIncident,
   type IncidentFeedState,
+  type IncidentFilters,
 } from './incidents';
 import type { TransitionRequest, TransitionUiState } from './useReportTransition';
 import { IncidentMap } from '../map/IncidentMap';
@@ -37,9 +43,9 @@ import { IncidentMap } from '../map/IncidentMap';
  * and the queue shows a sign-in prompt rather than erroring.
  *
  * Region → owning ticket (Fig 11 interaction map):
- *   - Filters (category / status / region)        → CRIS-22 (facets read-only)
+ *   - Filters (category / status / region)        → CRIS-22 (interactive ✓)
  *   - Live map (Amazon Location + MapLibre)        → CRIS-13 (base map ✓)
- *   - Priority-ordered incident queue              → live here; filters CRIS-22
+ *   - Priority-ordered incident queue              → live here; filtered by CRIS-22
  *   - Incident detail (summary / score / timeline) → CRIS-23
  *   - Status transitions (verify/reject/resolve …) → CRIS-18 (wired here)
  *   - Guarded response actions (assign team, merge) → CRIS-32
@@ -148,12 +154,118 @@ function Region({
   );
 }
 
-/** A read-only facet chip. Non-interactive until the queue lands (CRIS-22). */
-function Chip({ children }: { children: ReactNode }) {
+/**
+ * An interactive facet chip (CRIS-22). A toggle button — `aria-pressed` reflects
+ * whether the value is part of the active filter — so the facets are operable by
+ * keyboard and screen reader, not just decorative (design doc §2.4).
+ */
+function FilterChip({
+  label,
+  active,
+  onToggle,
+}: {
+  label: string;
+  active: boolean;
+  onToggle: () => void;
+}) {
   return (
-    <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-xs font-medium text-slate-600">
-      {children}
-    </span>
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onToggle}
+      className={`rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors ${
+        active
+          ? 'border-sky-500 bg-sky-500 text-white'
+          : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+/** A titled group of facet chips (Category / Status / Region). */
+function FacetGroup({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div>
+      <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+      <div className="flex flex-wrap gap-1.5">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * The interactive filter facets (CRIS-22, design doc §2.4). Category and status
+ * are the fixed shared enums; region is data-driven — only regions present in
+ * the loaded feed are offered (`regions`), so the facet never lists a region
+ * with zero incidents. Selection state and the narrowing itself are owned by the
+ * parent (this stays presentational); "Clear filters" appears only while a facet
+ * is active.
+ */
+function FilterPanel({
+  filters,
+  regions,
+  onToggleCategory,
+  onToggleStatus,
+  onToggleRegion,
+  onClear,
+}: {
+  filters: IncidentFilters;
+  regions: readonly string[];
+  onToggleCategory: (category: Category) => void;
+  onToggleStatus: (status: ReportStatus) => void;
+  onToggleRegion: (regionId: string) => void;
+  onClear: () => void;
+}) {
+  return (
+    <div className="space-y-3">
+      <FacetGroup label="Category">
+        {CATEGORIES.map((category) => (
+          <FilterChip
+            key={category}
+            label={category}
+            active={filters.categories.includes(category)}
+            onToggle={() => onToggleCategory(category)}
+          />
+        ))}
+      </FacetGroup>
+      <FacetGroup label="Status">
+        {STATUSES.map((status) => (
+          <FilterChip
+            key={status}
+            label={status}
+            active={filters.statuses.includes(status)}
+            onToggle={() => onToggleStatus(status)}
+          />
+        ))}
+      </FacetGroup>
+      {regions.length > 0 ? (
+        <FacetGroup label="Region">
+          {regions.map((region) => (
+            <FilterChip
+              key={region}
+              label={region}
+              active={filters.regionIds.includes(region)}
+              onToggle={() => onToggleRegion(region)}
+            />
+          ))}
+        </FacetGroup>
+      ) : null}
+      <div className="flex items-center justify-between gap-3 pt-1">
+        <p className="text-xs text-slate-400">
+          Select facets to narrow the queue. Filtering is client-side over the loaded feed.
+        </p>
+        {filtersActive(filters) ? (
+          <button
+            type="button"
+            onClick={onClear}
+            className="whitespace-nowrap rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
+          >
+            Clear filters
+          </button>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
@@ -230,43 +342,59 @@ function IncidentRow({
 /** The priority-ordered incident table (design doc §2.4). */
 function IncidentQueue({
   incidents,
+  totalCount,
+  filtered,
   selectedReportId,
   onSelect,
 }: {
+  /** The rows to render — already narrowed by the active filters. */
   incidents: CoordinatorIncident[];
+  /** Size of the unfiltered feed, for the "showing N of M" summary. */
+  totalCount: number;
+  /** Whether any facet is active (distinguishes the two empty states). */
+  filtered: boolean;
   selectedReportId: string | null;
   onSelect: (reportId: string) => void;
 }) {
-  if (incidents.length === 0) {
+  if (totalCount === 0) {
     return (
       <RegionMessage>No incidents yet. New reports will appear here as they arrive.</RegionMessage>
     );
   }
+  if (incidents.length === 0) {
+    // The feed has incidents, but the active filters hide all of them.
+    return <RegionMessage>No incidents match the current filters.</RegionMessage>;
+  }
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full min-w-[36rem] text-left">
-        <thead>
-          <tr className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-            <th className="px-3 py-2">Priority</th>
-            <th className="px-3 py-2">Category</th>
-            <th className="px-3 py-2">Urgency</th>
-            <th className="px-3 py-2">Status</th>
-            <th className="px-3 py-2">Region</th>
-            <th className="px-3 py-2">Reported</th>
-            <th className="px-3 py-2">ID</th>
-          </tr>
-        </thead>
-        <tbody>
-          {sortByPriority(incidents).map((incident) => (
-            <IncidentRow
-              key={incident.reportId}
-              incident={incident}
-              selected={incident.reportId === selectedReportId}
-              onSelect={() => onSelect(incident.reportId)}
-            />
-          ))}
-        </tbody>
-      </table>
+    <div className="space-y-2">
+      <p className="px-1 text-xs text-slate-400">
+        {filtered ? `Showing ${incidents.length} of ${totalCount}` : `${totalCount} incidents`}
+      </p>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[36rem] text-left">
+          <thead>
+            <tr className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              <th className="px-3 py-2">Priority</th>
+              <th className="px-3 py-2">Category</th>
+              <th className="px-3 py-2">Urgency</th>
+              <th className="px-3 py-2">Status</th>
+              <th className="px-3 py-2">Region</th>
+              <th className="px-3 py-2">Reported</th>
+              <th className="px-3 py-2">ID</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sortByPriority(incidents).map((incident) => (
+              <IncidentRow
+                key={incident.reportId}
+                incident={incident}
+                selected={incident.reportId === selectedReportId}
+                onSelect={() => onSelect(incident.reportId)}
+              />
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -465,6 +593,13 @@ export function CoordinatorDashboard({
   const incidents = feed.status === 'ready' ? feed.incidents : [];
   const selectedIncident = incidents.find((i) => i.reportId === selectedReportId) ?? null;
 
+  // CRIS-22 queue filters. Also pure view state — the narrowing happens
+  // client-side over the already-loaded feed; the read path is unchanged. Region
+  // options are derived from what's actually loaded so the facet never offers an
+  // empty region.
+  const [filters, setFilters] = useState<IncidentFilters>(EMPTY_FILTERS);
+  const regions = regionOptions(incidents);
+
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900">
       {/* Command bar */}
@@ -548,38 +683,27 @@ export function CoordinatorDashboard({
           ) : null}
         </section>
 
-        {/* Filters (Fig 11). Interactive filtering is CRIS-22. */}
+        {/* Filters (Fig 11). Interactive faceted narrowing of the queue (CRIS-22). */}
         <Region
           title="Filters"
           ticket="CRIS-22"
           hint="Filter incidents by category, status, and region"
           className="mb-6"
         >
-          <div className="space-y-3">
-            <div>
-              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                Category
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                {CATEGORIES.map((category) => (
-                  <Chip key={category}>{category}</Chip>
-                ))}
-              </div>
-            </div>
-            <div>
-              <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                Status
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                {STATUSES.map((status) => (
-                  <Chip key={status}>{status}</Chip>
-                ))}
-              </div>
-            </div>
-            <p className="text-xs text-slate-400">
-              Facets are read-only in the shell; interactive filtering is built in CRIS-22.
-            </p>
-          </div>
+          <FilterPanel
+            filters={filters}
+            regions={regions}
+            onToggleCategory={(category) =>
+              setFilters((f) => ({ ...f, categories: toggleValue(f.categories, category) }))
+            }
+            onToggleStatus={(status) =>
+              setFilters((f) => ({ ...f, statuses: toggleValue(f.statuses, status) }))
+            }
+            onToggleRegion={(regionId) =>
+              setFilters((f) => ({ ...f, regionIds: toggleValue(f.regionIds, regionId) }))
+            }
+            onClear={() => setFilters(EMPTY_FILTERS)}
+          />
         </Region>
 
         {/* Main working area: map + queue on the left, detail rail on the right. */}
@@ -603,7 +727,9 @@ export function CoordinatorDashboard({
             >
               {feedBody(feed, (rows) => (
                 <IncidentQueue
-                  incidents={rows}
+                  incidents={applyFilters(rows, filters)}
+                  totalCount={rows.length}
+                  filtered={filtersActive(filters)}
                   selectedReportId={selectedReportId}
                   onSelect={setSelectedReportId}
                 />

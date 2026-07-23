@@ -1,4 +1,10 @@
-import { Category, PriorityBand, priorityBandForScore, type PublicReport } from '@crisismap/shared';
+import {
+  Category,
+  PriorityBand,
+  priorityBandForScore,
+  type PublicReport,
+  type ReportStatus,
+} from '@crisismap/shared';
 
 /**
  * Coordinator dashboard read-model (CRIS-12 → CRIS-22 read path).
@@ -117,4 +123,103 @@ export function sortByPriority<T extends PublicReport>(incidents: readonly T[]):
     const timeB = b.createdAt ? Date.parse(b.createdAt) : 0;
     return timeB - timeA;
   });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Queue filters — design doc §2.4 ("filter by category, status, region")      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The active facet selection for the priority queue (CRIS-22). Each facet is a
+ * set of allowed values; an **empty** facet imposes no constraint (it is not
+ * "match nothing"). A report passes iff it satisfies every non-empty facet, so
+ * facets combine with AND across dimensions and OR within a dimension — the
+ * usual faceted-search semantics coordinators expect.
+ *
+ * Filtering is a pure, client-side narrowing of the already-loaded feed — it
+ * changes nothing about how data is read. Server-side, GSI-backed filtering and
+ * pagination are a later optimization (see ADR-0032); the bounded `READ_LIMIT`
+ * list is the working set today.
+ */
+export interface IncidentFilters {
+  categories: readonly Category[];
+  statuses: readonly ReportStatus[];
+  /** Region ids are data-driven (see `regionOptions`), not a fixed enum. */
+  regionIds: readonly string[];
+}
+
+/** The no-op filter: every facet empty, so nothing is narrowed. */
+export const EMPTY_FILTERS: IncidentFilters = {
+  categories: [],
+  statuses: [],
+  regionIds: [],
+};
+
+/** True when at least one facet constrains the queue (drives the "clear" affordance). */
+export function filtersActive(filters: IncidentFilters): boolean {
+  return (
+    filters.categories.length > 0 || filters.statuses.length > 0 || filters.regionIds.length > 0
+  );
+}
+
+/**
+ * Whether a single incident satisfies every non-empty facet. An incident with a
+ * `null` category/region can never satisfy a non-empty category/region facet —
+ * "unclassified" is simply not one of the selected values, so it is excluded
+ * while that facet is active (the same way it would be under a server filter).
+ */
+export function matchesFilters(incident: PublicReport, filters: IncidentFilters): boolean {
+  if (
+    filters.categories.length > 0 &&
+    !(incident.category != null && filters.categories.includes(incident.category))
+  ) {
+    return false;
+  }
+  if (filters.statuses.length > 0 && !filters.statuses.includes(incident.status)) {
+    return false;
+  }
+  if (
+    filters.regionIds.length > 0 &&
+    !(incident.regionId != null && filters.regionIds.includes(incident.regionId))
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Narrow a list to the incidents matching `filters`. Returns a new array (the
+ * input is never mutated) and is generic over the incident type so a
+ * `CoordinatorIncident` keeps its `version` through the filter. When no facet is
+ * active this is a straight copy — callers can filter unconditionally.
+ */
+export function applyFilters<T extends PublicReport>(
+  incidents: readonly T[],
+  filters: IncidentFilters,
+): T[] {
+  if (!filtersActive(filters)) return [...incidents];
+  return incidents.filter((incident) => matchesFilters(incident, filters));
+}
+
+/**
+ * The distinct, non-empty region ids present in the loaded feed, sorted for a
+ * stable facet order. Region is data-driven — coordinators can only filter by
+ * regions that actually appear in the current working set, so the facet never
+ * offers a region with zero incidents.
+ */
+export function regionOptions(incidents: readonly PublicReport[]): string[] {
+  const seen = new Set<string>();
+  for (const incident of incidents) {
+    if (incident.regionId) seen.add(incident.regionId);
+  }
+  return [...seen].sort();
+}
+
+/**
+ * Toggle `value`'s membership in a facet list, returning a new array. Adds it
+ * when absent, removes it when present — the primitive behind clicking a facet
+ * chip. Order is preserved for existing values; a newly-added value is appended.
+ */
+export function toggleValue<T>(values: readonly T[], value: T): T[] {
+  return values.includes(value) ? values.filter((v) => v !== value) : [...values, value];
 }
