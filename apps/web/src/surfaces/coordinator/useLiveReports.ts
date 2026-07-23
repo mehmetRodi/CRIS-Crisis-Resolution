@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getCurrentUser } from 'aws-amplify/auth';
-import { toPublicReport, type Category, type ReportStatus, type Urgency } from '@crisismap/shared';
+import {
+  parseEntities,
+  parseScoreBreakdown,
+  toPublicReport,
+  type Category,
+  type ReportStatus,
+  type Urgency,
+} from '@crisismap/shared';
 
 import { client } from '../../lib/amplify';
 import type { Schema } from '../../../amplify/data/resource';
@@ -54,6 +61,14 @@ function toRedactedIncident(report: Schema['Report']['type']): CoordinatorIncide
       createdAt: report.createdAt,
     }),
     version: report.version ?? 0,
+    // Coordinator-internal triage context for the incident-detail view (CRIS-23).
+    // Non-PII and already present on the loaded row — no extra read. The two
+    // `a.json()` columns are untyped at read time, so parse them defensively
+    // through the shared validators (both never throw; malformed → null/empty).
+    confidence: report.confidence ?? null,
+    scoreVersion: report.scoreVersion ?? null,
+    scoreBreakdown: parseScoreBreakdown(report.scoreBreakdown),
+    entities: report.entities != null ? parseEntities(report.entities) : null,
   };
 }
 
