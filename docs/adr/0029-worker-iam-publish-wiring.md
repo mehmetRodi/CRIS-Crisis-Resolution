@@ -15,7 +15,7 @@
 > declare its own per-operation auth rule, and `allow.resource` is siphoned into function-access
 > wiring rather than counted as the operation's auth. `ampx pipeline-deploy` fails synthesis
 > with `InvalidSchemaError: Custom operation publishReportUpdate requires both an authorization
-> rule and a handler reference`. ADR-0030 reinstates `allow.groups(['ADMIN'])` on the operation.
+rule and a handler reference`. ADR-0030 reinstates `allow.groups(['ADMIN'])` on the operation.
 > Everything else here (write-then-publish, data-client-over-IAM, best-effort publish, persisting
 > the AI `summary`) remains in force.
 
