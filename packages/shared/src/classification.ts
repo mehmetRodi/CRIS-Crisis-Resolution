@@ -468,14 +468,10 @@ export function scoreReport(input: ScoreInput): ScoringResult {
   };
 }
 
-/** The five additive numeric factors every `ScoreBreakdown` must carry. */
-const SCORE_BREAKDOWN_FACTORS = [
-  'urgencyWeight',
-  'categoryWeight',
-  'recencyWeight',
-  'corroborationWeight',
-  'manualAdjustment',
-] as const;
+/** Narrow an untrusted value to a finite number, or `null`. */
+function finiteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
 
 /**
  * Parse a persisted `scoreBreakdown` (stored as `a.json()` on `Report`, so
@@ -492,19 +488,27 @@ const SCORE_BREAKDOWN_FACTORS = [
  */
 export function parseScoreBreakdown(raw: unknown): ScoreBreakdown | null {
   if (!isRecord(raw)) return null;
-  const factors: Record<string, number> = {};
-  for (const key of SCORE_BREAKDOWN_FACTORS) {
-    const value = raw[key];
-    if (typeof value !== 'number' || !Number.isFinite(value)) return null;
-    factors[key] = value;
+  const urgencyWeight = finiteNumber(raw.urgencyWeight);
+  const categoryWeight = finiteNumber(raw.categoryWeight);
+  const recencyWeight = finiteNumber(raw.recencyWeight);
+  const corroborationWeight = finiteNumber(raw.corroborationWeight);
+  const manualAdjustment = finiteNumber(raw.manualAdjustment);
+  if (
+    urgencyWeight === null ||
+    categoryWeight === null ||
+    recencyWeight === null ||
+    corroborationWeight === null ||
+    manualAdjustment === null
+  ) {
+    return null;
   }
   const notes = typeof raw.notes === 'string' ? raw.notes : undefined;
   return {
-    urgencyWeight: factors.urgencyWeight,
-    categoryWeight: factors.categoryWeight,
-    recencyWeight: factors.recencyWeight,
-    corroborationWeight: factors.corroborationWeight,
-    manualAdjustment: factors.manualAdjustment,
+    urgencyWeight,
+    categoryWeight,
+    recencyWeight,
+    corroborationWeight,
+    manualAdjustment,
     ...(notes !== undefined ? { notes } : {}),
   };
 }
