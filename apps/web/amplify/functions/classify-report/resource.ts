@@ -29,6 +29,17 @@ export const classifyReport = defineFunction({
   runtime: 20,
   timeoutSeconds: 60,
   memoryMB: 1024,
+  // Provision this worker INSIDE the `data` nested stack (ADR-0031). It calls the
+  // data API — the schema's `allow.resource(classifyReport)` grant (CRIS-19)
+  // makes the data stack attach an `appsync:GraphQL` policy to this function's
+  // role (data → function), while the Report-stream pipe wired in `backend.ts`
+  // reads the data table's stream (function → data). Left in the default
+  // `function` stack those opposing edges form a nested-stack cycle CloudFormation
+  // rejects (CloudformationStackCircularDependencyError). Co-locating the worker
+  // with the data resources it both reads from and writes to makes every edge
+  // intra-stack. This is Amplify's documented fix for a function that calls the
+  // data API. https://docs.amplify.aws/react/build-a-backend/troubleshooting/circular-dependency/
+  resourceGroupName: 'data',
   environment: {
     // Bedrock model id. Current Claude tiers are invoked via an EU cross-Region
     // *inference profile* (`eu.` prefix) so triage traffic stays inside the EU

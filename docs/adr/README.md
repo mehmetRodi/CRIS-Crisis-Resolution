@@ -46,3 +46,4 @@ behind the code — essential when refactoring or extending the system.
 | [0028](0028-coordinator-status-transition-wiring.md)          | Coordinator status-transition wiring (frontend)        | Accepted                         |
 | [0029](0029-worker-iam-publish-wiring.md)                     | Triage worker as IAM-only publisher (CRIS-19)          | Superseded by 0030 (Decision 1)  |
 | [0030](0030-publish-mutation-requires-operation-auth-rule.md) | publishReportUpdate needs an operation-level auth rule | Accepted                         |
+| [0031](0031-classify-worker-in-data-stack.md)                 | classify-report worker pinned to the data stack        | Accepted                         |

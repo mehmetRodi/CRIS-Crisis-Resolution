@@ -33,9 +33,12 @@ import { addObservability } from './observability';
  * mutation (CRIS-19). That last grant is NOT wired here: the schema's
  * `allow.resource(classifyReport)` (data/resource.ts) attaches the
  * `appsync:GraphQL` policy and injects the endpoint/introspection env vars onto
- * the worker's role automatically — all `classify-report → data` edges, the same
- * direction as the table grants below, so no cross-stack cycle. Custom
- * subscriptions (CRIS-28) and SNS proximity alerts remain deferred seams.
+ * the worker's role automatically. That grant is a `data → function` edge, and
+ * the Report-stream pipe below is a `function → data` edge — opposing edges that
+ * form a nested-stack cycle unless the worker lives in the data stack. So
+ * `classify-report` is pinned to the `data` group (`resourceGroupName: 'data'`,
+ * ADR-0031); every edge here is then intra-`data`-stack. Custom subscriptions
+ * (CRIS-28) and SNS proximity alerts remain deferred seams.
  *
  * Run `npx ampx sandbox` from `apps/web` (with AWS credentials + Bedrock model
  * access) to stand up a personal dev environment. Source control does not
@@ -134,13 +137,16 @@ cfnTables['IdempotencyRecord'].timeToLiveAttribute = {
 
 // The queues, pipe, and observability alarms all reference the classify worker
 // (event source + consume grant + metric alarms). A separate `createStack`
-// would make that nested stack and the managed `function` stack reference each
-// other, which CloudFormation rejects as a circular dependency
-// (CloudformationStackCircularDependencyError). AWS's fix for this is to create
+// would make that nested stack and the worker's stack reference each other,
+// which CloudFormation rejects as a circular dependency. AWS's fix is to create
 // these resources in the SAME stack as the Lambda they wire to, so every
-// reference is intra-stack; the only remaining cross-stack edge is the pipe
-// reading the Report stream ARN (function → data), which is one-directional.
-// See docs/adr — https://docs.amplify.aws/react/build-a-backend/troubleshooting/circular-dependency/
+// reference is intra-stack. The worker itself is pinned to the `data` stack
+// (`resourceGroupName: 'data'`, ADR-0031) because the CRIS-19 `allow.resource`
+// grant is a data→function edge that would otherwise close a cycle against the
+// pipe's function→data read of the Report stream. With the worker in the data
+// stack, `Stack.of(worker)` IS the data stack, so the pipe reads the stream and
+// the queues/alarms reference the worker all intra-stack — no cross-stack edge
+// remains. https://docs.amplify.aws/react/build-a-backend/troubleshooting/circular-dependency/
 const pipelineStack = Stack.of(worker);
 
 // Standard queues (reports are independent; idempotency is enforced in-app).
