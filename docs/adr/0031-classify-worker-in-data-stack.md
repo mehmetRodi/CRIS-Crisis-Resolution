@@ -32,8 +32,8 @@ Between `data` and `function` there were, after CRIS-19, two **opposing** edges:
 
 Two edges in opposite directions between the same pair of stacks = the cycle CFN rejected.
 
-> **Correction to ADR-0029.** ADR-0029's "No new `backend.ts` wiring" bullet claimed *"All edges
-> are `classify-report → data` … so no cross-stack cycle is introduced."* That is wrong:
+> **Correction to ADR-0029.** ADR-0029's "No new `backend.ts` wiring" bullet claimed _"All edges
+> are `classify-report → data` … so no cross-stack cycle is introduced."_ That is wrong:
 > `allow.resource` introduces a `data → function` edge, which is precisely the opposing edge that
 > closes the cycle. The claim was never exercised against AWS (ADR-0029's "validation owed on
 > deploy" caveat). This ADR records the actual topology and the fix.
