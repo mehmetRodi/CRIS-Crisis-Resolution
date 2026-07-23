@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import { AuthProvider } from './AuthContext';
 import App from './App';
@@ -9,6 +10,7 @@ import ConfirmSignupPage from './ConfirmSignupPage';
 import { CoordinatorDashboard } from './surfaces/coordinator/CoordinatorDashboard';
 import { useLiveReports } from './surfaces/coordinator/useLiveReports';
 import { useReportTransition } from './surfaces/coordinator/useReportTransition';
+import { useIncidentTimeline } from './surfaces/coordinator/useIncidentTimeline';
 
 /**
  * Web routes. The web SPA is chiefly the coordinator/responder/volunteer
@@ -28,11 +30,19 @@ import { useReportTransition } from './surfaces/coordinator/useReportTransition'
 function CoordinatorRoute() {
   const navigate = useNavigate();
   const { state, refresh } = useLiveReports();
-  // CRIS-18: guarded status transitions. Re-read the feed after any successful
-  // transition so the queue reflects the new status and a fresh optimistic-lock
-  // version (§5.3).
+  // CRIS-23: per-incident audit timeline. The dashboard owns row selection but
+  // reports it here so this wrapper can drive the timeline read; nothing is
+  // fetched until a row is selected (`selectedId === null` → idle).
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const { state: timeline, refresh: refreshTimeline } = useIncidentTimeline(selectedId);
+  // CRIS-18: guarded status transitions. Re-read the feed AND the timeline after
+  // any successful transition so the queue reflects the new status and a fresh
+  // optimistic-lock version (§5.3), and the newly-appended audit event appears.
   const { state: transition, transition: applyTransition } = useReportTransition({
-    onSuccess: refresh,
+    onSuccess: () => {
+      refresh();
+      refreshTimeline();
+    },
   });
   return (
     <CoordinatorDashboard
@@ -41,6 +51,8 @@ function CoordinatorRoute() {
       onRefresh={refresh}
       onTransition={(request) => void applyTransition(request)}
       transition={transition}
+      onSelectIncident={setSelectedId}
+      timeline={timeline}
     />
   );
 }

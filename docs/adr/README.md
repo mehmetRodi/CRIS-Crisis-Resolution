@@ -48,3 +48,4 @@ behind the code — essential when refactoring or extending the system.
 | [0030](0030-publish-mutation-requires-operation-auth-rule.md) | publishReportUpdate needs an operation-level auth rule | Accepted                         |
 | [0031](0031-classify-worker-in-data-stack.md)                 | classify-report worker pinned to the data stack        | Accepted                         |
 | [0032](0032-coordinator-queue-client-side-filters.md)         | Coordinator queue interactive filters (client-side)    | Accepted                         |
+| [0033](0033-coordinator-incident-detail-interface.md)         | Coordinator incident-detail interface (CRIS-23)        | Accepted                         |

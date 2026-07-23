@@ -467,3 +467,48 @@ export function scoreReport(input: ScoreInput): ScoringResult {
     breakdown,
   };
 }
+
+/** Narrow an untrusted value to a finite number, or `null`. */
+function finiteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+/**
+ * Parse a persisted `scoreBreakdown` (stored as `a.json()` on `Report`, so
+ * untyped at read time) back into a {@link ScoreBreakdown}, or `null` when it is
+ * absent/malformed. Unlike {@link scoreReport} — which produces the breakdown —
+ * this is the read-side counterpart the coordinator incident-detail view (CRIS-23)
+ * uses to render *why* a report ranks where it does.
+ *
+ * Strict on the five numeric factors (all must be finite numbers, since the UI
+ * renders each as a contribution to the score); lenient on the optional `notes`.
+ * A breakdown missing any factor is treated as absent rather than partially
+ * rendered — the detail view simply omits the "why" panel for that report.
+ * Never throws.
+ */
+export function parseScoreBreakdown(raw: unknown): ScoreBreakdown | null {
+  if (!isRecord(raw)) return null;
+  const urgencyWeight = finiteNumber(raw.urgencyWeight);
+  const categoryWeight = finiteNumber(raw.categoryWeight);
+  const recencyWeight = finiteNumber(raw.recencyWeight);
+  const corroborationWeight = finiteNumber(raw.corroborationWeight);
+  const manualAdjustment = finiteNumber(raw.manualAdjustment);
+  if (
+    urgencyWeight === null ||
+    categoryWeight === null ||
+    recencyWeight === null ||
+    corroborationWeight === null ||
+    manualAdjustment === null
+  ) {
+    return null;
+  }
+  const notes = typeof raw.notes === 'string' ? raw.notes : undefined;
+  return {
+    urgencyWeight,
+    categoryWeight,
+    recencyWeight,
+    corroborationWeight,
+    manualAdjustment,
+    ...(notes !== undefined ? { notes } : {}),
+  };
+}

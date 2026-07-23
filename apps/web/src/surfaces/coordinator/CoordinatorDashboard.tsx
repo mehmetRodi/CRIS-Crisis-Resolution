@@ -2,11 +2,18 @@ import { useState, type ReactNode } from 'react';
 import {
   canActorTransition,
   Category,
+  CATEGORY_MAX_POINTS,
+  CORROBORATION_MAX_POINTS,
   PriorityBand,
+  RECENCY_MAX_POINTS,
+  ReportEventType,
   ReportStatus,
   STATUS_TRANSITIONS,
+  URGENCY_MAX_POINTS,
   UserRole,
   type PublicReport,
+  type ScoreBreakdown,
+  type TriageEntities,
 } from '@crisismap/shared';
 import {
   applyFilters,
@@ -22,6 +29,8 @@ import {
   type CoordinatorIncident,
   type IncidentFeedState,
   type IncidentFilters,
+  type IncidentTimelineState,
+  type TimelineEvent,
 } from './incidents';
 import type { TransitionRequest, TransitionUiState } from './useReportTransition';
 import { IncidentMap } from '../map/IncidentMap';
@@ -74,6 +83,19 @@ interface CoordinatorDashboardProps {
   onTransition?: (request: TransitionRequest) => void;
   /** Lifecycle of the in-flight/last transition, for inline feedback (CRIS-18). */
   transition?: TransitionUiState;
+  /**
+   * Notified whenever the selected incident changes (the report id, or `null`
+   * when the selection is cleared). Selection stays *internal* view state; this
+   * only lets the route wrapper drive the per-incident timeline read
+   * (`useIncidentTimeline`) without making selection a controlled prop (CRIS-23).
+   */
+  onSelectIncident?: (reportId: string | null) => void;
+  /**
+   * Audit timeline for the currently-selected incident (CRIS-23). Injected by
+   * the route wrapper (which owns `useIncidentTimeline`) so this component stays
+   * presentational. Defaults to `idle` — the pre-wired shell shows no timeline.
+   */
+  timeline?: IncidentTimelineState;
 }
 
 /** A metric tile in the top command strip (Fig 1: "incident metrics"). */
@@ -431,12 +453,244 @@ function coordinatorTransitions(from: ReportStatus): ReportStatus[] {
   );
 }
 
+function clampPercent(value: number): number {
+  return Math.min(100, Math.max(0, value));
+}
+
+/** A labelled section heading inside the incident-detail panel. */
+function DetailLabel({ children }: { children: ReactNode }) {
+  return (
+    <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-400">
+      {children}
+    </p>
+  );
+}
+
+/** A small read-only pill used for infrastructure/hazard entity chips. */
+function EntityTag({ children }: { children: ReactNode }) {
+  return (
+    <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs text-slate-600">
+      {children}
+    </span>
+  );
+}
+
 /**
- * Incident-detail panel with the CRIS-18 status-transition controls. Presented
- * for the selected incident; the richer detail (AI summary, score breakdown,
- * timeline) is CRIS-23, and assignment/merge actions are CRIS-32.
+ * The classification snapshot — category, urgency, priority band + score, and
+ * model confidence (design doc Fig 2). Confidence is the model's self-report in
+ * [0, 1], shown as a percentage; it is context, never the priority itself (the
+ * deterministic score is — see {@link ScoreBreakdownView}).
  */
-function IncidentDetail({
+function ClassificationMeta({ incident }: { incident: CoordinatorIncident }) {
+  const band = bandOf(incident);
+  const fields: { label: string; value: string }[] = [
+    { label: 'Category', value: incident.category ?? '—' },
+    { label: 'Urgency', value: incident.urgency ?? '—' },
+    {
+      label: 'Priority',
+      value: incident.priorityScore != null ? `${band ?? '—'} · ${incident.priorityScore.toFixed(1)}` : '—', // prettier-ignore
+    },
+    {
+      label: 'Confidence',
+      value: incident.confidence != null ? `${Math.round(incident.confidence * 100)}%` : '—',
+    },
+  ];
+  return (
+    <dl className="grid grid-cols-2 gap-x-4 gap-y-2">
+      {fields.map((field) => (
+        <div key={field.label}>
+          <dt className="text-xs font-medium uppercase tracking-wide text-slate-400">
+            {field.label}
+          </dt>
+          <dd className="text-sm text-slate-700">{field.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/** The additive score factors, each with the max points it can contribute. */
+const SCORE_FACTORS: readonly { key: keyof ScoreBreakdown; label: string; max: number }[] = [
+  { key: 'urgencyWeight', label: 'Urgency', max: URGENCY_MAX_POINTS },
+  { key: 'categoryWeight', label: 'Category', max: CATEGORY_MAX_POINTS },
+  { key: 'recencyWeight', label: 'Recency', max: RECENCY_MAX_POINTS },
+  { key: 'corroborationWeight', label: 'Corroboration', max: CORROBORATION_MAX_POINTS },
+];
+
+/**
+ * The "why this ranks here" panel (design guarantee: priority is deterministic
+ * and *explainable*, §5.4.2). Renders each additive factor as a proportional bar
+ * against the points it can contribute, so a coordinator can see whether a rank
+ * is driven by urgency, category, recency, or corroboration. A non-zero manual
+ * adjustment (a coordinator override) is shown separately since it may be
+ * negative and is not bounded to [0, max] the same way.
+ */
+function ScoreBreakdownView({ breakdown }: { breakdown: ScoreBreakdown }) {
+  return (
+    <div>
+      <DetailLabel>Why this priority</DetailLabel>
+      <ul className="space-y-1.5">
+        {SCORE_FACTORS.map((factor) => {
+          const value = breakdown[factor.key] as number;
+          const pct = clampPercent((value / factor.max) * 100);
+          return (
+            <li key={factor.key}>
+              <div className="flex items-center justify-between text-xs text-slate-600">
+                <span>{factor.label}</span>
+                <span className="tabular-nums text-slate-500">+{value.toFixed(2)}</span>
+              </div>
+              <div
+                className="mt-0.5 h-1.5 overflow-hidden rounded bg-slate-100"
+                role="presentation"
+              >
+                <div className="h-full rounded bg-sky-400" style={{ width: `${pct}%` }} />
+              </div>
+            </li>
+          );
+        })}
+        {breakdown.manualAdjustment !== 0 ? (
+          <li className="flex items-center justify-between text-xs text-slate-600">
+            <span>Manual adjustment</span>
+            <span className="tabular-nums text-slate-500">
+              {breakdown.manualAdjustment > 0 ? '+' : ''}
+              {breakdown.manualAdjustment.toFixed(2)}
+            </span>
+          </li>
+        ) : null}
+      </ul>
+      {breakdown.notes ? <p className="mt-1.5 text-xs text-slate-400">{breakdown.notes}</p> : null}
+    </div>
+  );
+}
+
+/**
+ * PII-free entities the Triage Agent extracted (§2.2, design doc Fig 2 & Fig 4):
+ * estimated people affected, and the specific infrastructure / hazards named in
+ * the report. Renders nothing when no entities were extracted.
+ */
+function EntitiesView({ entities }: { entities: TriageEntities }) {
+  const hasAny =
+    entities.peopleAffected != null ||
+    entities.infrastructure.length > 0 ||
+    entities.hazards.length > 0;
+  if (!hasAny) return null;
+  return (
+    <div className="space-y-2">
+      <DetailLabel>Extracted details</DetailLabel>
+      {entities.peopleAffected != null ? (
+        <p className="text-xs text-slate-600">
+          <span className="font-semibold text-slate-700">{entities.peopleAffected}</span> people
+          affected
+        </p>
+      ) : null}
+      {entities.infrastructure.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-xs text-slate-400">Infrastructure:</span>
+          {entities.infrastructure.map((item) => (
+            <EntityTag key={item}>{item}</EntityTag>
+          ))}
+        </div>
+      ) : null}
+      {entities.hazards.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-xs text-slate-400">Hazards:</span>
+          {entities.hazards.map((item) => (
+            <EntityTag key={item}>{item}</EntityTag>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Human label for one audit event (design doc §5.1 event types). */
+function timelineEventLabel(event: TimelineEvent): string {
+  switch (event.type) {
+    case ReportEventType.SUBMITTED:
+      return 'Report submitted';
+    case ReportEventType.CLASSIFIED:
+      return 'AI classified';
+    case ReportEventType.PRIORITY_SCORED:
+      return 'Priority scored';
+    case ReportEventType.VERIFICATION_RECORDED:
+      return 'Verification recorded';
+    case ReportEventType.ASSIGNED:
+      return 'Team assigned';
+    case ReportEventType.DUPLICATE_LINKED:
+      return 'Linked as duplicate';
+    case ReportEventType.ALERT_DISPATCHED:
+      return 'Alert dispatched';
+    case ReportEventType.STATUS_CHANGED:
+      return event.fromStatus && event.toStatus
+        ? `${event.fromStatus} → ${event.toStatus}`
+        : 'Status changed';
+    default:
+      return event.type;
+  }
+}
+
+/** Who drove an event: `System` for pipeline events, else the actor's role. */
+function timelineActor(event: TimelineEvent): string {
+  if (event.isSystem) return 'System';
+  return event.actorRole ?? 'Unknown';
+}
+
+/**
+ * The selected incident's audit timeline (CRIS-23) — its own `ReportEvent` log,
+ * newest-first. Distinct from the dashboard-wide "Recent activity" stream
+ * (CRIS-28). Renders one branch per feed state; the injected `timeline` defaults
+ * to `idle` in the shell, where no read has been wired.
+ */
+function TimelineView({ timeline }: { timeline: IncidentTimelineState }) {
+  return (
+    <div>
+      <DetailLabel>Timeline</DetailLabel>
+      {timeline.status === 'idle' ? (
+        <p className="text-xs text-slate-400">No timeline loaded.</p>
+      ) : null}
+      {timeline.status === 'loading' ? (
+        <p className="text-xs text-slate-500">Loading timeline…</p>
+      ) : null}
+      {timeline.status === 'error' ? (
+        <p className="text-xs text-red-600" role="alert">
+          {timeline.message}
+        </p>
+      ) : null}
+      {timeline.status === 'ready' ? (
+        timeline.events.length === 0 ? (
+          <p className="text-xs text-slate-400">No audit events recorded yet.</p>
+        ) : (
+          <ol className="space-y-2">
+            {timeline.events.map((event) => (
+              <li key={event.eventId} className="border-l-2 border-slate-200 pl-3">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-xs font-medium text-slate-700">
+                    {timelineEventLabel(event)}
+                  </span>
+                  <span className="whitespace-nowrap text-xs text-slate-400">
+                    {formatReported(event.createdAt)}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400">{timelineActor(event)}</p>
+                {event.note ? (
+                  <p className="mt-0.5 text-xs text-slate-500">“{event.note}”</p>
+                ) : null}
+              </li>
+            ))}
+          </ol>
+        )
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * The CRIS-18 status-transition controls for the selected incident. Split out of
+ * the read-only detail so the panel can render the incident's full picture
+ * (summary, score, entities, timeline) independently of whether a transition
+ * handler is wired.
+ */
+function TransitionControls({
   incident,
   onTransition,
   transition,
@@ -454,22 +708,7 @@ function IncidentDetail({
   const showSuccess = transition.status === 'success' && transition.reportId === incident.reportId;
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <span className="font-mono text-xs text-slate-500">{incident.reportId}</span>
-        <span className="rounded bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
-          {from}
-        </span>
-      </div>
-
-      {incident.summary ? (
-        <p className="text-sm text-slate-600">{incident.summary}</p>
-      ) : (
-        <p className="text-xs text-slate-400">
-          No AI summary yet. Summary, score breakdown, and timeline land in CRIS-23.
-        </p>
-      )}
-
+    <div className="space-y-3 border-t border-slate-100 pt-3">
       {moves.length > 0 ? (
         <>
           <label className="block">
@@ -529,6 +768,87 @@ function IncidentDetail({
 }
 
 /**
+ * The shell's disabled action affordances, shown when no transition handler is
+ * wired (the presentational default). Live actions arrive with the injected
+ * `onTransition` (CRIS-18); assignment / merge are CRIS-32.
+ */
+function DisabledActions() {
+  return (
+    <div className="space-y-2 border-t border-slate-100 pt-3">
+      <div className="flex flex-wrap gap-2">
+        {['Verify', 'Reject', 'Assign team', 'Resolve'].map((action) => (
+          <button
+            key={action}
+            type="button"
+            disabled
+            className="cursor-not-allowed rounded border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-400"
+            title="Select an incident to enable status actions (CRIS-18); assignment is CRIS-32"
+          >
+            {action}
+          </button>
+        ))}
+      </div>
+      <p className="text-xs text-slate-400">Assignment and merge actions are built in CRIS-32.</p>
+    </div>
+  );
+}
+
+/**
+ * Incident-detail interface (CRIS-23, design doc Fig 2). The full picture for
+ * the selected incident: classification snapshot, AI summary, extracted
+ * entities, the explainable score breakdown, and the per-incident audit
+ * timeline — all PII-free. The CRIS-18 transition controls render below when an
+ * `onTransition` handler is wired; otherwise the shell's disabled placeholders
+ * do. Assignment / merge actions remain CRIS-32.
+ */
+function IncidentDetail({
+  incident,
+  timeline,
+  onTransition,
+  transition,
+}: {
+  incident: CoordinatorIncident;
+  timeline: IncidentTimelineState;
+  onTransition?: (request: TransitionRequest) => void;
+  transition: TransitionUiState;
+}) {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <span className="font-mono text-xs text-slate-500">{incident.reportId}</span>
+        <span className="rounded bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
+          {incident.status}
+        </span>
+      </div>
+
+      <ClassificationMeta incident={incident} />
+
+      {incident.summary ? (
+        <p className="text-sm text-slate-600">{incident.summary}</p>
+      ) : (
+        <p className="text-xs text-slate-400">No AI summary yet.</p>
+      )}
+
+      {incident.entities ? <EntitiesView entities={incident.entities} /> : null}
+
+      {incident.scoreBreakdown ? <ScoreBreakdownView breakdown={incident.scoreBreakdown} /> : null}
+
+      <TimelineView timeline={timeline} />
+
+      {onTransition ? (
+        <TransitionControls
+          incident={incident}
+          onTransition={onTransition}
+          transition={transition}
+        />
+      ) : (
+        <DisabledActions />
+      )}
+    </div>
+  );
+}
+
+/**
  * Renders the body of a data-driven region for each feed state. `idle` returns
  * `null` so the parent `Region` falls back to its shell placeholder.
  */
@@ -581,6 +901,8 @@ export function CoordinatorDashboard({
   onRefresh,
   onTransition,
   transition = { status: 'idle' },
+  onSelectIncident,
+  timeline = { status: 'idle' },
 }: CoordinatorDashboardProps) {
   const counts = feed.status === 'ready' ? countByBand(feed.incidents) : null;
   const unscored = feed.status === 'ready' ? countUnscored(feed.incidents) : 0;
@@ -589,9 +911,15 @@ export function CoordinatorDashboard({
 
   // Which incident the detail panel + CRIS-18 transition controls act on. Pure
   // view state (not a data source), so it lives in the presentational component.
+  // Selecting also notifies the parent (`onSelectIncident`) so it can load the
+  // incident's timeline (CRIS-23) without selection becoming a controlled prop.
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
   const incidents = feed.status === 'ready' ? feed.incidents : [];
   const selectedIncident = incidents.find((i) => i.reportId === selectedReportId) ?? null;
+  const selectIncident = (reportId: string) => {
+    setSelectedReportId(reportId);
+    onSelectIncident?.(reportId);
+  };
 
   // CRIS-22 queue filters. Also pure view state — the narrowing happens
   // client-side over the already-loaded feed; the read path is unchanged. Region
@@ -731,7 +1059,7 @@ export function CoordinatorDashboard({
                   totalCount={rows.length}
                   filtered={filtersActive(filters)}
                   selectedReportId={selectedReportId}
-                  onSelect={setSelectedReportId}
+                  onSelect={selectIncident}
                 />
               ))}
             </Region>
@@ -744,44 +1072,30 @@ export function CoordinatorDashboard({
               hint="Selected incident: AI summary, score breakdown, and timeline"
               className="min-h-[12rem]"
             >
-              {selectedIncident && onTransition ? (
-                // CRIS-18: status transitions for the selected incident. The
-                // richer detail (score breakdown, timeline) is CRIS-23; assign/
-                // merge actions are CRIS-32.
+              {selectedIncident ? (
+                // The full incident-detail interface (CRIS-23). CRIS-18 status
+                // transitions render within it when `onTransition` is wired;
+                // assignment / merge actions are CRIS-32.
                 <IncidentDetail
                   incident={selectedIncident}
+                  timeline={timeline}
                   onTransition={onTransition}
                   transition={transition}
                 />
               ) : (
                 <div className="space-y-3">
                   <p className="text-sm text-slate-500">
-                    {isLive ? 'Select an incident to view actions.' : 'No incident selected.'}
+                    {isLive ? 'Select an incident to view its detail.' : 'No incident selected.'}
                   </p>
                   <p className="text-xs text-slate-400">
-                    Selecting a row in the queue opens summary, score breakdown, and timeline here
-                    (CRIS-23).
+                    Selecting a row in the queue opens its classification, AI summary, score
+                    breakdown, extracted entities, and audit timeline here.
                   </p>
                   {/* Placeholder actions until an incident is selected. Live
-                      status transitions (Verify / Reject / Resolve …) are wired
-                      in the panel above once a row is selected (CRIS-18);
+                      status transitions (Verify / Reject / Resolve …) render in
+                      the detail panel once a row is selected (CRIS-18);
                       assignment / merge remain CRIS-32. */}
-                  <div className="flex flex-wrap gap-2 pt-1">
-                    {['Verify', 'Reject', 'Assign team', 'Resolve'].map((action) => (
-                      <button
-                        key={action}
-                        type="button"
-                        disabled
-                        className="cursor-not-allowed rounded border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-400"
-                        title="Select an incident to enable status actions (CRIS-18); assignment is CRIS-32"
-                      >
-                        {action}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="text-xs text-slate-400">
-                    Assignment and merge actions are built in CRIS-32.
-                  </p>
+                  <DisabledActions />
                 </div>
               )}
             </Region>
