@@ -1,6 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { Category, PriorityBand, type PublicReport } from '@crisismap/shared';
-import { bandOf, countByBand, countByCategory, countUnscored, sortByPriority } from './incidents';
+import { Category, PriorityBand, ReportStatus, type PublicReport } from '@crisismap/shared';
+import {
+  applyFilters,
+  bandOf,
+  countByBand,
+  countByCategory,
+  countUnscored,
+  EMPTY_FILTERS,
+  filtersActive,
+  matchesFilters,
+  regionOptions,
+  sortByPriority,
+  toggleValue,
+  type IncidentFilters,
+} from './incidents';
 
 /** Minimal PublicReport factory — only the fields the read-model reads. */
 function incident(overrides: Partial<PublicReport> = {}): PublicReport {
@@ -97,5 +110,101 @@ describe('sortByPriority', () => {
     const snapshot = [...input];
     sortByPriority(input);
     expect(input).toEqual(snapshot);
+  });
+});
+
+describe('filtersActive', () => {
+  it('is false for the empty filter and true once any facet is set', () => {
+    expect(filtersActive(EMPTY_FILTERS)).toBe(false);
+    expect(filtersActive({ ...EMPTY_FILTERS, categories: [Category.FIRE] })).toBe(true);
+    expect(filtersActive({ ...EMPTY_FILTERS, statuses: [ReportStatus.NEW] })).toBe(true);
+    expect(filtersActive({ ...EMPTY_FILTERS, regionIds: ['region-a'] })).toBe(true);
+  });
+});
+
+describe('matchesFilters', () => {
+  const filters: IncidentFilters = {
+    categories: [Category.MEDICAL, Category.FIRE],
+    statuses: [ReportStatus.VERIFIED],
+    regionIds: ['region-a'],
+  };
+
+  it('passes an incident satisfying every non-empty facet (AND across facets)', () => {
+    expect(
+      matchesFilters(
+        incident({ category: Category.FIRE, status: ReportStatus.VERIFIED, regionId: 'region-a' }),
+        filters,
+      ),
+    ).toBe(true);
+  });
+
+  it('fails when any single facet is not satisfied', () => {
+    const base = { category: Category.FIRE, status: ReportStatus.VERIFIED, regionId: 'region-a' };
+    expect(matchesFilters(incident({ ...base, category: Category.FLOOD }), filters)).toBe(false);
+    expect(matchesFilters(incident({ ...base, status: ReportStatus.NEW }), filters)).toBe(false);
+    expect(matchesFilters(incident({ ...base, regionId: 'region-b' }), filters)).toBe(false);
+  });
+
+  it('treats a null category/region as not matching an active facet', () => {
+    expect(
+      matchesFilters(
+        incident({ category: null, status: ReportStatus.VERIFIED, regionId: 'region-a' }),
+        filters,
+      ),
+    ).toBe(false);
+  });
+
+  it('imposes no constraint from an empty facet', () => {
+    // Only status is constrained; category/region are unconstrained (empty).
+    expect(
+      matchesFilters(incident({ category: null, regionId: null, status: ReportStatus.NEW }), {
+        ...EMPTY_FILTERS,
+        statuses: [ReportStatus.NEW],
+      }),
+    ).toBe(true);
+  });
+});
+
+describe('applyFilters', () => {
+  it('returns a copy of all incidents when no facet is active', () => {
+    const input = [incident({ reportId: 'a' }), incident({ reportId: 'b' })];
+    const result = applyFilters(input, EMPTY_FILTERS);
+    expect(result.map((i) => i.reportId)).toEqual(['a', 'b']);
+    expect(result).not.toBe(input); // new array, input not mutated
+  });
+
+  it('narrows to the matching incidents', () => {
+    const input = [
+      incident({ reportId: 'fire', category: Category.FIRE }),
+      incident({ reportId: 'flood', category: Category.FLOOD }),
+      incident({ reportId: 'medical', category: Category.MEDICAL }),
+    ];
+    const result = applyFilters(input, {
+      ...EMPTY_FILTERS,
+      categories: [Category.FIRE, Category.MEDICAL],
+    });
+    expect(result.map((i) => i.reportId)).toEqual(['fire', 'medical']);
+  });
+});
+
+describe('regionOptions', () => {
+  it('returns the distinct non-empty region ids, sorted', () => {
+    expect(
+      regionOptions([
+        incident({ regionId: 'region-b' }),
+        incident({ regionId: 'region-a' }),
+        incident({ regionId: 'region-b' }),
+        incident({ regionId: null }),
+      ]),
+    ).toEqual(['region-a', 'region-b']);
+  });
+});
+
+describe('toggleValue', () => {
+  it('adds an absent value and removes a present one, without mutating', () => {
+    const input = ['a', 'b'];
+    expect(toggleValue(input, 'c')).toEqual(['a', 'b', 'c']);
+    expect(toggleValue(input, 'a')).toEqual(['b']);
+    expect(input).toEqual(['a', 'b']);
   });
 });
