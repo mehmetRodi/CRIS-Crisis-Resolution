@@ -1068,44 +1068,30 @@ export function CoordinatorDashboard({
               hint="Selected incident: AI summary, score breakdown, and timeline"
               className="min-h-[12rem]"
             >
-              {selectedIncident && onTransition ? (
-                // CRIS-18: status transitions for the selected incident. The
-                // richer detail (score breakdown, timeline) is CRIS-23; assign/
-                // merge actions are CRIS-32.
+              {selectedIncident ? (
+                // The full incident-detail interface (CRIS-23). CRIS-18 status
+                // transitions render within it when `onTransition` is wired;
+                // assignment / merge actions are CRIS-32.
                 <IncidentDetail
                   incident={selectedIncident}
+                  timeline={timeline}
                   onTransition={onTransition}
                   transition={transition}
                 />
               ) : (
                 <div className="space-y-3">
                   <p className="text-sm text-slate-500">
-                    {isLive ? 'Select an incident to view actions.' : 'No incident selected.'}
+                    {isLive ? 'Select an incident to view its detail.' : 'No incident selected.'}
                   </p>
                   <p className="text-xs text-slate-400">
-                    Selecting a row in the queue opens summary, score breakdown, and timeline here
-                    (CRIS-23).
+                    Selecting a row in the queue opens its classification, AI summary, score
+                    breakdown, extracted entities, and audit timeline here.
                   </p>
                   {/* Placeholder actions until an incident is selected. Live
-                      status transitions (Verify / Reject / Resolve …) are wired
-                      in the panel above once a row is selected (CRIS-18);
+                      status transitions (Verify / Reject / Resolve …) render in
+                      the detail panel once a row is selected (CRIS-18);
                       assignment / merge remain CRIS-32. */}
-                  <div className="flex flex-wrap gap-2 pt-1">
-                    {['Verify', 'Reject', 'Assign team', 'Resolve'].map((action) => (
-                      <button
-                        key={action}
-                        type="button"
-                        disabled
-                        className="cursor-not-allowed rounded border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-400"
-                        title="Select an incident to enable status actions (CRIS-18); assignment is CRIS-32"
-                      >
-                        {action}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="text-xs text-slate-400">
-                    Assignment and merge actions are built in CRIS-32.
-                  </p>
+                  <DisabledActions />
                 </div>
               )}
             </Region>
