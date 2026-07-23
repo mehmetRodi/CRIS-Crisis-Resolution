@@ -2,8 +2,12 @@ import {
   Category,
   PriorityBand,
   priorityBandForScore,
+  ReportEventType,
+  UserRole,
   type PublicReport,
   type ReportStatus,
+  type ScoreBreakdown,
+  type TriageEntities,
 } from '@crisismap/shared';
 
 /**
@@ -34,6 +38,24 @@ import {
 export interface CoordinatorIncident extends PublicReport {
   /** Optimistic-lock version, passed back as `expectedVersion` on a transition. */
   version: number;
+  /**
+   * Coordinator-internal triage context surfaced on the incident-detail view
+   * (CRIS-23, design doc Fig 2). These ride alongside the public fields for the
+   * same reason `version` does: they are needed to *act on* an incident but are
+   * deliberately NOT part of `PublicReport` — the public/map projection stays
+   * lean and the entity/score detail never leaks to anonymous surfaces (§5.6).
+   * All are non-PII: model confidence, the deterministic score's explainable
+   * breakdown, and PII-free extracted entities. Populated from the same list read
+   * that already loads full `Report` rows, so there is no extra round-trip.
+   */
+  /** Model confidence in [0, 1]; `null` before classification. */
+  confidence: number | null;
+  /** Version of the scoring formula that produced `priorityScore`. */
+  scoreVersion: number | null;
+  /** Per-factor "why it ranks here" breakdown; `null` until scored. */
+  scoreBreakdown: ScoreBreakdown | null;
+  /** People affected / infrastructure / hazards the Triage Agent extracted. */
+  entities: TriageEntities | null;
 }
 
 /**
@@ -222,4 +244,111 @@ export function regionOptions(incidents: readonly PublicReport[]): string[] {
  */
 export function toggleValue<T>(values: readonly T[], value: T): T[] {
   return values.includes(value) ? values.filter((v) => v !== value) : [...values, value];
+}
+
+/* -------------------------------------------------------------------------- */
+/* Incident timeline — the per-incident audit trail (CRIS-23, design doc §5.1) */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * One entry of the selected incident's audit timeline, projected from a
+ * `ReportEvent` (§5.1). This is the *per-incident* history shown in the
+ * incident-detail panel — distinct from the dashboard-wide "Recent activity"
+ * stream (CRIS-28). Only the PII-free, display-relevant fields are kept: the
+ * raw `actorId` (a Cognito sub) is reduced to `isSystem` + `actorRole`, and the
+ * freeform `detail` JSON is narrowed to the known `{ note }` an operator typed
+ * on a transition (CRIS-18) — arbitrary detail keys are never surfaced.
+ */
+export interface TimelineEvent {
+  eventId: string;
+  type: ReportEventType;
+  fromStatus: string | null;
+  toStatus: string | null;
+  /** Role of the actor, or `null` for pipeline-driven events. */
+  actorRole: UserRole | null;
+  /** True for pipeline-driven events (`actorId === 'SYSTEM'`). */
+  isSystem: boolean;
+  /** Operator note recorded on the event, if any. */
+  note: string | null;
+  /** Report version AFTER this event — pairs the entry to the optimistic lock. */
+  version: number | null;
+  createdAt: string | null;
+}
+
+/**
+ * The timeline feed as a state machine, mirroring `IncidentFeedState`. `idle`
+ * means "no incident selected"; the detail panel renders one branch per state.
+ */
+export type IncidentTimelineState =
+  | { status: 'idle' }
+  | { status: 'loading' }
+  | { status: 'error'; message: string }
+  | { status: 'ready'; events: TimelineEvent[] };
+
+/**
+ * The subset of a raw `ReportEvent` the timeline reads. Structural (not the
+ * generated Amplify `Schema` type) so this module stays framework-free and unit
+ * testable; the hook passes AppSync records, which are assignable to this shape.
+ */
+export interface RawReportEvent {
+  id?: string | null;
+  eventId?: string | null;
+  type?: string | null;
+  fromStatus?: string | null;
+  toStatus?: string | null;
+  actorId?: string | null;
+  actorRole?: string | null;
+  version?: number | null;
+  detail?: unknown;
+  createdAt?: string | null;
+}
+
+const REPORT_EVENT_TYPES = new Set<string>(Object.values(ReportEventType));
+const USER_ROLES = new Set<string>(Object.values(UserRole));
+
+/** Pull the operator `note` out of an event's freeform `detail` JSON, if present. */
+function noteFromDetail(detail: unknown): string | null {
+  if (typeof detail !== 'object' || detail === null) return null;
+  const note = (detail as Record<string, unknown>).note;
+  return typeof note === 'string' && note.trim() ? note : null;
+}
+
+/**
+ * Project a raw `ReportEvent` into a {@link TimelineEvent}. Lenient — an unknown
+ * `type`/`actorRole` degrades to `STATUS_CHANGED` / `null` rather than dropping
+ * the entry, since the timeline is display-only and should never hide history.
+ */
+export function toTimelineEvent(raw: RawReportEvent): TimelineEvent {
+  const type =
+    raw.type && REPORT_EVENT_TYPES.has(raw.type)
+      ? (raw.type as ReportEventType)
+      : ReportEventType.STATUS_CHANGED;
+  const actorRole =
+    raw.actorRole && USER_ROLES.has(raw.actorRole) ? (raw.actorRole as UserRole) : null;
+  return {
+    eventId: raw.eventId ?? raw.id ?? '',
+    type,
+    fromStatus: raw.fromStatus ?? null,
+    toStatus: raw.toStatus ?? null,
+    actorRole,
+    isSystem: raw.actorId === 'SYSTEM',
+    note: noteFromDetail(raw.detail),
+    version: raw.version ?? null,
+    createdAt: raw.createdAt ?? null,
+  };
+}
+
+/**
+ * Order timeline entries newest-first (most recent at the top), matching the
+ * dashboard's activity framing. Ties (same `createdAt`, or none) fall back to
+ * the higher `version`, so the later event still sorts first. Returns a new
+ * array; the input is not mutated.
+ */
+export function sortTimeline(events: readonly TimelineEvent[]): TimelineEvent[] {
+  return [...events].sort((a, b) => {
+    const timeA = a.createdAt ? Date.parse(a.createdAt) : 0;
+    const timeB = b.createdAt ? Date.parse(b.createdAt) : 0;
+    if (timeB !== timeA) return timeB - timeA;
+    return (b.version ?? 0) - (a.version ?? 0);
+  });
 }
