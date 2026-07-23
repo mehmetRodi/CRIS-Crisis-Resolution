@@ -27,6 +27,31 @@ import { sortTimeline, toTimelineEvent, type IncidentTimelineState } from './inc
 /** How many audit events to pull for one incident. Bounded until pagination. */
 const TIMELINE_LIMIT = 100;
 
+/**
+ * The exact fields the timeline maps (see `toTimelineEvent`). We select these
+ * explicitly rather than take the default selection set for a correctness
+ * reason, not just economy: `ReportEvent` rows are written directly by the
+ * guarded CRIS-18 resolver, which bypasses Amplify's auto-managed `updatedAt`,
+ * leaving it null. `updatedAt` is non-nullable in the generated schema, so the
+ * default selection set makes AppSync reject the whole query
+ * ("Cannot return null for non-nullable type: 'AWSDateTime' … /updatedAt"). Not
+ * requesting it sidesteps that; every field below is either required-and-present
+ * or nullable. Our own `createdAt` (declared on the model, §5.1) is the ordering
+ * key and is populated by the resolver.
+ */
+const TIMELINE_SELECTION = [
+  'id',
+  'eventId',
+  'type',
+  'fromStatus',
+  'toStatus',
+  'actorId',
+  'actorRole',
+  'version',
+  'detail',
+  'createdAt',
+] as const;
+
 export interface LiveIncidentTimeline {
   state: IncidentTimelineState;
   /** Re-run the read (e.g. after a status transition appends an event). */
@@ -55,7 +80,7 @@ export function useIncidentTimeline(reportId: string | null): LiveIncidentTimeli
     try {
       const { data, errors } = await client.models.ReportEvent.eventsByReport(
         { reportId },
-        { limit: TIMELINE_LIMIT },
+        { limit: TIMELINE_LIMIT, selectionSet: TIMELINE_SELECTION },
       );
       if (errors && errors.length > 0) {
         setState({
