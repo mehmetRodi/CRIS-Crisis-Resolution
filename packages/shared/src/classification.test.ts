@@ -12,6 +12,7 @@ import {
   MANUAL_ADJUSTMENT_LIMIT,
   parseClassification,
   parseEntities,
+  parseScoreBreakdown,
   RECENCY_HALF_LIFE_MINUTES,
   RECENCY_MAX_POINTS,
   scoreReport,
@@ -300,6 +301,49 @@ describe('deterministic priority scoring (§5.4.2)', () => {
  * custom type in `apps/web/amplify/data/resource.ts`. If you add/rename a
  * factor, update BOTH and this expectation.
  */
+describe('parseScoreBreakdown', () => {
+  it('round-trips a breakdown produced by scoreReport', () => {
+    const { breakdown } = scoreReport({
+      urgency: Urgency.HIGH,
+      category: Category.FIRE,
+      corroboratingReports: 2,
+    });
+    expect(parseScoreBreakdown(breakdown)).toEqual(breakdown);
+  });
+
+  it('keeps an optional notes string', () => {
+    const parsed = parseScoreBreakdown({
+      urgencyWeight: 3.5,
+      categoryWeight: 3,
+      recencyWeight: 1,
+      corroborationWeight: 0.5,
+      manualAdjustment: -1,
+      notes: 'coordinator override',
+    });
+    expect(parsed?.notes).toBe('coordinator override');
+    expect(parsed?.manualAdjustment).toBe(-1);
+  });
+
+  it('returns null when a numeric factor is missing or not a finite number', () => {
+    const base = {
+      urgencyWeight: 3.5,
+      categoryWeight: 3,
+      recencyWeight: 1,
+      corroborationWeight: 0.5,
+      manualAdjustment: 0,
+    };
+    expect(parseScoreBreakdown({ ...base, recencyWeight: undefined })).toBeNull();
+    expect(parseScoreBreakdown({ ...base, categoryWeight: 'x' })).toBeNull();
+    expect(parseScoreBreakdown({ ...base, urgencyWeight: Number.NaN })).toBeNull();
+  });
+
+  it('returns null for non-object input', () => {
+    expect(parseScoreBreakdown(null)).toBeNull();
+    expect(parseScoreBreakdown('breakdown')).toBeNull();
+    expect(parseScoreBreakdown(undefined)).toBeNull();
+  });
+});
+
 describe('score breakdown sync guard', () => {
   it('pins the breakdown factor names that must match the Amplify ScoreBreakdown type', () => {
     const { breakdown } = scoreReport({
