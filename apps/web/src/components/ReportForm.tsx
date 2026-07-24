@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
 import {
   Category,
+  LOCATION_HINT_MAX_LENGTH,
   REPORT_TEXT_MAX_LENGTH,
   Urgency,
   createEmptyReportDraft,
@@ -8,6 +9,7 @@ import {
   toReportSubmission,
 } from '@crisismap/shared';
 
+import { LocationPicker } from './LocationPicker';
 import { newClientRequestId, submitReport } from '../lib/submit-report';
 
 /**
@@ -148,6 +150,30 @@ export function ReportForm() {
           placeholder="e.g., Water, Food, Medical"
           value={draft.subcategory}
           onChange={(e) => setDraft((d) => ({ ...d, subcategory: e.target.value }))}
+        />
+      </div>
+
+      {/* Location */}
+      <div className="flex flex-col gap-1.5">
+        <span className="text-sm font-semibold text-slate-900">Location (Optional)</span>
+        <LocationPicker
+          value={draft.location}
+          onChange={(location) => setDraft((d) => ({ ...d, location }))}
+        />
+      </div>
+
+      {/* Location hint */}
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor="report-location-hint" className="text-sm font-semibold text-slate-900">
+          Location Hint (Optional)
+        </label>
+        <input
+          id="report-location-hint"
+          className={inputBase}
+          placeholder="e.g., near the blue bridge, 2nd floor"
+          value={draft.locationHint}
+          onChange={(e) => setDraft((d) => ({ ...d, locationHint: e.target.value }))}
+          maxLength={LOCATION_HINT_MAX_LENGTH}
         />
       </div>
 

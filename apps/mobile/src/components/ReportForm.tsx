@@ -11,6 +11,7 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import {
   Category,
+  LOCATION_HINT_MAX_LENGTH,
   REPORT_TEXT_MAX_LENGTH,
   Urgency,
   createEmptyReportDraft,
@@ -18,6 +19,7 @@ import {
   toReportSubmission,
 } from '@crisismap/shared';
 
+import { LocationPicker } from './LocationPicker';
 import { colors, radii } from '../theme';
 import { newClientRequestId, submitReport } from '../lib/submit-report';
 
@@ -28,7 +30,13 @@ function categoryLabel(category: string): string {
   return category.replace(/_/g, ' ');
 }
 
-export function ReportForm() {
+interface ReportFormProps {
+  /** Forwarded to LocationPicker so the parent ScrollView can yield the pan gesture to the map. */
+  onMapInteractionStart?: () => void;
+  onMapInteractionEnd?: () => void;
+}
+
+export function ReportForm({ onMapInteractionStart, onMapInteractionEnd }: ReportFormProps = {}) {
   const [draft, setDraft] = useState(createEmptyReportDraft());
   const [photo, setPhoto] = useState<ImagePicker.ImagePickerAsset | null>(null);
   const [submitted, setSubmitted] = useState(false);
@@ -143,6 +151,30 @@ export function ReportForm() {
           placeholderTextColor={colors.textMuted}
           value={draft.subcategory}
           onChangeText={(subcategory) => setDraft((d) => ({ ...d, subcategory }))}
+        />
+      </View>
+
+      {/* Location */}
+      <View style={styles.field}>
+        <Text style={styles.label}>Location (Optional)</Text>
+        <LocationPicker
+          value={draft.location}
+          onChange={(location) => setDraft((d) => ({ ...d, location }))}
+          onInteractionStart={onMapInteractionStart}
+          onInteractionEnd={onMapInteractionEnd}
+        />
+      </View>
+
+      {/* Location hint */}
+      <View style={styles.field}>
+        <Text style={styles.label}>Location Hint (Optional)</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="e.g., near the blue bridge, 2nd floor"
+          placeholderTextColor={colors.textMuted}
+          value={draft.locationHint}
+          onChangeText={(locationHint) => setDraft((d) => ({ ...d, locationHint }))}
+          maxLength={LOCATION_HINT_MAX_LENGTH}
         />
       </View>
 

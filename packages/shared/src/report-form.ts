@@ -28,9 +28,18 @@ export const REPORT_TEXT_MIN_LENGTH = 10;
 /** Hard cap on the free-text description, mirrored by the input's maxLength. */
 export const REPORT_TEXT_MAX_LENGTH = 1000;
 
+/** Hard cap on the optional location-hint text (CRIS-16). */
+export const LOCATION_HINT_MAX_LENGTH = 200;
+
 /* -------------------------------------------------------------------------- */
 /* Draft shape                                                                 */
 /* -------------------------------------------------------------------------- */
+
+/** A resolved coordinate, from GPS or a map-pin drop (CRIS-16). */
+export interface ReportLocation {
+  lat: number;
+  lng: number;
+}
 
 /**
  * The in-progress form state. `''` means "not chosen yet" for the two required
@@ -43,6 +52,14 @@ export interface ReportDraft {
   urgency: Urgency | '';
   anonymous: boolean;
   contact: string;
+  /**
+   * Resolved coordinate (GPS or map-pin), null until captured. Location is
+   * never required — an emergency report must not be blockable by a denied
+   * permission or a bad GPS fix (CRIS-16).
+   */
+  location: ReportLocation | null;
+  /** Free-text supplement ("near the blue bridge"), independent of `location`. */
+  locationHint: string;
 }
 
 /** Fresh, empty draft. A factory (not a constant) so callers can't share state. */
@@ -54,6 +71,8 @@ export function createEmptyReportDraft(): ReportDraft {
     urgency: '',
     anonymous: false,
     contact: '',
+    location: null,
+    locationHint: '',
   };
 }
 
@@ -84,6 +103,9 @@ export function validateReportDraft(draft: ReportDraft): ReportDraftErrors {
   if (draft.urgency === '') {
     errors.urgency = 'Choose an urgency level.';
   }
+  if (draft.locationHint.length > LOCATION_HINT_MAX_LENGTH) {
+    errors.locationHint = `Location hint must be at most ${LOCATION_HINT_MAX_LENGTH} characters.`;
+  }
 
   return errors;
 }
@@ -99,8 +121,7 @@ export function isReportDraftSubmittable(draft: ReportDraft): boolean {
 
 /**
  * The client-side payload handed to the submit path (CRIS-9 `submitReport`).
- * Media and location attachments ride alongside, owned by their own tickets
- * (CRIS-16 location, CRIS-17 media upload).
+ * Media attachments ride alongside, owned by their own ticket (CRIS-17).
  */
 export interface ReportSubmission {
   text: string;
@@ -110,6 +131,11 @@ export interface ReportSubmission {
   anonymous: boolean;
   /** Always `null` when `anonymous` — enforced here, not by callers. */
   contact: string | null;
+  /** Passed straight through to `submitReport`'s `lat`/`lng` arguments. */
+  lat: number | null;
+  lng: number | null;
+  /** Folded into the submission text (§2.2 free-text-first) — see `toSubmissionText`. */
+  locationHint: string | null;
 }
 
 /**
@@ -130,6 +156,9 @@ export function toSubmissionText(submission: ReportSubmission): string {
   if (submission.subcategory) {
     hints.push(`supply: ${submission.subcategory}`);
   }
+  if (submission.locationHint) {
+    hints.push(`location hint: ${submission.locationHint}`);
+  }
   return `${submission.text}\n\n[Citizen selections — ${hints.join('; ')}]`;
 }
 
@@ -149,5 +178,8 @@ export function toReportSubmission(draft: ReportDraft): ReportSubmission {
     urgency: draft.urgency,
     anonymous: draft.anonymous,
     contact: draft.anonymous || contact === '' ? null : contact,
+    lat: draft.location?.lat ?? null,
+    lng: draft.location?.lng ?? null,
+    locationHint: draft.locationHint.trim() || null,
   };
 }
