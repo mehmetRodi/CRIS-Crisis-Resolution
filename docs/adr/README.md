@@ -14,8 +14,8 @@ behind the code — essential when refactoring or extending the system.
 
 ## Index
 
-| ADR                                                           | Title                                                   | Status                           |
-| ------------------------------------------------------------- | -------------------------------------------------------| -------------------------------- |
+| ADR                                                           | Title                                                  | Status                           |
+| ------------------------------------------------------------- | ------------------------------------------------------ | -------------------------------- |
 | [0001](0001-monorepo-npm-workspaces.md)                       | Monorepo with npm workspaces                           | Accepted                         |
 | [0002](0002-frontend-vite-react-spa.md)                       | Frontend: Vite + React SPA                             | Partially superseded by ADR-0020 |
 | [0003](0003-backend-amplify-gen2-with-cdk-escape-hatch.md)    | Backend/IaC: Amplify Gen 2 + CDK                       | Accepted                         |

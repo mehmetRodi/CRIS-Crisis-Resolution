@@ -52,9 +52,7 @@ describe('validateReportDraft', () => {
   });
 
   it('treats location and locationHint as optional', () => {
-    expect(
-      validateReportDraft(submittableDraft({ location: null, locationHint: '' })),
-    ).toEqual({});
+    expect(validateReportDraft(submittableDraft({ location: null, locationHint: '' }))).toEqual({});
   });
 
   it('rejects a location hint above the maximum length', () => {
@@ -107,7 +105,9 @@ describe('toReportSubmission', () => {
   });
 
   it('trims the location hint and normalizes blank to null', () => {
-    const hinted = toReportSubmission(submittableDraft({ locationHint: '  near the blue bridge  ' }));
+    const hinted = toReportSubmission(
+      submittableDraft({ locationHint: '  near the blue bridge  ' }),
+    );
     expect(hinted.locationHint).toBe('near the blue bridge');
 
     const blank = toReportSubmission(submittableDraft({ locationHint: '   ' }));
