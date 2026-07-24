@@ -79,6 +79,16 @@ describe('toReportSubmission', () => {
     );
     expect(submission.contact).toBe('reporter@example.org');
   });
+
+  it('defaults mediaKeys to an empty array when omitted', () => {
+    const submission = toReportSubmission(submittableDraft());
+    expect(submission.mediaKeys).toEqual([]);
+  });
+
+  it('passes through the provided mediaKeys', () => {
+    const submission = toReportSubmission(submittableDraft(), ['reports/abc/photo.jpg']);
+    expect(submission.mediaKeys).toEqual(['reports/abc/photo.jpg']);
+  });
 });
 
 describe('toSubmissionText', () => {

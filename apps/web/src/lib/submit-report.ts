@@ -41,6 +41,7 @@ export async function submitReport(
       clientRequestId,
       isAnonymous: submission.anonymous,
       reporterContact: submission.contact,
+      mediaKeys: submission.mediaKeys,
     },
     { authMode: 'identityPool' },
   );

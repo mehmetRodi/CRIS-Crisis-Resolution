@@ -19,6 +19,7 @@ import {
 } from '@crisismap/shared';
 
 import { colors, radii } from '../theme';
+import { uploadReportMedia } from '../lib/media-upload';
 import { newClientRequestId, submitReport } from '../lib/submit-report';
 
 const CATEGORY_OPTIONS = Object.values(Category);
@@ -31,22 +32,41 @@ function categoryLabel(category: string): string {
 export function ReportForm() {
   const [draft, setDraft] = useState(createEmptyReportDraft());
   const [photo, setPhoto] = useState<ImagePicker.ImagePickerAsset | null>(null);
+  const [mediaKey, setMediaKey] = useState<string | null>(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Idempotency token (§5.4.4): stable across retries of the same report so a
-  // flaky network can't create duplicates; re-minted only after success.
+  // flaky network can't create duplicates; re-minted only after success. Also
+  // scopes the media upload's S3 key (CRIS-17) — a photo is picked before a
+  // report exists, so there's no reportId yet to key it by.
   const [clientRequestId, setClientRequestId] = useState(newClientRequestId);
 
-  const canSubmit = isReportDraftSubmittable(draft) && !submitting;
+  const canSubmit = isReportDraftSubmittable(draft) && !submitting && !photoUploading;
 
   async function pickPhoto() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       quality: 0.8,
     });
-    if (!result.canceled) {
-      setPhoto(result.assets[0] ?? null);
+    if (result.canceled) return;
+
+    const asset = result.assets[0] ?? null;
+    setPhoto(asset);
+    setMediaKey(null);
+    setPhotoError(null);
+    if (!asset) return;
+
+    setPhotoUploading(true);
+    try {
+      const key = await uploadReportMedia(asset, clientRequestId);
+      setMediaKey(key);
+    } catch (e) {
+      setPhotoError(e instanceof Error ? e.message : 'Could not upload the photo.');
+    } finally {
+      setPhotoUploading(false);
     }
   }
 
@@ -56,11 +76,15 @@ export function ReportForm() {
     setError(null);
 
     try {
-      // TODO(CRIS-17): upload the photo via presigned S3 and pass mediaKeys.
-      await submitReport(toReportSubmission(draft), clientRequestId);
+      await submitReport(
+        toReportSubmission(draft, mediaKey ? [mediaKey] : []),
+        clientRequestId,
+      );
       setSubmitted(true);
       setDraft(createEmptyReportDraft());
       setPhoto(null);
+      setMediaKey(null);
+      setPhotoError(null);
       setClientRequestId(newClientRequestId());
     } catch (e) {
       const message = e instanceof Error && e.message ? e.message : null;
@@ -151,16 +175,32 @@ export function ReportForm() {
         <Text style={styles.label}>Add Photo (Optional)</Text>
         <Pressable
           onPress={pickPhoto}
-          style={[styles.photoBox, photo != null && styles.photoBoxFilled]}
+          disabled={photoUploading}
+          style={[
+            styles.photoBox,
+            mediaKey != null && styles.photoBoxFilled,
+            photoError != null && styles.photoBoxError,
+          ]}
           accessibilityRole="button"
         >
-          <Text style={styles.photoIcon}>📷</Text>
+          {photoUploading ? (
+            <ActivityIndicator color={colors.primary} />
+          ) : (
+            <Text style={styles.photoIcon}>📷</Text>
+          )}
           {photo ? (
             <>
-              <Text style={styles.photoName} numberOfLines={1}>
+              <Text
+                style={[styles.photoName, mediaKey != null && styles.photoNameUploaded]}
+                numberOfLines={1}
+              >
                 {photo.fileName ?? 'Photo attached'}
               </Text>
-              <Text style={styles.photoHint}>Tap to change photo</Text>
+              <Text style={[styles.photoHint, photoError != null && styles.photoHintError]}>
+                {photoUploading
+                  ? 'Uploading…'
+                  : (photoError ?? 'Tap to change photo')}
+              </Text>
             </>
           ) : (
             <>
@@ -339,6 +379,10 @@ const styles = StyleSheet.create({
     borderColor: colors.successAccent,
     backgroundColor: colors.successBg,
   },
+  photoBoxError: {
+    borderColor: colors.errorBorder,
+    backgroundColor: colors.errorBg,
+  },
   photoIcon: {
     fontSize: 28,
   },
@@ -350,12 +394,18 @@ const styles = StyleSheet.create({
   photoName: {
     fontSize: 14,
     fontWeight: '500',
-    color: colors.successAccent,
+    color: colors.textPrimary,
     maxWidth: '90%',
+  },
+  photoNameUploaded: {
+    color: colors.successAccent,
   },
   photoHint: {
     fontSize: 12,
     color: colors.textMuted,
+  },
+  photoHintError: {
+    color: colors.errorText,
   },
   anonymousRow: {
     flexDirection: 'row',

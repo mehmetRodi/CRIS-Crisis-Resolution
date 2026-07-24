@@ -8,6 +8,7 @@ import {
   toReportSubmission,
 } from '@crisismap/shared';
 
+import { uploadReportMedia } from '../lib/media-upload';
 import { newClientRequestId, submitReport } from '../lib/submit-report';
 
 /**
@@ -35,21 +36,41 @@ const inputBase =
 export function ReportForm() {
   const [draft, setDraft] = useState(createEmptyReportDraft());
   const [photoName, setPhotoName] = useState<string | null>(null);
+  const [mediaKey, setMediaKey] = useState<string | null>(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Idempotency token (§5.4.4): stable across retries of the same report so a
-  // flaky network can't create duplicates; re-minted only after success.
+  // flaky network can't create duplicates; re-minted only after success. Also
+  // scopes the media upload's S3 key (CRIS-17) — a photo is picked before a
+  // report exists, so there's no reportId yet to key it by.
   const [clientRequestId, setClientRequestId] = useState(newClientRequestId);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const canSubmit = isReportDraftSubmittable(draft) && !submitting;
+  const canSubmit = isReportDraftSubmittable(draft) && !submitting && !photoUploading;
 
-  function pickPhoto(e: React.ChangeEvent<HTMLInputElement>) {
-    // TODO(CRIS-17): upload via presigned S3 and pass mediaKeys. For now the
-    // file is not read or uploaded — we only surface its name, matching mobile.
+  async function pickPhoto(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    setPhotoName(file ? file.name : null);
+    if (!file) {
+      setPhotoName(null);
+      setMediaKey(null);
+      setPhotoError(null);
+      return;
+    }
+    setPhotoName(file.name);
+    setMediaKey(null);
+    setPhotoError(null);
+    setPhotoUploading(true);
+    try {
+      const key = await uploadReportMedia(file, clientRequestId);
+      setMediaKey(key);
+    } catch (err) {
+      setPhotoError(err instanceof Error ? err.message : 'Could not upload the photo.');
+    } finally {
+      setPhotoUploading(false);
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -59,10 +80,15 @@ export function ReportForm() {
     setError(null);
 
     try {
-      await submitReport(toReportSubmission(draft), clientRequestId);
+      await submitReport(
+        toReportSubmission(draft, mediaKey ? [mediaKey] : []),
+        clientRequestId,
+      );
       setSubmitted(true);
       setDraft(createEmptyReportDraft());
       setPhotoName(null);
+      setMediaKey(null);
+      setPhotoError(null);
       if (fileInputRef.current) fileInputRef.current.value = '';
       setClientRequestId(newClientRequestId());
     } catch (err) {
@@ -157,17 +183,30 @@ export function ReportForm() {
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className={`flex flex-col items-center gap-0.5 rounded-xl border-2 border-dashed p-5 text-center transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-            photoName ? 'border-green-600 bg-green-50' : 'border-slate-300 hover:border-blue-400'
+          disabled={photoUploading}
+          className={`flex flex-col items-center gap-0.5 rounded-xl border-2 border-dashed p-5 text-center transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-70 ${
+            mediaKey
+              ? 'border-green-600 bg-green-50'
+              : photoError
+                ? 'border-red-300 bg-red-50'
+                : 'border-slate-300 hover:border-blue-400'
           }`}
         >
           <span className="text-3xl">📷</span>
           {photoName ? (
             <>
-              <span className="max-w-[90%] truncate text-sm font-medium text-green-600">
+              <span
+                className={`max-w-[90%] truncate text-sm font-medium ${mediaKey ? 'text-green-600' : 'text-slate-900'}`}
+              >
                 {photoName}
               </span>
-              <span className="text-xs text-slate-400">Click to change photo</span>
+              <span className="text-xs text-slate-400">
+                {photoUploading
+                  ? 'Uploading…'
+                  : photoError
+                    ? photoError
+                    : 'Click to change photo'}
+              </span>
             </>
           ) : (
             <>

@@ -13,6 +13,7 @@ import { submitReport } from './functions/submit-report/resource';
 import { transitionReport } from './functions/transition-report/resource';
 import { publishReportUpdate } from './functions/publish-report-update/resource';
 import { classifyReport } from './functions/classify-report/resource';
+import { createMediaUploadUrl } from './functions/create-media-upload-url/resource';
 import { addObservability } from './observability';
 
 /**
@@ -53,6 +54,7 @@ const backend = defineBackend({
   transitionReport,
   publishReportUpdate,
   classifyReport,
+  createMediaUploadUrl,
 });
 
 /* -------------------------------------------------------------------------- */
@@ -93,6 +95,38 @@ backend.submitReport.addEnvironment('REPORT_EVENT_TABLE_NAME', tables['ReportEve
 backend.submitReport.addEnvironment(
   'IDEMPOTENCY_TABLE_NAME',
   tables['IdempotencyRecord'].tableName,
+);
+
+/* -------------------------------------------------------------------------- */
+/* createMediaUploadUrl (CRIS-17) — grant S3 write + inject bucket name       */
+/* -------------------------------------------------------------------------- */
+
+const mediaUploadFn = backend.createMediaUploadUrl.resources.lambda;
+
+// The presigned POST is signed with a DEDICATED role's temporary credentials,
+// not the Lambda's own execution-role credentials. A Lambda's ambient
+// execution-role session carries a long STS session token (often several KB),
+// and combined with the presigned POST's policy document, that pushes the
+// multipart request's "fields" section (everything before the photo data)
+// past S3's fixed, non-configurable 20 KB cap — the exact
+// `MaxPostPreDataLengthExceeded` error this role exists to avoid. A fresh
+// `AssumeRole` against a role with no other trust relationships or session
+// tags produces a materially shorter token that fits comfortably under that
+// cap. This role has no other purpose: it exists solely to be assumed for
+// signing, so it carries no permissions beyond the S3 write itself.
+const mediaUploadPresignRole = new Role(Stack.of(mediaUploadFn), 'MediaUploadPresignRole', {
+  assumedBy: mediaUploadFn.grantPrincipal,
+});
+backend.storage.resources.bucket.grantWrite(mediaUploadPresignRole, 'reports/*');
+mediaUploadPresignRole.grantAssumeRole(mediaUploadFn.grantPrincipal);
+
+backend.createMediaUploadUrl.addEnvironment(
+  'MEDIA_BUCKET_NAME',
+  backend.storage.resources.bucket.bucketName,
+);
+backend.createMediaUploadUrl.addEnvironment(
+  'MEDIA_UPLOAD_PRESIGN_ROLE_ARN',
+  mediaUploadPresignRole.roleArn,
 );
 
 /* -------------------------------------------------------------------------- */
@@ -283,6 +317,7 @@ const tracedFunctions = [
   backend.transitionReport,
   backend.publishReportUpdate,
   backend.classifyReport,
+  backend.createMediaUploadUrl,
 ];
 for (const fn of tracedFunctions) {
   fn.resources.cfnResources.cfnFunction.tracingConfig = { mode: 'Active' };

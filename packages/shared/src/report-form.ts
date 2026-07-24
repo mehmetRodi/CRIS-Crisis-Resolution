@@ -99,8 +99,7 @@ export function isReportDraftSubmittable(draft: ReportDraft): boolean {
 
 /**
  * The client-side payload handed to the submit path (CRIS-9 `submitReport`).
- * Media and location attachments ride alongside, owned by their own tickets
- * (CRIS-16 location, CRIS-17 media upload).
+ * Location attachments ride alongside, owned by their own ticket (CRIS-16).
  */
 export interface ReportSubmission {
   text: string;
@@ -110,6 +109,11 @@ export interface ReportSubmission {
   anonymous: boolean;
   /** Always `null` when `anonymous` — enforced here, not by callers. */
   contact: string | null;
+  /**
+   * S3 object keys for media already uploaded via the presigned-upload
+   * mutation (CRIS-17) before submission — never raw file bytes/objects.
+   */
+  mediaKeys: string[];
 }
 
 /**
@@ -136,8 +140,17 @@ export function toSubmissionText(submission: ReportSubmission): string {
 /**
  * Shape a validated draft into the submission payload. Throws if the draft is
  * not submittable so an invalid payload can never be constructed.
+ *
+ * `mediaKeys` is a separate parameter, not a `ReportDraft` field: picking a
+ * photo triggers an async upload (CRIS-17) with its own loading/error state,
+ * which the form components track outside the draft (same as they already
+ * track the raw picked file/asset outside the draft) — by the time this is
+ * called, upload has already finished and produced these S3 keys.
  */
-export function toReportSubmission(draft: ReportDraft): ReportSubmission {
+export function toReportSubmission(
+  draft: ReportDraft,
+  mediaKeys: string[] = [],
+): ReportSubmission {
   if (draft.category === '' || draft.urgency === '' || !isReportDraftSubmittable(draft)) {
     throw new Error('Report draft is not submittable; validate before submitting.');
   }
@@ -149,5 +162,6 @@ export function toReportSubmission(draft: ReportDraft): ReportSubmission {
     urgency: draft.urgency,
     anonymous: draft.anonymous,
     contact: draft.anonymous || contact === '' ? null : contact,
+    mediaKeys,
   };
 }
