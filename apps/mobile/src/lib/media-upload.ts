@@ -56,10 +56,11 @@ export async function uploadReportMedia(
   // RN's FormData accepts a { uri, name, type } file descriptor in place of a
   // Blob — TS's DOM-derived FormData typing doesn't know this RN-specific
   // shape, hence the cast. Must be appended last (S3 requires the file field last).
-  formData.append(
-    'file',
-    { uri: asset.uri, name: asset.fileName ?? 'photo.jpg', type: contentType } as unknown as Blob,
-  );
+  formData.append('file', {
+    uri: asset.uri,
+    name: asset.fileName ?? 'photo.jpg',
+    type: contentType,
+  } as unknown as Blob);
 
   const response = await fetch(data.url, { method: 'POST', body: formData });
   if (!response.ok) {

@@ -147,10 +147,7 @@ export function toSubmissionText(submission: ReportSubmission): string {
  * track the raw picked file/asset outside the draft) — by the time this is
  * called, upload has already finished and produced these S3 keys.
  */
-export function toReportSubmission(
-  draft: ReportDraft,
-  mediaKeys: string[] = [],
-): ReportSubmission {
+export function toReportSubmission(draft: ReportDraft, mediaKeys: string[] = []): ReportSubmission {
   if (draft.category === '' || draft.urgency === '' || !isReportDraftSubmittable(draft)) {
     throw new Error('Report draft is not submittable; validate before submitting.');
   }

@@ -7,7 +7,7 @@
 ## Context
 
 CRIS-17 owns getting a citizen's report photo into S3 (design doc §4). The backend write
-path already had everything it needed to *receive* a key: `submitReport` accepts an optional
+path already had everything it needed to _receive_ a key: `submitReport` accepts an optional
 `mediaKeys: string[]` argument and stores it unchanged
 (`apps/web/amplify/functions/submit-report/core.ts`). Neither client actually uploaded
 anything, though — web's photo picker kept only the filename, and mobile kept the picked
@@ -31,7 +31,7 @@ The storage bucket's `access` rules were also still coarse (`STUB — TODO(CRIS-
   path/verb grant; there's no way to cap file size or restrict content-type at the point of
   write, and design doc §4 anticipates a quarantine step this bypasses entirely.
 - **Presigned PUT** — a single Lambda-issued URL, client does one `fetch(url, { method: 'PUT',
-  body: file })`. Simple client code, but a presigned PUT's signature covers the URL/method/
+body: file })`. Simple client code, but a presigned PUT's signature covers the URL/method/
   key only; there is no server-enforced size or content-type limit baked into the upload
   itself.
 - **Presigned POST** (chosen) — the Lambda's presigned policy can include a
@@ -65,7 +65,7 @@ The storage bucket's `access` rules were also still coarse (`STUB — TODO(CRIS-
    coordinator/responder/volunteer staff viewing report photos.
 5. **Two bugs surfaced live testing the upload, both producing the identical S3 error
    (`MaxPostPreDataLengthExceeded` — a fixed, non-configurable 20 KB cap on the multipart
-   request's fields section *before* the file data):**
+   request's fields section _before_ the file data):**
    - **The actual root cause**: `createMediaUploadUrl`'s `fields` return value is an
      `a.json()` scalar, and came back to both clients as a raw JSON **string**, not an
      already-parsed object. `Object.entries()` on a string doesn't throw — it silently walks
@@ -95,7 +95,7 @@ The storage bucket's `access` rules were also still coarse (`STUB — TODO(CRIS-
    the photo control), storing the resulting key separately from `ReportDraft` — same
    pattern as the picked file/asset itself, which was already tracked outside the draft.
 7. **A failed or in-progress upload never blocks submission** — only prevents it while
-   actively uploading (`canSubmit` gates on `!photoUploading`, not on upload *success*). A
+   actively uploading (`canSubmit` gates on `!photoUploading`, not on upload _success_). A
    photo is optional; an emergency report must still go through without one if the upload
    fails — the same "never blocks submission" principle CRIS-16 (location capture, on its own
    unmerged branch) applies to GPS/map-pin input.

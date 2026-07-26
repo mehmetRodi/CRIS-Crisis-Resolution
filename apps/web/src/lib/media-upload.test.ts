@@ -2,7 +2,9 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const createMediaUploadUrl = vi.fn();
 vi.mock('./amplify', () => ({
-  client: { mutations: { createMediaUploadUrl: (...args: unknown[]) => createMediaUploadUrl(...args) } },
+  client: {
+    mutations: { createMediaUploadUrl: (...args: unknown[]) => createMediaUploadUrl(...args) },
+  },
 }));
 
 import { MediaUploadError, uploadReportMedia } from './media-upload';
@@ -37,7 +39,11 @@ describe('uploadReportMedia', () => {
 
   it('uploads via the presigned POST and returns the key', async () => {
     createMediaUploadUrl.mockResolvedValue({
-      data: { url: 'https://bucket.s3.example/', fields: { key: 'reports/req-1/a.jpg' }, key: 'reports/req-1/a.jpg' },
+      data: {
+        url: 'https://bucket.s3.example/',
+        fields: { key: 'reports/req-1/a.jpg' },
+        key: 'reports/req-1/a.jpg',
+      },
       errors: null,
     });
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true });
@@ -59,7 +65,11 @@ describe('uploadReportMedia', () => {
     // blew a real upload past S3's MaxPostPreDataLengthExceeded cap.
     const realFields = { key: 'reports/req-1/a.jpg', policy: 'abc', 'x-amz-signature': 'def' };
     createMediaUploadUrl.mockResolvedValue({
-      data: { url: 'https://bucket.s3.example/', fields: JSON.stringify(realFields), key: 'reports/req-1/a.jpg' },
+      data: {
+        url: 'https://bucket.s3.example/',
+        fields: JSON.stringify(realFields),
+        key: 'reports/req-1/a.jpg',
+      },
       errors: null,
     });
     (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true });

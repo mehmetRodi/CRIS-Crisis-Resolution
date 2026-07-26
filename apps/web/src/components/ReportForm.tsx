@@ -80,10 +80,7 @@ export function ReportForm() {
     setError(null);
 
     try {
-      await submitReport(
-        toReportSubmission(draft, mediaKey ? [mediaKey] : []),
-        clientRequestId,
-      );
+      await submitReport(toReportSubmission(draft, mediaKey ? [mediaKey] : []), clientRequestId);
       setSubmitted(true);
       setDraft(createEmptyReportDraft());
       setPhotoName(null);
@@ -201,11 +198,7 @@ export function ReportForm() {
                 {photoName}
               </span>
               <span className="text-xs text-slate-400">
-                {photoUploading
-                  ? 'Uploading…'
-                  : photoError
-                    ? photoError
-                    : 'Click to change photo'}
+                {photoUploading ? 'Uploading…' : photoError ? photoError : 'Click to change photo'}
               </span>
             </>
           ) : (

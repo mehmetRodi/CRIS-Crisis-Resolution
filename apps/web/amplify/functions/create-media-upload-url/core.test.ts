@@ -46,8 +46,8 @@ describe('buildMediaUploadPlan', () => {
   });
 
   it('throws on invalid input rather than building a plan', () => {
-    expect(() =>
-      buildMediaUploadPlan({ clientRequestId: '', contentType: 'image/png' }),
-    ).toThrow(MediaUploadValidationError);
+    expect(() => buildMediaUploadPlan({ clientRequestId: '', contentType: 'image/png' })).toThrow(
+      MediaUploadValidationError,
+    );
   });
 });

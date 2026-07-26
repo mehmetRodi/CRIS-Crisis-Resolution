@@ -76,10 +76,7 @@ export function ReportForm() {
     setError(null);
 
     try {
-      await submitReport(
-        toReportSubmission(draft, mediaKey ? [mediaKey] : []),
-        clientRequestId,
-      );
+      await submitReport(toReportSubmission(draft, mediaKey ? [mediaKey] : []), clientRequestId);
       setSubmitted(true);
       setDraft(createEmptyReportDraft());
       setPhoto(null);
@@ -197,9 +194,7 @@ export function ReportForm() {
                 {photo.fileName ?? 'Photo attached'}
               </Text>
               <Text style={[styles.photoHint, photoError != null && styles.photoHintError]}>
-                {photoUploading
-                  ? 'Uploading…'
-                  : (photoError ?? 'Tap to change photo')}
+                {photoUploading ? 'Uploading…' : (photoError ?? 'Tap to change photo')}
               </Text>
             </>
           ) : (
