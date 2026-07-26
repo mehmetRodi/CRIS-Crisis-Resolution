@@ -96,6 +96,15 @@ interface CoordinatorDashboardProps {
    * presentational. Defaults to `idle` — the pre-wired shell shows no timeline.
    */
   timeline?: IncidentTimelineState;
+  /**
+   * The signed-in caller's real Cognito role (CRIS-24), used to compute which
+   * status-transition buttons to offer — mirroring the server's
+   * `TRANSITION_ROLES` for whichever role is actually signed in, not always
+   * `COORDINATOR`. Defaults to `COORDINATOR` so the shell and its fixture-driven
+   * tests (which render with no role prop) are unchanged; the live route
+   * (`Router.tsx`) always passes the caller's actual `highestRole`.
+   */
+  callerRole?: UserRole;
 }
 
 /** A metric tile in the top command strip (Fig 1: "incident metrics"). */
@@ -440,17 +449,15 @@ function transitionLabel(from: ReportStatus, to: ReportStatus): string {
 }
 
 /**
- * The status transitions a coordinator may drive from `from` (CRIS-18). The
+ * The status transitions `role` may drive from `from` (CRIS-18, CRIS-24). The
  * structurally-legal moves come from `STATUS_TRANSITIONS`; `canActorTransition`
- * narrows them to the coordinator's authority. This mirrors the server's
+ * narrows them to that role's authority — mirroring the server's
  * `TRANSITION_ROLES` so the UI only offers moves the resolver will accept — but
  * the resolver remains the real gate (a `FORBIDDEN` still surfaces as an error).
  * SYSTEM-only moves (NEW→PROCESSING, classification) never appear here.
  */
-function coordinatorTransitions(from: ReportStatus): ReportStatus[] {
-  return STATUS_TRANSITIONS[from].filter((to) =>
-    canActorTransition(UserRole.COORDINATOR, from, to),
-  );
+function coordinatorTransitions(from: ReportStatus, role: UserRole): ReportStatus[] {
+  return STATUS_TRANSITIONS[from].filter((to) => canActorTransition(role, from, to));
 }
 
 function clampPercent(value: number): number {
@@ -692,16 +699,18 @@ function TimelineView({ timeline }: { timeline: IncidentTimelineState }) {
  */
 function TransitionControls({
   incident,
+  callerRole,
   onTransition,
   transition,
 }: {
   incident: CoordinatorIncident;
+  callerRole: UserRole;
   onTransition: (request: TransitionRequest) => void;
   transition: TransitionUiState;
 }) {
   const [note, setNote] = useState('');
   const from = incident.status;
-  const moves = coordinatorTransitions(from);
+  const moves = coordinatorTransitions(from, callerRole);
   const isSubmitting =
     transition.status === 'submitting' && transition.reportId === incident.reportId;
   const showError = transition.status === 'error' && transition.reportId === incident.reportId;
@@ -804,11 +813,13 @@ function DisabledActions() {
 function IncidentDetail({
   incident,
   timeline,
+  callerRole,
   onTransition,
   transition,
 }: {
   incident: CoordinatorIncident;
   timeline: IncidentTimelineState;
+  callerRole: UserRole;
   onTransition?: (request: TransitionRequest) => void;
   transition: TransitionUiState;
 }) {
@@ -838,6 +849,7 @@ function IncidentDetail({
       {onTransition ? (
         <TransitionControls
           incident={incident}
+          callerRole={callerRole}
           onTransition={onTransition}
           transition={transition}
         />
@@ -903,6 +915,7 @@ export function CoordinatorDashboard({
   transition = { status: 'idle' },
   onSelectIncident,
   timeline = { status: 'idle' },
+  callerRole = UserRole.COORDINATOR,
 }: CoordinatorDashboardProps) {
   const counts = feed.status === 'ready' ? countByBand(feed.incidents) : null;
   const unscored = feed.status === 'ready' ? countUnscored(feed.incidents) : 0;
@@ -936,7 +949,7 @@ export function CoordinatorDashboard({
           <div className="flex items-center gap-3">
             <h1 className="text-lg font-bold tracking-tight">Coordinator dashboard</h1>
             <span className="rounded bg-slate-900 px-2 py-0.5 text-xs font-medium text-white">
-              {UserRole.COORDINATOR}
+              {callerRole}
             </span>
           </div>
           <div className="flex items-center gap-3">
@@ -1079,6 +1092,7 @@ export function CoordinatorDashboard({
                 <IncidentDetail
                   incident={selectedIncident}
                   timeline={timeline}
+                  callerRole={callerRole}
                   onTransition={onTransition}
                   transition={transition}
                 />

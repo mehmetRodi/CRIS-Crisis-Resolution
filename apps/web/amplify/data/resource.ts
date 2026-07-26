@@ -155,11 +155,13 @@ const schema = a
       ])
       // Coarse role gate. Clients should use the guarded CRIS-9/18 mutations, but
       // generated model operations still exist for the allowed groups. Public-facing
-      // reads must use PublicReport; authenticated internal reads currently remain.
+      // reads must use PublicReport. CRIS-24/ADR-0040: no blanket
+      // `allow.authenticated()` read here — this model carries reporter PII
+      // (`reporterContact`, `text`, `reporterId`) that a signed-in user with no
+      // staff group (e.g. a self-signed-up CITIZEN) must never be able to read.
       .authorization((allow) => [
         allow.groups(['COORDINATOR', 'ADMIN']),
         allow.groups(['RESPONDER', 'VOLUNTEER']).to(['read']),
-        allow.authenticated().to(['read']),
       ]),
 
     /* ---------------------------------------------------------------------- */

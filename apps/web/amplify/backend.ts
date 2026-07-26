@@ -7,6 +7,7 @@ import { CfnPipe } from 'aws-cdk-lib/aws-pipes';
 import { Queue } from 'aws-cdk-lib/aws-sqs';
 import { PASSWORD_MIN_LENGTH } from '@crisismap/shared';
 import { auth } from './auth/resource';
+import { postConfirmation } from './auth/post-confirmation/resource';
 import { data } from './data/resource';
 import { storage } from './storage/resource';
 import { submitReport } from './functions/submit-report/resource';
@@ -48,6 +49,7 @@ import { addObservability } from './observability';
  */
 const backend = defineBackend({
   auth,
+  postConfirmation,
   data,
   storage,
   submitReport,
@@ -75,6 +77,20 @@ backend.auth.resources.cfnResources.cfnUserPool.policies = {
     requireSymbols: false,
   },
 };
+
+/* -------------------------------------------------------------------------- */
+/* postConfirmation (CRIS-24, ADR-0040) — grant AdminAddUserToGroup           */
+/* -------------------------------------------------------------------------- */
+
+// Scoped to THIS User Pool only — the trigger's one job is auto-assigning
+// CITIZEN to the account that just confirmed (see handler.ts); it has no
+// broader Cognito admin access.
+backend.postConfirmation.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['cognito-idp:AdminAddUserToGroup'],
+    resources: [backend.auth.resources.userPool.userPoolArn],
+  }),
+);
 
 const tables = backend.data.resources.tables;
 
