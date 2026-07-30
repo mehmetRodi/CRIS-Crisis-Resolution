@@ -47,6 +47,25 @@ describe('App shell', () => {
     expect(screen.getByText('Coordinator dashboard')).toBeInTheDocument();
   });
 
+  // CRIS-27: without an explicit label the card's accessible name is its entire
+  // contents — title, ticket, description, and role read as one string.
+  it('names each navigable card by the action it performs', async () => {
+    await renderApp();
+
+    expect(screen.getByRole('button', { name: 'Open Coordinator dashboard' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open Live map' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open Citizen submission' })).toBeInTheDocument();
+  });
+
+  it('leaves cards without a landed shell out of the tab order', async () => {
+    await renderApp();
+
+    // The volunteer board has no route yet — it must not advertise itself as
+    // activatable to keyboard or screen-reader users.
+    expect(screen.queryByRole('button', { name: /volunteer task board/i })).not.toBeInTheDocument();
+    expect(screen.getByText('Volunteer task board')).toBeInTheDocument();
+  });
+
   it('navigates to the coordinator dashboard shell when its card is activated', async () => {
     // App reads useAuth(), so it must render inside an AuthProvider; the mock
     // above makes it settle unauthenticated.
