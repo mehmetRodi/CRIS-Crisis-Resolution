@@ -138,6 +138,10 @@ function App() {
                 }}
                 role={surface.path ? 'button' : undefined}
                 tabIndex={surface.path ? 0 : undefined}
+                // Without this the name is the whole card read end to end —
+                // title, ticket, description, role. Name it by what it does,
+                // and leave the detail to be read on entry (CRIS-27).
+                aria-label={surface.path ? `Open ${surface.title}` : undefined}
                 className={`rounded-lg border border-slate-200 bg-white p-4 shadow-sm ${
                   surface.path
                     ? 'cursor-pointer transition-all hover:border-blue-400 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500'
