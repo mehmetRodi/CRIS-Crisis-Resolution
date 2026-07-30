@@ -79,6 +79,27 @@ rationale in ADR-0011):
   (see ADR-0011). Before a write path is "done", smoke-test it end-to-end against a sandbox
   (`npx ampx sandbox` → sign in → call the mutation → assert the returned record).
 
+## Accessibility (ADR-0036)
+
+Users reach these surfaces under duress — one-handed, on a phone, sometimes with a screen
+reader. Every interactive surface ships with five guarantees, asserted in a co-located
+`*.a11y.test.tsx`:
+
+- **Label every control programmatically** — `htmlFor`/`id`, or `aria-label` when there is no
+  visible label. A placeholder is a hint, never an accessible name. Query controls in tests
+  with `getByLabelText`, not `getByPlaceholderText`; the query is the assertion.
+- **Convey required state non-visually** — `aria-required`, plus visually-hidden "(required)"
+  next to the `aria-hidden` asterisk. A bare `*` announces as "star", or not at all.
+- **An unavailable control says why** — point a disabled button at an explanation with
+  `aria-describedby`; "dimmed" on its own is not a reason.
+- **Announce state changes** — `role="alert"` for errors, `role="status"` for success and for
+  degraded dependencies (a blank map reads as a working one otherwise).
+- **Move focus when a region is replaced** — otherwise focus is stranded on an unmounted node.
+
+Not covered by these tests, and still owed: colour contrast, zoom/reflow, and real
+screen-reader passes against WCAG 2.1 AA. The mobile workspace has no test harness, so its
+surfaces are unasserted.
+
 ## Commits & branches
 
 - Work on feature branches; reference the ticket (e.g. `CRIS-9`) in the branch/PR.
