@@ -86,7 +86,12 @@ export default function IncidentMapView({
         </span>
       ) : null}
       {failed ? (
-        <div className="absolute inset-0 z-[1] flex items-center justify-center bg-slate-50/95 p-4 text-center">
+        // Degradation is silent for a non-sighted user — the canvas simply stays
+        // empty — so the notice is announced rather than merely drawn (CRIS-27).
+        <div
+          role="status"
+          className="absolute inset-0 z-[1] flex items-center justify-center bg-slate-50/95 p-4 text-center"
+        >
           <p className="text-sm text-slate-500">
             Map unavailable — base tiles could not be loaded.
           </p>
