@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Category,
   REPORT_TEXT_MAX_LENGTH,
@@ -25,6 +25,22 @@ function categoryLabel(category: string): string {
   return category.replace(/_/g, ' ');
 }
 
+/**
+ * Required-field indicator (CRIS-27). The red asterisk is decoration — screen
+ * readers either skip it or read "star", neither of which says "required" — so
+ * it is hidden and paired with visually-hidden text that does.
+ */
+function RequiredMark() {
+  return (
+    <>
+      <span aria-hidden="true" className="text-red-500">
+        *
+      </span>
+      <span className="sr-only">(required)</span>
+    </>
+  );
+}
+
 const chipBase =
   'rounded-lg border px-3 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500';
 const chipIdle = 'border-slate-300 bg-white text-slate-900 hover:border-blue-400';
@@ -42,8 +58,16 @@ export function ReportForm() {
   // flaky network can't create duplicates; re-minted only after success.
   const [clientRequestId, setClientRequestId] = useState(newClientRequestId);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const confirmationRef = useRef<HTMLHeadingElement>(null);
 
   const canSubmit = isReportDraftSubmittable(draft) && !submitting;
+
+  // The confirmation replaces the form in place. Without moving focus, a screen
+  // reader or keyboard user is left on a button that no longer exists and hears
+  // nothing — so send focus to the confirmation heading once it mounts (CRIS-27).
+  useEffect(() => {
+    if (submitted) confirmationRef.current?.focus();
+  }, [submitted]);
 
   function pickPhoto(e: React.ChangeEvent<HTMLInputElement>) {
     // TODO(CRIS-17): upload via presigned S3 and pass mediaKeys. For now the
@@ -75,11 +99,19 @@ export function ReportForm() {
 
   if (submitted) {
     return (
-      <div className="flex flex-col items-center gap-2 rounded-xl border border-green-200 bg-green-50 p-6 text-center">
-        <div className="mb-2 flex h-16 w-16 items-center justify-center rounded-full bg-green-200 text-3xl font-bold text-green-600">
+      <div
+        role="status"
+        className="flex flex-col items-center gap-2 rounded-xl border border-green-200 bg-green-50 p-6 text-center"
+      >
+        <div
+          aria-hidden="true"
+          className="mb-2 flex h-16 w-16 items-center justify-center rounded-full bg-green-200 text-3xl font-bold text-green-600"
+        >
           ✓
         </div>
-        <h2 className="text-xl font-bold text-green-800">Report Submitted</h2>
+        <h2 ref={confirmationRef} tabIndex={-1} className="text-xl font-bold text-green-800">
+          Report Submitted
+        </h2>
         <p className="text-sm text-green-800">
           Thank you for your report. Emergency coordinators will review it shortly.
         </p>
@@ -95,21 +127,30 @@ export function ReportForm() {
   }
 
   return (
-    <form className="flex flex-col gap-5" onSubmit={handleSubmit} noValidate>
+    <form
+      className="flex flex-col gap-5"
+      aria-label="Emergency report"
+      onSubmit={handleSubmit}
+      noValidate
+    >
       {/* Description */}
       <div className="flex flex-col gap-1.5">
         <label htmlFor="report-text" className="text-sm font-semibold text-slate-900">
-          Description <span className="text-red-500">*</span>
+          Description <RequiredMark />
         </label>
         <textarea
           id="report-text"
+          // The form is `noValidate` (shared logic owns the gate), so the required
+          // state has to be conveyed to assistive tech explicitly (CRIS-27).
+          aria-required="true"
+          aria-describedby="report-text-count"
           className={`${inputBase} min-h-[110px] resize-y`}
           placeholder="Provide clear details about what's happening and what's needed."
           value={draft.text}
           onChange={(e) => setDraft((d) => ({ ...d, text: e.target.value }))}
           maxLength={REPORT_TEXT_MAX_LENGTH}
         />
-        <span className="self-end text-xs text-slate-400">
+        <span id="report-text-count" className="self-end text-xs text-slate-400">
           {draft.text.length}/{REPORT_TEXT_MAX_LENGTH} characters
         </span>
       </div>
@@ -117,7 +158,7 @@ export function ReportForm() {
       {/* Category */}
       <fieldset className="flex flex-col gap-1.5">
         <legend className="text-sm font-semibold text-slate-900">
-          Category <span className="text-red-500">*</span>
+          Category <RequiredMark />
         </legend>
         <div className="flex flex-wrap gap-2">
           {CATEGORY_OPTIONS.map((c) => {
@@ -156,12 +197,18 @@ export function ReportForm() {
         <span className="text-sm font-semibold text-slate-900">Add Photo (Optional)</span>
         <button
           type="button"
+          // The visible copy is split across three spans and an emoji, which
+          // concatenates into a noisy name. State it once, and reflect the
+          // current selection so the control is not just "button" (CRIS-27).
+          aria-label={photoName ? `Change photo, ${photoName} selected` : 'Add a photo (optional)'}
           onClick={() => fileInputRef.current?.click()}
           className={`flex flex-col items-center gap-0.5 rounded-xl border-2 border-dashed p-5 text-center transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${
             photoName ? 'border-green-600 bg-green-50' : 'border-slate-300 hover:border-blue-400'
           }`}
         >
-          <span className="text-3xl">📷</span>
+          <span aria-hidden="true" className="text-3xl">
+            📷
+          </span>
           {photoName ? (
             <>
               <span className="max-w-[90%] truncate text-sm font-medium text-green-600">
@@ -190,7 +237,7 @@ export function ReportForm() {
       {/* Urgency */}
       <fieldset className="flex flex-col gap-1.5">
         <legend className="text-sm font-semibold text-slate-900">
-          Urgency <span className="text-red-500">*</span>
+          Urgency <RequiredMark />
         </legend>
         <div className="flex flex-wrap gap-2">
           {URGENCY_OPTIONS.map((u) => {
@@ -260,10 +307,16 @@ export function ReportForm() {
       <button
         type="submit"
         disabled={!canSubmit}
+        // A disabled button announces as "dimmed" with no reason. Point at the
+        // requirements so the blocker is discoverable without guesswork (CRIS-27).
+        aria-describedby={canSubmit ? undefined : 'report-submit-requirements'}
         className="flex items-center justify-center rounded-xl bg-blue-600 px-4 py-3.5 text-[15px] font-semibold text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:hover:bg-blue-600"
       >
         {submitting ? 'Submitting…' : 'Submit Report'}
       </button>
+      <span id="report-submit-requirements" className="sr-only">
+        Description, category, and urgency are required before you can submit.
+      </span>
 
       <p className="text-center text-xs text-slate-400">All reports are secure and encrypted</p>
     </form>
