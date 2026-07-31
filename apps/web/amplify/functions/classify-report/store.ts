@@ -4,6 +4,7 @@ import {
   DynamoDBDocumentClient,
   GetCommand,
   PutCommand,
+  QueryCommand,
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
 import {
@@ -12,6 +13,7 @@ import {
   SYSTEM_ACTOR,
   type ClassificationResult,
   type ScoreBreakdown,
+  type TriageEntities,
 } from '@crisismap/shared';
 
 /**
@@ -76,18 +78,72 @@ export interface MarkNeedsVerificationInput {
   streamEventId: string;
 }
 
+/** A neighbouring report considered as a possible duplicate (§5.4.3, CRIS-31). */
+export interface DuplicateCandidateRecord {
+  reportId: string;
+  category: string;
+  lat?: number | null;
+  lng?: number | null;
+  createdAt: string;
+  text?: string | null;
+  entities?: TriageEntities | null;
+  duplicateGroupId?: string | null;
+  version: number;
+}
+
+export interface FindDuplicateCandidatesInput {
+  /** Partition key of the map-viewport GSI — the ~4.9 km cell to search. */
+  geohashPrefix: string;
+  /** The report being classified; excluded from its own candidate set. */
+  excludeReportId: string;
+  /** ISO-8601 lower bound on `createdAt` (the §5.4.3 recency window). */
+  since: string;
+}
+
+export interface LinkDuplicateGroupInput {
+  reportId: string;
+  /** Version the row is expected to be at — dedup is a version-checked write like any other. */
+  expectedVersion: number;
+  duplicateGroupId: string;
+  /** Audit detail: the score and components that justified the link. */
+  detail: Record<string, unknown>;
+}
+
 export interface ReportStore {
   getReport(reportId: string): Promise<ReportRecord | null>;
   /** NEW → PROCESSING via a version conditional write. False = lost race / already claimed. */
   claimProcessing(reportId: string, expectedVersion: number): Promise<boolean>;
   persistClassification(input: PersistClassificationInput): Promise<void>;
   markNeedsVerification(input: MarkNeedsVerificationInput): Promise<void>;
+  /** Recent, nearby reports to score for duplication (§5.4.3, CRIS-31). */
+  findDuplicateCandidates(input: FindDuplicateCandidatesInput): Promise<DuplicateCandidateRecord[]>;
+  /**
+   * Points a report at a duplicate group and appends the DUPLICATE_LINKED audit
+   * event. Version-checked; false means the row moved under us (skip, don't retry
+   * — a later report will re-link it).
+   */
+  linkDuplicateGroup(input: LinkDuplicateGroupInput): Promise<boolean>;
 }
 
 export interface DynamoStoreTables {
   report: string;
   reportEvent: string;
+  /**
+   * Name of the `geohashPrefix`/`geohash` GSI (data/resource.ts index #4), used
+   * to gather duplicate candidates. Injected rather than hardcoded: the physical
+   * index name is Amplify's to choose, and a wrong guess is invisible to unit
+   * tests (ADR-0011) — it only fails in a deployed environment.
+   */
+  geoIndex: string;
 }
+
+/**
+ * Safety cap on candidates read from one geohash cell. The GSI sorts by geohash
+ * (spatial), not time, so the recency window can only be applied after reading —
+ * meaning a dense cell is read in full. The cap bounds worst-case cost; hitting
+ * it is logged rather than silently truncating the candidate set.
+ */
+export const DUPLICATE_CANDIDATE_LIMIT = 100;
 
 /** True when a DynamoDB error is a failed conditional (optimistic-lock) write. */
 function isConditionalCheckFailed(err: unknown): boolean {
@@ -259,6 +315,82 @@ export function createDynamoStore(
           },
         }),
       );
+    },
+
+    async findDuplicateCandidates(input) {
+      // Queries the map-viewport GSI (data/resource.ts index #4). The sort key is
+      // `geohash`, not time, so recency is a filter rather than a key condition —
+      // `Limit` therefore bounds *items read*, and the caller logs when it binds.
+      const { Items = [] } = await doc.send(
+        new QueryCommand({
+          TableName: tables.report,
+          IndexName: tables.geoIndex,
+          KeyConditionExpression: 'geohashPrefix = :prefix',
+          FilterExpression: 'createdAt >= :since AND id <> :self',
+          ExpressionAttributeValues: {
+            ':prefix': input.geohashPrefix,
+            ':since': input.since,
+            ':self': input.excludeReportId,
+          },
+          Limit: DUPLICATE_CANDIDATE_LIMIT,
+        }),
+      );
+
+      return Items.map((item) => ({
+        reportId: item.id as string,
+        category: (item.category as string) ?? '',
+        lat: (item.lat as number | undefined) ?? null,
+        lng: (item.lng as number | undefined) ?? null,
+        createdAt: (item.createdAt as string | undefined) ?? '',
+        text: (item.text as string | undefined) ?? null,
+        entities: (item.entities as TriageEntities | undefined) ?? null,
+        duplicateGroupId: (item.duplicateGroupId as string | undefined) ?? null,
+        version: (item.version as number | undefined) ?? 0,
+      }));
+    },
+
+    async linkDuplicateGroup(input) {
+      const now = new Date().toISOString();
+      const nextVersion = input.expectedVersion + 1;
+
+      try {
+        await doc.send(
+          new UpdateCommand({
+            TableName: tables.report,
+            Key: { id: input.reportId },
+            UpdateExpression: 'SET duplicateGroupId = :group, #v = :next',
+            ConditionExpression: '#v = :expected',
+            ExpressionAttributeNames: { '#v': 'version' },
+            ExpressionAttributeValues: {
+              ':group': input.duplicateGroupId,
+              ':expected': input.expectedVersion,
+              ':next': nextVersion,
+            },
+          }),
+        );
+      } catch (err) {
+        // Lost race: the report changed between scoring and linking. Not an error
+        // — grouping is advisory, and the next report into this cell re-evaluates.
+        if (isConditionalCheckFailed(err)) return false;
+        throw err;
+      }
+
+      // Immutable audit trail (§5.1): every grouping is explainable after the fact.
+      await doc.send(
+        new PutCommand({
+          TableName: tables.reportEvent,
+          Item: {
+            id: randomUUID(),
+            reportId: input.reportId,
+            type: ReportEventType.DUPLICATE_LINKED,
+            actorId: SYSTEM_ACTOR,
+            version: nextVersion,
+            detail: { duplicateGroupId: input.duplicateGroupId, ...input.detail },
+            createdAt: now,
+          },
+        }),
+      );
+      return true;
     },
   };
 }
