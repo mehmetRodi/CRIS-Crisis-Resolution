@@ -270,6 +270,18 @@ worker.addToRolePolicy(
 backend.classifyReport.addEnvironment('REPORT_TABLE_NAME', reportTable.tableName);
 backend.classifyReport.addEnvironment('REPORT_EVENT_TABLE_NAME', tables['ReportEvent'].tableName);
 
+// Duplicate detection (§5.4.3, CRIS-31) gathers candidates from the
+// geohashPrefix/geohash GSI (`data/resource.ts` index #4). Amplify names a
+// secondary index `<partitionKey>-<sortKey>-index`; the L2 `ITable` does not
+// expose its GSI names, so the name is stated here and injected rather than
+// hardcoded in the worker — one place to correct if the convention differs.
+// `grantReadWriteData` above already covers `<tableArn>/index/*`, so the Query
+// needs no additional IAM.
+//
+// NOTE: unit tests cannot verify this string (ADR-0011). Confirm against a
+// sandbox before treating CRIS-31 as done — see docs/adr/0037.
+backend.classifyReport.addEnvironment('REPORT_GEO_INDEX_NAME', 'geohashPrefix-geohash-index');
+
 /* -------------------------------------------------------------------------- */
 /* Observability (CRIS-15, ADR-0015) — X-Ray tracing + CloudWatch alarms       */
 /* -------------------------------------------------------------------------- */
