@@ -52,3 +52,4 @@ behind the code — essential when refactoring or extending the system.
 | [0034](0034-gps-map-pin-and-location-hint-input.md)                  | GPS, map-pin, and location-hint input (CRIS-16)        | Accepted                         |
 | [0036](0036-frontend-accessibility-baseline.md)                      | Frontend accessibility baseline, asserted in tests     | Refined by ADR-0037              |
 | [0037](0037-reachable-gated-controls-and-persistent-live-regions.md) | Reachable gated controls + persistent live regions     | Accepted                         |
+| [0038](0038-conservative-duplicate-detection.md)                     | Conservative duplicate detection (CRIS-31)             | Accepted                         |

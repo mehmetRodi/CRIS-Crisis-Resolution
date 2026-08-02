@@ -175,6 +175,19 @@ const pipeRole = new Role(pipelineStack, 'StreamToSqsPipeRole', {
 reportTable.grantStreamRead(pipeRole);
 classificationQueue.grantSendMessages(pipeRole);
 
+// Failure sink for the Stream→SQS hop (CRIS-31). `classificationDlq` covers only
+// SQS→Lambda; without this, a record that repeatedly fails to reach the queue is
+// retried until the 24 h stream retention expires, and because DynamoDB streams
+// are ordered per shard it head-of-line-blocks every report behind it — the whole
+// shard stops classifying. Deliberately a *separate* queue from
+// `classificationDlq`: its messages are stream-record metadata, not the worker's
+// message shape, so redriving them into the classification queue would hand the
+// worker bodies it cannot parse (poison). They need a different recovery path.
+const pipeDlq = new Queue(pipelineStack, 'ReportStreamPipeDlq', {
+  retentionPeriod: Duration.days(14),
+});
+pipeDlq.grantSendMessages(pipeRole);
+
 new CfnPipe(pipelineStack, 'ReportStreamToClassificationQueue', {
   roleArn: pipeRole.roleArn,
   source: streamArn,
@@ -184,6 +197,14 @@ new CfnPipe(pipelineStack, 'ReportStreamToClassificationQueue', {
       startingPosition: 'LATEST', // don't replay historical NEW reports on deploy
       batchSize: 10,
       maximumBatchingWindowInSeconds: 1,
+      // Bound how long one bad batch can block its shard, then park it (CRIS-31).
+      // Without these three the defaults are "retry until the record expires",
+      // which converts a transient SQS failure into a stalled shard.
+      maximumRetryAttempts: 5,
+      maximumRecordAgeInSeconds: 3600,
+      // Park only the records that actually failed, not the whole batch.
+      onPartialBatchItemFailure: 'AUTOMATIC_BISECT',
+      deadLetterConfig: { arn: pipeDlq.queueArn },
     },
     // Only INSERTs of reports that still need classification. `pattern` is a
     // JSON string (L1 CfnPipe quirk).
@@ -270,6 +291,30 @@ worker.addToRolePolicy(
 backend.classifyReport.addEnvironment('REPORT_TABLE_NAME', reportTable.tableName);
 backend.classifyReport.addEnvironment('REPORT_EVENT_TABLE_NAME', tables['ReportEvent'].tableName);
 
+// Duplicate detection (§5.4.3, CRIS-31) gathers candidates from the
+// geohashPrefix/geohash GSI (`data/resource.ts` index #4). The L2 `ITable` does
+// not expose its GSI names, so the name is stated here and injected rather than
+// hardcoded in the worker. `grantReadWriteData` above already covers
+// `<tableArn>/index/*`, so the Query needs no additional IAM.
+//
+// The name is NOT `<partitionKey>-<sortKey>-index`. When `@index` carries no
+// explicit `name` — and `data/resource.ts` passes only `.sortKeys()`/
+// `.queryField()` — the transformer derives it as
+// `${toLower(pluralize(model))}By${[field, ...sortKeys].map(toUpper).join('And')}`
+// (@aws-amplify/graphql-index-transformer: graphql-index-transformer.js
+// `getOrGenerateDefaultName` → utils.js `generateKeyAndQueryNameForConfig`),
+// then passes it straight to `addGlobalSecondaryIndex({ indexName })`
+// (resolvers/resolvers.js). For Report/geohashPrefix/geohash that is
+// `reportsByGeohashPrefixAndGeohash`.
+//
+// `.queryField('reportsByGeohash')` renames the *GraphQL query field* only and
+// has no effect on the physical index name — the two are derived separately.
+//
+// A wrong value here is invisible to unit tests (ADR-0011) and degrades to
+// "dedup silently links nothing" (logged as `dedupe.failed`), so it is derived
+// from the transformer source rather than guessed — see docs/adr/0038.
+backend.classifyReport.addEnvironment('REPORT_GEO_INDEX_NAME', 'reportsByGeohashPrefixAndGeohash');
+
 /* -------------------------------------------------------------------------- */
 /* Observability (CRIS-15, ADR-0015) — X-Ray tracing + CloudWatch alarms       */
 /* -------------------------------------------------------------------------- */
@@ -308,4 +353,5 @@ addObservability({
   },
   classificationQueue,
   classificationDlq,
+  pipeDlq,
 });

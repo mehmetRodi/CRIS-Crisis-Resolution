@@ -4,6 +4,8 @@ import {
   DynamoDBDocumentClient,
   GetCommand,
   PutCommand,
+  QueryCommand,
+  TransactWriteCommand,
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
 import {
@@ -12,6 +14,7 @@ import {
   SYSTEM_ACTOR,
   type ClassificationResult,
   type ScoreBreakdown,
+  type TriageEntities,
 } from '@crisismap/shared';
 
 /**
@@ -76,22 +79,108 @@ export interface MarkNeedsVerificationInput {
   streamEventId: string;
 }
 
+/** A neighbouring report considered as a possible duplicate (§5.4.3, CRIS-31). */
+export interface DuplicateCandidateRecord {
+  reportId: string;
+  category: string;
+  lat?: number | null;
+  lng?: number | null;
+  createdAt: string;
+  text?: string | null;
+  entities?: TriageEntities | null;
+  duplicateGroupId?: string | null;
+  version: number;
+}
+
+export interface FindDuplicateCandidatesInput {
+  /** Partition key of the map-viewport GSI — the ~4.9 km cell to search. */
+  geohashPrefix: string;
+  /** The report being classified; excluded from its own candidate set. */
+  excludeReportId: string;
+  /** ISO-8601 lower bound on `createdAt` (the §5.4.3 recency window). */
+  since: string;
+}
+
+/** One report being pointed at a duplicate group. */
+export interface DuplicateGroupMember {
+  reportId: string;
+  /** Version the row is expected to be at — dedup is a version-checked write like any other. */
+  expectedVersion: number;
+  /**
+   * Immutable id for the audit append (§5.4.4). Required: `eventId` is non-null
+   * in the schema (`data/resource.ts`), and an event written without it makes
+   * AppSync fail non-null resolution on *every* read of that report's timeline,
+   * not just the offending row (see `useIncidentTimeline`'s `updatedAt` note for
+   * the same failure mode). Must be derived, not random, so a retried link
+   * re-appends the same id rather than a second event.
+   */
+  eventId: string;
+  /** Audit detail: the score and components that justified this member's link. */
+  detail: Record<string, unknown>;
+}
+
+export interface LinkDuplicateGroupInput {
+  duplicateGroupId: string;
+  /** Every report joining the group in this pass. Written all-or-nothing. */
+  members: DuplicateGroupMember[];
+}
+
 export interface ReportStore {
   getReport(reportId: string): Promise<ReportRecord | null>;
   /** NEW → PROCESSING via a version conditional write. False = lost race / already claimed. */
   claimProcessing(reportId: string, expectedVersion: number): Promise<boolean>;
   persistClassification(input: PersistClassificationInput): Promise<void>;
   markNeedsVerification(input: MarkNeedsVerificationInput): Promise<void>;
+  /** Recent, nearby reports to score for duplication (§5.4.3, CRIS-31). */
+  findDuplicateCandidates(input: FindDuplicateCandidatesInput): Promise<DuplicateCandidateRecord[]>;
+  /**
+   * Points every member at a duplicate group and appends their DUPLICATE_LINKED
+   * audit events — atomically. Each member is version-checked; `false` means at
+   * least one row moved under us and **nothing** was written (skip, don't retry
+   * — a later report will re-link them).
+   */
+  linkDuplicateGroup(input: LinkDuplicateGroupInput): Promise<boolean>;
 }
 
 export interface DynamoStoreTables {
   report: string;
   reportEvent: string;
+  /**
+   * Name of the `geohashPrefix`/`geohash` GSI (data/resource.ts index #4), used
+   * to gather duplicate candidates. Injected rather than hardcoded: the physical
+   * index name is Amplify's to choose, and a wrong guess is invisible to unit
+   * tests (ADR-0011) — it only fails in a deployed environment.
+   */
+  geoIndex: string;
 }
+
+/**
+ * Safety cap on candidates read from one geohash cell. The GSI sorts by geohash
+ * (spatial), not time, so the recency window can only be applied after reading —
+ * meaning a dense cell is read in full. The cap bounds worst-case cost; hitting
+ * it is logged rather than silently truncating the candidate set.
+ */
+export const DUPLICATE_CANDIDATE_LIMIT = 100;
+
+/**
+ * Ceiling on reports linked in one pass. `TransactWriteItems` accepts 100 items
+ * and each member costs two (the update and its audit append), so 50 members is
+ * the hard limit — not a tuning knob.
+ */
+export const DUPLICATE_GROUP_MAX_MEMBERS = 50;
 
 /** True when a DynamoDB error is a failed conditional (optimistic-lock) write. */
 function isConditionalCheckFailed(err: unknown): boolean {
   return (err as { name?: string })?.name === 'ConditionalCheckFailedException';
+}
+
+/**
+ * True when a transaction was cancelled — the multi-item equivalent of a failed
+ * conditional. A version condition that no longer holds cancels the whole
+ * transaction, so nothing was written.
+ */
+function isTransactionCancelled(err: unknown): boolean {
+  return (err as { name?: string })?.name === 'TransactionCanceledException';
 }
 
 /**
@@ -259,6 +348,105 @@ export function createDynamoStore(
           },
         }),
       );
+    },
+
+    async findDuplicateCandidates(input) {
+      // Queries the map-viewport GSI (data/resource.ts index #4). The sort key is
+      // `geohash`, not time, so recency is a filter rather than a key condition —
+      // `Limit` therefore bounds *items read*, and the caller logs when it binds.
+      const { Items = [] } = await doc.send(
+        new QueryCommand({
+          TableName: tables.report,
+          IndexName: tables.geoIndex,
+          KeyConditionExpression: 'geohashPrefix = :prefix',
+          FilterExpression: 'createdAt >= :since AND id <> :self',
+          ExpressionAttributeValues: {
+            ':prefix': input.geohashPrefix,
+            ':since': input.since,
+            ':self': input.excludeReportId,
+          },
+          Limit: DUPLICATE_CANDIDATE_LIMIT,
+        }),
+      );
+
+      return Items.map((item) => ({
+        reportId: item.id as string,
+        category: (item.category as string) ?? '',
+        lat: (item.lat as number | undefined) ?? null,
+        lng: (item.lng as number | undefined) ?? null,
+        createdAt: (item.createdAt as string | undefined) ?? '',
+        text: (item.text as string | undefined) ?? null,
+        entities: (item.entities as TriageEntities | undefined) ?? null,
+        duplicateGroupId: (item.duplicateGroupId as string | undefined) ?? null,
+        version: (item.version as number | undefined) ?? 0,
+      }));
+    },
+
+    async linkDuplicateGroup(input) {
+      if (input.members.length === 0) return false;
+      if (input.members.length > DUPLICATE_GROUP_MAX_MEMBERS) {
+        // Caller's job to cap — silently dropping members would produce a group
+        // that claims to hold reports it never linked.
+        throw new RangeError(
+          `linkDuplicateGroup: ${input.members.length} members exceeds the ` +
+            `${DUPLICATE_GROUP_MAX_MEMBERS}-member transaction limit`,
+        );
+      }
+
+      const now = new Date().toISOString();
+
+      // One transaction over every member's update *and* its audit append. Two
+      // independent conditional writes could each succeed on the other's peer and
+      // both fail on their own, leaving two reports cross-linked into singleton
+      // groups — permanently, since classification is one-shot. Atomicity makes
+      // that state unrepresentable: the whole grouping lands, or none of it does.
+      const items = input.members.flatMap((member) => {
+        const nextVersion = member.expectedVersion + 1;
+        return [
+          {
+            Update: {
+              TableName: tables.report,
+              Key: { id: member.reportId },
+              UpdateExpression: 'SET duplicateGroupId = :group, #v = :next',
+              ConditionExpression: '#v = :expected',
+              ExpressionAttributeNames: { '#v': 'version' },
+              ExpressionAttributeValues: {
+                ':group': input.duplicateGroupId,
+                ':expected': member.expectedVersion,
+                ':next': nextVersion,
+              },
+            },
+          },
+          {
+            // Immutable audit trail (§5.1): every grouping is explainable after
+            // the fact, and rolls back with the link it justifies.
+            Put: {
+              TableName: tables.reportEvent,
+              Item: {
+                id: randomUUID(),
+                reportId: member.reportId,
+                type: ReportEventType.DUPLICATE_LINKED,
+                actorId: SYSTEM_ACTOR,
+                version: nextVersion,
+                eventId: member.eventId,
+                detail: { duplicateGroupId: input.duplicateGroupId, ...member.detail },
+                createdAt: now,
+              },
+            },
+          },
+        ];
+      });
+
+      try {
+        await doc.send(new TransactWriteCommand({ TransactItems: items }));
+        return true;
+      } catch (err) {
+        // Lost race: at least one report changed between scoring and linking, so
+        // the transaction cancelled and nothing was written. Not an error —
+        // grouping is advisory, and the next report into this cell re-evaluates.
+        if (isTransactionCancelled(err)) return false;
+        throw err;
+      }
     },
   };
 }
