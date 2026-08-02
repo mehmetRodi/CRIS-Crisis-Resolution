@@ -49,3 +49,4 @@ behind the code — essential when refactoring or extending the system.
 | [0031](0031-classify-worker-in-data-stack.md)                 | classify-report worker pinned to the data stack        | Accepted                         |
 | [0032](0032-coordinator-queue-client-side-filters.md)         | Coordinator queue interactive filters (client-side)    | Accepted                         |
 | [0033](0033-coordinator-incident-detail-interface.md)         | Coordinator incident-detail interface (CRIS-23)        | Accepted                         |
+| [0034](0034-gps-map-pin-and-location-hint-input.md)           | GPS, map-pin, and location-hint input (CRIS-16)        | Accepted                         |

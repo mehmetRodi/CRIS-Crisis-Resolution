@@ -9,6 +9,10 @@ vi.mock('../lib/submit-report', () => ({
   newClientRequestId: () => 'test-request-id',
 }));
 
+// jsdom has no WebGL; maplibre-gl throws on import outside a real browser.
+// See __mocks__/maplibre-gl.ts.
+vi.mock('maplibre-gl');
+
 import { ReportForm } from './ReportForm';
 
 const VALID_TEXT = 'A gas leak is filling the stairwell on Elm Street.';
