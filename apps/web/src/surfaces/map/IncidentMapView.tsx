@@ -85,18 +85,27 @@ export default function IncidentMapView({
           Demo tiles — Amazon Location wires in with CRIS-24
         </span>
       ) : null}
-      {failed ? (
-        // Degradation is silent for a non-sighted user — the canvas simply stays
-        // empty — so the notice is announced rather than merely drawn (CRIS-27).
-        <div
-          role="status"
-          className="absolute inset-0 z-[1] flex items-center justify-center bg-slate-50/95 p-4 text-center"
-        >
+      {/* Degradation is silent for a non-sighted user — the canvas simply stays
+          empty — so the notice is announced rather than merely drawn (CRIS-27).
+          The region is mounted unconditionally and only its *content* toggles:
+          a live region inserted at the same moment as its text is commonly
+          missed, because assistive tech has to be watching the region already
+          (ADR-0037). Hidden from layout while empty so it cannot swallow map
+          clicks. */}
+      <div
+        role="status"
+        className={
+          failed
+            ? 'absolute inset-0 z-[1] flex items-center justify-center bg-slate-50/95 p-4 text-center'
+            : 'sr-only pointer-events-none'
+        }
+      >
+        {failed ? (
           <p className="text-sm text-slate-500">
             Map unavailable — base tiles could not be loaded.
           </p>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
     </div>
   );
 }

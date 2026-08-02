@@ -144,6 +144,9 @@ export function LocationPicker({ value, onChange }: LocationPickerProps) {
   }, [value, placeMarker]);
 
   function useMyLocation() {
+    // The control is aria-disabled, not disabled, so a second press still
+    // reaches us while a fix is pending (ADR-0037).
+    if (gpsLoading) return;
     if (!('geolocation' in navigator)) {
       setGpsError('Location services are not available on this device.');
       return;
@@ -169,15 +172,32 @@ export function LocationPicker({ value, onChange }: LocationPickerProps) {
         <button
           type="button"
           onClick={useMyLocation}
-          disabled={gpsLoading}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-900 transition-colors hover:border-blue-400 disabled:opacity-50"
+          // `aria-disabled` rather than `disabled` while the fix is in flight:
+          // disabling the element the person just activated drops focus to the
+          // document body mid-interaction. `useMyLocation` holds the re-entry
+          // guard instead (ADR-0037). `aria-busy` carries the working state that
+          // the label change conveys visually, and the emoji is decoration that
+          // would otherwise be read as "round pushpin" ahead of the name.
+          aria-disabled={gpsLoading}
+          aria-busy={gpsLoading}
+          className={`rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-900 transition-colors ${
+            gpsLoading ? 'opacity-50' : 'hover:border-blue-400'
+          }`}
         >
-          {gpsLoading ? 'Locating…' : '📍 Use my location'}
+          {gpsLoading ? (
+            'Locating…'
+          ) : (
+            <>
+              <span aria-hidden="true">📍</span> Use my location
+            </>
+          )}
         </button>
         {value ? (
           <button
             type="button"
             onClick={() => onChange(null)}
+            // "Clear" alone gives no object; out of context it is unanswerable.
+            aria-label="Clear selected location"
             className="text-xs text-slate-500 underline hover:text-slate-700"
           >
             Clear
@@ -188,15 +208,29 @@ export function LocationPicker({ value, onChange }: LocationPickerProps) {
       <div
         ref={containerRef}
         data-testid="location-map"
+        // Named and given a role so the map is not an anonymous group in the
+        // reading order. Pin-dropping is pointer-only by nature; the GPS button
+        // above and the location-hint field below are the keyboard paths, and
+        // location is never required (ADR-0037).
+        role="application"
+        aria-label="Location map — drop a pin to mark the incident"
         className="h-56 w-full overflow-hidden rounded-xl border border-slate-300"
       />
 
-      <p className="text-xs text-slate-500">
+      {/* Already rendered in both states, so it is a live region that exists
+          *before* its text changes — which is what makes "Use my location"
+          succeeding audible rather than silent (ADR-0037). */}
+      <p role="status" className="text-xs text-slate-500">
         {value
           ? `Pin at ${value.lat.toFixed(5)}, ${value.lng.toFixed(5)} — drag the pin or tap the map to adjust.`
           : 'Tap the map to drop a pin, or use your location above.'}
       </p>
-      {gpsError && <p className="text-xs text-red-600">{gpsError}</p>}
+      {/* Kept mounted for the same reason, and visually hidden while empty so an
+          always-present region costs no layout. A denied permission is the most
+          likely outcome of the button above; it must not fail quietly (CRIS-27). */}
+      <p role="alert" className={gpsError ? 'text-xs text-red-600' : 'sr-only'}>
+        {gpsError}
+      </p>
     </div>
   );
 }

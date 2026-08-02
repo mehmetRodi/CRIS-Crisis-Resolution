@@ -90,11 +90,20 @@ reader. Every interactive surface ships with five guarantees, asserted in a co-l
   with `getByLabelText`, not `getByPlaceholderText`; the query is the assertion.
 - **Convey required state non-visually** — `aria-required`, plus visually-hidden "(required)"
   next to the `aria-hidden` asterisk. A bare `*` announces as "star", or not at all.
-- **An unavailable control says why** — point a disabled button at an explanation with
-  `aria-describedby`; "dimmed" on its own is not a reason.
+- **A gated control says why, and stays reachable to say it** (ADR-0037) — use `aria-disabled`,
+  not `disabled`, and point at the reason with `aria-describedby`. A `disabled` control leaves
+  the tab order, so a description on it is never announced to the keyboard user it was written
+  for. Enforce the gate in the handler, and answer activation with something — moving focus to
+  the field at fault — rather than a silent no-op. Reserve `disabled` for a control that is
+  genuinely inert and has nothing to explain.
 - **Announce state changes** — `role="alert"` for errors, `role="status"` for success and for
-  degraded dependencies (a blank map reads as a working one otherwise).
+  degraded dependencies (a blank map reads as a working one otherwise). **Mount the region
+  before its content** and toggle only the text (ADR-0037): assistive tech reports changes to
+  regions it is already watching, so a region inserted together with its message is commonly
+  missed. Hold an empty region out of the layout with `sr-only`, never `display: none`.
 - **Move focus when a region is replaced** — otherwise focus is stranded on an unmounted node.
+  This is also the announcement mechanism for a wholesale replacement, where a persistent
+  region would have nothing to persist.
 
 Not covered by these tests, and still owed: colour contrast, zoom/reflow, and real
 screen-reader passes against WCAG 2.1 AA. The mobile workspace has no test harness, so its

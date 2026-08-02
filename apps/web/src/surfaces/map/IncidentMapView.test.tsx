@@ -65,13 +65,17 @@ describe('IncidentMapView', () => {
 
   // CRIS-27: a blank canvas is indistinguishable from a working map without
   // sight, so the degraded state has to be announced, not just drawn.
-  it('announces the degraded state when the tile source fails', async () => {
+  it('announces the degraded state when the tile source fails', () => {
     render(<IncidentMapView />);
-    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+
+    // Mounted and empty before anything fails. That is deliberate, not spare
+    // markup: assistive tech only reports a live region it was already
+    // watching, so a region inserted together with its text is missed
+    // (ADR-0037). Asserting emptiness pins the behaviour the fix depends on.
+    expect(screen.getByRole('status')).toBeEmptyDOMElement();
 
     act(() => handlers.get('error')?.());
 
-    const notice = await screen.findByRole('status');
-    expect(notice).toHaveTextContent(/map unavailable/i);
+    expect(screen.getByRole('status')).toHaveTextContent(/map unavailable/i);
   });
 });

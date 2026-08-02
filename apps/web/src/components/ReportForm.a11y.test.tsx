@@ -8,6 +8,12 @@ vi.mock('../lib/submit-report', () => ({
   newClientRequestId: () => 'test-request-id',
 }));
 
+// The form embeds the MapLibre LocationPicker (CRIS-16). Mock the package the
+// same way ReportForm.test.tsx does: the global stub in vitest.setup.ts has no
+// `Marker`, so anything that places a pin would fail there for a reason that has
+// nothing to do with accessibility. See __mocks__/maplibre-gl.ts.
+vi.mock('maplibre-gl');
+
 import { ReportForm } from './ReportForm';
 
 /**
@@ -21,6 +27,11 @@ import { ReportForm } from './ReportForm';
  */
 
 const VALID_TEXT = 'A gas leak is filling the stairwell on Elm Street.';
+
+/** The first chip inside a named `fieldset` group (Category, Urgency). */
+function firstOptionIn(groupName: RegExp) {
+  return screen.getByRole('group', { name: groupName }).querySelector('button');
+}
 
 /** Fills the three required fields, leaving the form submittable. */
 function fillRequired() {
@@ -65,8 +76,45 @@ describe('ReportForm accessibility', () => {
     render(<ReportForm />);
 
     const submit = screen.getByRole('button', { name: /submit report/i });
-    expect(submit).toBeDisabled();
-    expect(submit).toHaveAccessibleDescription(/description, category, and urgency are required/i);
+    expect(submit).toHaveAttribute('aria-disabled', 'true');
+    // Sourced from the shared validator, so it names every outstanding field
+    // rather than restating a fixed sentence that could drift from the gate.
+    expect(submit).toHaveAccessibleDescription(
+      /description must be longer.*choose a category.*choose an urgency/i,
+    );
+  });
+
+  it('keeps the gated submit focusable so its reason can be heard', () => {
+    render(<ReportForm />);
+
+    // The whole point of aria-disabled over disabled (ADR-0037): a `disabled`
+    // button leaves the tab order, and a description on a control that cannot
+    // be focused is never announced to the person it was written for.
+    const submit = screen.getByRole('button', { name: /submit report/i });
+    expect(submit).not.toBeDisabled();
+
+    submit.focus();
+    expect(submit).toHaveFocus();
+  });
+
+  it('sends focus to the first outstanding field when a gated submit is pressed', () => {
+    render(<ReportForm />);
+    const submit = screen.getByRole('button', { name: /submit report/i });
+
+    // Nothing filled in: the description is what is missing.
+    fireEvent.click(submit);
+    expect(screen.getByLabelText(/description/i)).toHaveFocus();
+
+    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: VALID_TEXT } });
+    fireEvent.click(submit);
+    // Category and urgency are chip groups, so focus enters the group at its
+    // first option. Queried through the group rather than by chip name, so the
+    // assertion does not encode the order of the Category enum.
+    expect(firstOptionIn(/category/i)).toHaveFocus();
+
+    fireEvent.click(screen.getByRole('button', { name: /medical/i }));
+    fireEvent.click(submit);
+    expect(firstOptionIn(/urgency/i)).toHaveFocus();
   });
 
   it('drops the blocked-submit explanation once the form is complete', () => {
@@ -74,8 +122,16 @@ describe('ReportForm accessibility', () => {
     fillRequired();
 
     const submit = screen.getByRole('button', { name: /submit report/i });
-    expect(submit).toBeEnabled();
+    expect(submit).toHaveAttribute('aria-disabled', 'false');
     expect(submit).toHaveAccessibleDescription('');
+  });
+
+  it('names the location picker as a group rather than by adjacent text', () => {
+    render(<ReportForm />);
+
+    // The picker is several controls plus a map; without a legend its heading is
+    // loose text that a screen reader has no reason to tie to them (CRIS-27).
+    expect(screen.getByRole('group', { name: /location/i })).toBeInTheDocument();
   });
 
   it('gives the photo control a name that reflects the current selection', () => {
