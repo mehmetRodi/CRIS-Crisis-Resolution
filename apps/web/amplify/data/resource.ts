@@ -1,5 +1,6 @@
 import { a, defineData, type ClientSchema } from '@aws-amplify/backend';
 import { submitReport as submitReportFn } from '../functions/submit-report/resource';
+import { createMediaUploadUrl as createMediaUploadUrlFn } from '../functions/create-media-upload-url/resource';
 import { transitionReport as transitionReportFn } from '../functions/transition-report/resource';
 import { publishReportUpdate as publishReportUpdateFn } from '../functions/publish-report-update/resource';
 import { classifyReport as classifyReportFn } from '../functions/classify-report/resource';
@@ -426,6 +427,36 @@ const schema = a
       })
       .returns(a.ref('Report'))
       .handler(a.handler.function(submitReportFn))
+      .authorization((allow) => [
+        allow.authenticated(),
+        allow.authenticated('identityPool'),
+        allow.guest(),
+      ]),
+
+    /**
+     * CRIS-17 — issues a presigned S3 POST for a citizen's report photo,
+     * before `submitReport` has ever run (no report id exists yet at photo-pick
+     * time). Scoped by `clientRequestId`, the same idempotency token used for
+     * `submitReport` (§5.4.4) — stable across retries, already minted
+     * client-side. Same three-way auth as `submitReport` (ADR-0024): guests
+     * and signed-in citizens alike pick photos before any auth state matters.
+     * Content-type/size limits are enforced by the presigned POST policy
+     * itself (`createMediaUploadUrl` handler), not just client-side.
+     */
+    createMediaUploadUrl: a
+      .mutation()
+      .arguments({
+        clientRequestId: a.string().required(),
+        contentType: a.string().required(),
+      })
+      .returns(
+        a.customType({
+          url: a.string().required(),
+          fields: a.json().required(),
+          key: a.string().required(),
+        }),
+      )
+      .handler(a.handler.function(createMediaUploadUrlFn))
       .authorization((allow) => [
         allow.authenticated(),
         allow.authenticated('identityPool'),

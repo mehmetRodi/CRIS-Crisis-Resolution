@@ -5,9 +5,10 @@ import { client } from './amplify';
 
 /**
  * Client side of the CRIS-9 write path. Calls the guarded `submitReport`
- * mutation as a guest (identity pool). Media upload is CRIS-17 — the photo
- * stays on-device for now. Never log the submission: it can carry contact PII
- * (design doc §5.4.1, §5.6).
+ * mutation as a guest (identity pool). `submission.mediaKeys` are already-
+ * uploaded S3 keys from the presigned-upload path (CRIS-17,
+ * `lib/media-upload.ts`) — never raw file bytes. Never log the submission: it
+ * can carry contact PII (design doc §5.4.1, §5.6).
  */
 
 /**
@@ -34,6 +35,7 @@ export async function submitReport(
     clientRequestId,
     isAnonymous: submission.anonymous,
     reporterContact: submission.contact,
+    mediaKeys: submission.mediaKeys,
     lat: submission.lat,
     lng: submission.lng,
   });

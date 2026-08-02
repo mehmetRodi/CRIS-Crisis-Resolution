@@ -92,6 +92,16 @@ describe('toReportSubmission', () => {
     expect(submission.contact).toBe('reporter@example.org');
   });
 
+  it('defaults mediaKeys to an empty array when omitted', () => {
+    const submission = toReportSubmission(submittableDraft());
+    expect(submission.mediaKeys).toEqual([]);
+  });
+
+  it('passes through the provided mediaKeys', () => {
+    const submission = toReportSubmission(submittableDraft(), ['reports/abc/photo.jpg']);
+    expect(submission.mediaKeys).toEqual(['reports/abc/photo.jpg']);
+  });
+
   it('maps a resolved location to lat/lng, or null when uncaptured', () => {
     const withLocation = toReportSubmission(
       submittableDraft({ location: { lat: 41.0082, lng: 28.9784 } }),

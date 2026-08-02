@@ -23,9 +23,10 @@ Streams → SQS → Lambda → Bedrock triage pipeline, deterministic scoring, d
 MapLibre base maps, CI/CD, and observability.
 
 Important deferred seams are listed in [`docs/architecture.md`](docs/architecture.md): media
-upload, Amazon Location map tiles, custom subscriptions (the worker-to-AppSync publish call is
-wired in CRIS-19, but nothing subscribes yet), deduplication, citizen alerts, interactive
-coordinator workflows, and security hardening. Do not infer the state of a deployed
+quarantine/signed delivery (presigned upload itself landed in CRIS-17), Amazon Location map
+tiles, custom subscriptions (the worker-to-AppSync publish call is wired in CRIS-19, but
+nothing subscribes yet), citizen alerts, interactive coordinator workflows, and security
+hardening. Do not infer the state of a deployed
 environment from the source tree.
 
 ## Repository map

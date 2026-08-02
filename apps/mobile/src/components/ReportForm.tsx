@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -21,6 +21,7 @@ import {
 
 import { LocationPicker } from './LocationPicker';
 import { colors, radii } from '../theme';
+import { uploadReportMedia } from '../lib/media-upload';
 import { newClientRequestId, submitReport } from '../lib/submit-report';
 
 const CATEGORY_OPTIONS = Object.values(Category);
@@ -39,22 +40,91 @@ interface ReportFormProps {
 export function ReportForm({ onMapInteractionStart, onMapInteractionEnd }: ReportFormProps) {
   const [draft, setDraft] = useState(createEmptyReportDraft());
   const [photo, setPhoto] = useState<ImagePicker.ImagePickerAsset | null>(null);
+  const [mediaKey, setMediaKey] = useState<string | null>(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+  // Set on a submit that went out without the photo the user had picked, so the
+  // confirmation can say so rather than claiming an unqualified success.
+  const [photoDropped, setPhotoDropped] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Idempotency token (§5.4.4): stable across retries of the same report so a
-  // flaky network can't create duplicates; re-minted only after success.
+  // flaky network can't create duplicates; re-minted only after success. Also
+  // scopes the media upload's S3 key (CRIS-17) — a photo is picked before a
+  // report exists, so there's no reportId yet to key it by.
   const [clientRequestId, setClientRequestId] = useState(newClientRequestId);
+  // Monotonic upload generation. Only the newest pick may write photo state, so
+  // a slow upload that resolves after a newer pick — or after the form has been
+  // reset by a successful submit — cannot attach its key to the wrong report.
+  const uploadSeq = useRef(0);
+  // Guards the window while the OS picker is open, which `photoUploading` does
+  // not cover (it only flips once an asset has come back).
+  const pickerOpen = useRef(false);
 
-  const canSubmit = isReportDraftSubmittable(draft) && !submitting;
+  const canSubmit = isReportDraftSubmittable(draft) && !submitting && !photoUploading;
+
+  // Picking is also blocked while a submit is in flight: the success path resets
+  // the draft and re-mints `clientRequestId`, so a photo picked during that
+  // window would upload against a report that no longer exists.
+  const photoBusy = photoUploading || submitting;
+
+  /** Announced photo state. Empty when there is nothing to say. */
+  const photoName = photo?.fileName ?? null;
+  const photoStatus = photoUploading
+    ? `Uploading ${photoName ?? 'photo'}.`
+    : photoError
+      ? `Photo upload failed. ${photoError} You can still submit the report without it.`
+      : mediaKey
+        ? `Photo ${photoName ?? ''} attached.`
+        : '';
+
+  /** Control name, carrying the outcome the visible text can't convey. */
+  const photoLabel = !photo
+    ? 'Add a photo (optional)'
+    : photoUploading
+      ? `Uploading ${photoName ?? 'photo'}`
+      : photoError
+        ? `Retry photo upload, ${photoName ?? 'photo'} failed to upload`
+        : `Change photo, ${photoName ?? 'photo'} attached`;
 
   async function pickPhoto() {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      quality: 0.8,
-    });
-    if (!result.canceled) {
-      setPhoto(result.assets[0] ?? null);
+    // The picker is awaited *before* `photoUploading` flips, so the control stays
+    // pressable for as long as the picker takes to appear. Guard re-entry here
+    // rather than relying on the disabled state to sequence taps.
+    if (photoBusy || pickerOpen.current) return;
+    pickerOpen.current = true;
+    let result: ImagePicker.ImagePickerResult;
+    try {
+      result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        quality: 0.8,
+      });
+    } finally {
+      pickerOpen.current = false;
+    }
+    if (result.canceled) return;
+
+    // Claim a generation before the upload; the guards below drop any result a
+    // newer pick — or a completed submit — has since superseded.
+    const seq = ++uploadSeq.current;
+
+    const asset = result.assets[0] ?? null;
+    setPhoto(asset);
+    setMediaKey(null);
+    setPhotoError(null);
+    if (!asset) return;
+
+    setPhotoUploading(true);
+    try {
+      const key = await uploadReportMedia(asset, clientRequestId);
+      if (seq !== uploadSeq.current) return;
+      setMediaKey(key);
+    } catch (e) {
+      if (seq !== uploadSeq.current) return;
+      setPhotoError(e instanceof Error ? e.message : 'Could not upload the photo.');
+    } finally {
+      if (seq === uploadSeq.current) setPhotoUploading(false);
     }
   }
 
@@ -64,11 +134,20 @@ export function ReportForm({ onMapInteractionStart, onMapInteractionEnd }: Repor
     setError(null);
 
     try {
-      // TODO(CRIS-17): upload the photo via presigned S3 and pass mediaKeys.
-      await submitReport(toReportSubmission(draft), clientRequestId);
+      await submitReport(toReportSubmission(draft, mediaKey ? [mediaKey] : []), clientRequestId);
       setSubmitted(true);
+      // Tell the user their photo didn't make it, rather than letting an
+      // unqualified "Report Submitted" imply it did.
+      setPhotoDropped(photo !== null && mediaKey === null);
       setDraft(createEmptyReportDraft());
+      // Retire any upload still in flight along with the report it belonged to:
+      // its key is scoped to the `clientRequestId` we are about to replace, so
+      // letting it land would attach this report's photo to the next one.
+      uploadSeq.current++;
       setPhoto(null);
+      setMediaKey(null);
+      setPhotoError(null);
+      setPhotoUploading(false);
       setClientRequestId(newClientRequestId());
     } catch (e) {
       const message = e instanceof Error && e.message ? e.message : null;
@@ -88,6 +167,11 @@ export function ReportForm({ onMapInteractionStart, onMapInteractionEnd }: Repor
         <Text style={styles.successBody}>
           Thank you for your report. Emergency coordinators will review it shortly.
         </Text>
+        {photoDropped && (
+          <Text style={styles.successCaveat}>
+            Your photo could not be uploaded, so the report was sent without it.
+          </Text>
+        )}
         <Pressable onPress={() => setSubmitted(false)} hitSlop={8}>
           <Text style={styles.successAgain}>Submit another report</Text>
         </Pressable>
@@ -183,16 +267,36 @@ export function ReportForm({ onMapInteractionStart, onMapInteractionEnd }: Repor
         <Text style={styles.label}>Add Photo (Optional)</Text>
         <Pressable
           onPress={pickPhoto}
-          style={[styles.photoBox, photo != null && styles.photoBoxFilled]}
+          // Not `disabled`: that drops the control out of the accessibility tree
+          // mid-interaction (ADR-0037's reasoning applies equally to RN). The
+          // busy/disabled state is reported instead, and `pickPhoto` guards
+          // re-entry itself.
+          accessibilityState={{ disabled: photoBusy, busy: photoUploading }}
+          accessibilityLabel={photoLabel}
+          style={[
+            styles.photoBox,
+            photoBusy && styles.photoBoxBusy,
+            mediaKey != null && styles.photoBoxFilled,
+            photoError != null && styles.photoBoxError,
+          ]}
           accessibilityRole="button"
         >
-          <Text style={styles.photoIcon}>📷</Text>
+          {photoUploading ? (
+            <ActivityIndicator color={colors.primary} />
+          ) : (
+            <Text style={styles.photoIcon}>📷</Text>
+          )}
           {photo ? (
             <>
-              <Text style={styles.photoName} numberOfLines={1}>
+              <Text
+                style={[styles.photoName, mediaKey != null && styles.photoNameUploaded]}
+                numberOfLines={1}
+              >
                 {photo.fileName ?? 'Photo attached'}
               </Text>
-              <Text style={styles.photoHint}>Tap to change photo</Text>
+              <Text style={[styles.photoHint, photoError != null && styles.photoHintError]}>
+                {photoUploading ? 'Uploading…' : (photoError ?? 'Tap to change photo')}
+              </Text>
             </>
           ) : (
             <>
@@ -201,6 +305,16 @@ export function ReportForm({ onMapInteractionStart, onMapInteractionEnd }: Repor
             </>
           )}
         </Pressable>
+        {/* Always mounted, never conditionally rendered: a live region that
+            appears at the same moment as its text is frequently missed. Carries
+            the upload outcome, which `accessibilityLabel` hides from the box. */}
+        <Text
+          accessibilityLiveRegion="polite"
+          style={styles.srOnly}
+          importantForAccessibility={photoStatus ? 'yes' : 'no-hide-descendants'}
+        >
+          {photoStatus}
+        </Text>
       </View>
 
       {/* Urgency */}
@@ -367,9 +481,16 @@ const styles = StyleSheet.create({
     borderRadius: radii.lg,
     padding: 20,
   },
+  photoBoxBusy: {
+    opacity: 0.7,
+  },
   photoBoxFilled: {
     borderColor: colors.successAccent,
     backgroundColor: colors.successBg,
+  },
+  photoBoxError: {
+    borderColor: colors.errorBorder,
+    backgroundColor: colors.errorBg,
   },
   photoIcon: {
     fontSize: 28,
@@ -382,12 +503,18 @@ const styles = StyleSheet.create({
   photoName: {
     fontSize: 14,
     fontWeight: '500',
-    color: colors.successAccent,
+    color: colors.textPrimary,
     maxWidth: '90%',
+  },
+  photoNameUploaded: {
+    color: colors.successAccent,
   },
   photoHint: {
     fontSize: 12,
     color: colors.textMuted,
+  },
+  photoHintError: {
+    color: colors.errorText,
   },
   anonymousRow: {
     flexDirection: 'row',
@@ -469,6 +596,24 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 14,
     color: colors.successText,
+  },
+  successCaveat: {
+    textAlign: 'center',
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.successText,
+  },
+  /**
+   * Visually hidden but still in the accessibility tree — the RN counterpart of
+   * web's `sr-only`. `display: 'none'` or zero opacity would take it out of the
+   * tree entirely and silence the live region.
+   */
+  srOnly: {
+    position: 'absolute',
+    width: 1,
+    height: 1,
+    overflow: 'hidden',
+    opacity: 0,
   },
   successAgain: {
     marginTop: 8,

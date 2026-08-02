@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
+  ALLOWED_MEDIA_CONTENT_TYPES,
   Category,
   LOCATION_HINT_MAX_LENGTH,
   REPORT_TEXT_MAX_LENGTH,
@@ -10,6 +11,7 @@ import {
 } from '@crisismap/shared';
 import type { ReportDraft } from '@crisismap/shared';
 
+import { uploadReportMedia } from '../lib/media-upload';
 import { LocationPicker } from './LocationPicker';
 import { newClientRequestId, submitReport } from '../lib/submit-report';
 
@@ -71,14 +73,26 @@ const inputBase =
 export function ReportForm() {
   const [draft, setDraft] = useState(createEmptyReportDraft());
   const [photoName, setPhotoName] = useState<string | null>(null);
+  const [mediaKey, setMediaKey] = useState<string | null>(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
+  // Set on a submit that went out without the photo the user had picked, so the
+  // confirmation can say so rather than claiming an unqualified success.
+  const [photoDropped, setPhotoDropped] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Idempotency token (§5.4.4): stable across retries of the same report so a
-  // flaky network can't create duplicates; re-minted only after success.
+  // flaky network can't create duplicates; re-minted only after success. Also
+  // scopes the media upload's S3 key (CRIS-17) — a photo is picked before a
+  // report exists, so there's no reportId yet to key it by.
   const [clientRequestId, setClientRequestId] = useState(newClientRequestId);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const confirmationRef = useRef<HTMLHeadingElement>(null);
+  // Monotonic upload generation. Only the newest pick may write photo state, so
+  // a slow upload that resolves after a newer pick — or after the form has been
+  // reset by a successful submit — cannot attach its key to the wrong report.
+  const uploadSeq = useRef(0);
   // Focus targets for the blocked-submit path below. The two enum fields are
   // chip groups, so the fieldset is the ref and the first chip takes focus.
   const textRef = useRef<HTMLTextAreaElement>(null);
@@ -88,14 +102,45 @@ export function ReportForm() {
 
   const errors = validateReportDraft(draft);
   const outstanding = FIELD_ORDER.filter((field) => errors[field]);
-  const canSubmit = outstanding.length === 0 && !submitting;
+  const canSubmit = outstanding.length === 0 && !submitting && !photoUploading;
 
   /**
    * What blocks submission, in form order. Sourced from `validateReportDraft`
    * rather than restated here, so the announced reason cannot drift from the
    * rule that actually gates the submit (CRIS-27).
+   *
+   * An in-flight photo upload (CRIS-17) also gates the submit but is not a
+   * draft-validation failure, so it is appended separately. Without it, an
+   * upload-blocked submit would be an `aria-disabled` button with no reason to
+   * announce and no field to focus — the exact dead end ADR-0037 rules out.
    */
-  const blockedReason = outstanding.map((field) => errors[field]).join(' ');
+  const blockedReason = [
+    ...outstanding.map((field) => errors[field]),
+    ...(photoUploading ? ['Wait for the photo to finish uploading.'] : []),
+  ].join(' ');
+
+  // Picking is also blocked while a submit is in flight: the success path resets
+  // the draft and re-mints `clientRequestId`, so a photo picked during that
+  // window would upload against a report that no longer exists.
+  const photoBusy = photoUploading || submitting;
+
+  /** Announced photo state. Empty when there is nothing to say. */
+  const photoStatus = photoUploading
+    ? `Uploading ${photoName ?? 'photo'}.`
+    : photoError
+      ? `Photo upload failed. ${photoError} You can still submit the report without it.`
+      : mediaKey
+        ? `Photo ${photoName ?? ''} attached.`
+        : '';
+
+  /** Button name, carrying the outcome the visible text can't convey. */
+  const photoLabel = !photoName
+    ? 'Add a photo (optional)'
+    : photoUploading
+      ? `Uploading ${photoName}`
+      : photoError
+        ? `Retry photo upload, ${photoName} failed to upload`
+        : `Change photo, ${photoName} attached`;
 
   /** Sends focus to the first field still holding submission up. */
   function focusFirstOutstandingField() {
@@ -113,11 +158,45 @@ export function ReportForm() {
     if (submitted) confirmationRef.current?.focus();
   }, [submitted]);
 
-  function pickPhoto(e: React.ChangeEvent<HTMLInputElement>) {
-    // TODO(CRIS-17): upload via presigned S3 and pass mediaKeys. For now the
-    // file is not read or uploaded — we only surface its name, matching mobile.
-    const file = e.target.files?.[0];
-    setPhotoName(file ? file.name : null);
+  async function pickPhoto(e: React.ChangeEvent<HTMLInputElement>) {
+    const input = e.target;
+    // The button already refuses to open the picker while busy, but the input is
+    // not `disabled` (that would take it out of the tree), so guard here too —
+    // this is the check that actually holds, and it mirrors mobile.
+    if (photoBusy) {
+      input.value = '';
+      return;
+    }
+    const file = input.files?.[0];
+    // Clear the input straight away. Re-selecting the SAME file leaves `value`
+    // unchanged, so the browser fires no `change` event — meaning the retry the
+    // failure message just asked the user to perform would silently do nothing.
+    input.value = '';
+
+    // Claim a generation before the first await; the guards below drop any
+    // result that a newer pick (or a completed submit) has since superseded.
+    const seq = ++uploadSeq.current;
+
+    if (!file) {
+      setPhotoName(null);
+      setMediaKey(null);
+      setPhotoError(null);
+      return;
+    }
+    setPhotoName(file.name);
+    setMediaKey(null);
+    setPhotoError(null);
+    setPhotoUploading(true);
+    try {
+      const key = await uploadReportMedia(file, clientRequestId);
+      if (seq !== uploadSeq.current) return;
+      setMediaKey(key);
+    } catch (err) {
+      if (seq !== uploadSeq.current) return;
+      setPhotoError(err instanceof Error ? err.message : 'Could not upload the photo.');
+    } finally {
+      if (seq === uploadSeq.current) setPhotoUploading(false);
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -135,10 +214,20 @@ export function ReportForm() {
     setError(null);
 
     try {
-      await submitReport(toReportSubmission(draft), clientRequestId);
+      await submitReport(toReportSubmission(draft, mediaKey ? [mediaKey] : []), clientRequestId);
       setSubmitted(true);
+      // Tell the user their photo didn't make it, rather than letting an
+      // unqualified "Report Submitted" imply it did.
+      setPhotoDropped(photoName !== null && mediaKey === null);
       setDraft(createEmptyReportDraft());
+      // Retire any upload still in flight along with the report it belonged to:
+      // its key is scoped to the `clientRequestId` we are about to replace, so
+      // letting it land would attach this report's photo to the next one.
+      uploadSeq.current++;
       setPhotoName(null);
+      setMediaKey(null);
+      setPhotoError(null);
+      setPhotoUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
       setClientRequestId(newClientRequestId());
     } catch (err) {
@@ -167,6 +256,11 @@ export function ReportForm() {
         <p className="text-sm text-green-800">
           Thank you for your report. Emergency coordinators will review it shortly.
         </p>
+        {photoDropped && (
+          <p className="text-sm font-medium text-green-900">
+            Your photo could not be uploaded, so the report was sent without it.
+          </p>
+        )}
         <button
           type="button"
           onClick={() => setSubmitted(false)}
@@ -281,10 +375,28 @@ export function ReportForm() {
           // The visible copy is split across three spans and an emoji, which
           // concatenates into a noisy name. State it once, and reflect the
           // current selection so the control is not just "button" (CRIS-27).
-          aria-label={photoName ? `Change photo, ${photoName} selected` : 'Add a photo (optional)'}
-          onClick={() => fileInputRef.current?.click()}
+          // Because this label overrides the element's content, it also has to
+          // carry the upload outcome — otherwise the only mention of a failure
+          // is text the label hides (see the live region below).
+          aria-label={photoLabel}
+          // `aria-disabled`/`aria-busy` rather than `disabled` (ADR-0037): a
+          // disabled button is blurred to the document body the instant the
+          // upload starts, dropping the user out of the form mid-interaction.
+          // The gate is the re-entry guard in the handler instead.
+          aria-disabled={photoBusy}
+          aria-busy={photoUploading}
+          onClick={() => {
+            if (photoBusy) return;
+            fileInputRef.current?.click();
+          }}
           className={`flex flex-col items-center gap-0.5 rounded-xl border-2 border-dashed p-5 text-center transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-            photoName ? 'border-green-600 bg-green-50' : 'border-slate-300 hover:border-blue-400'
+            photoBusy ? 'opacity-70' : ''
+          } ${
+            mediaKey
+              ? 'border-green-600 bg-green-50'
+              : photoError
+                ? 'border-red-300 bg-red-50'
+                : 'border-slate-300 hover:border-blue-400'
           }`}
         >
           <span aria-hidden="true" className="text-3xl">
@@ -292,10 +404,19 @@ export function ReportForm() {
           </span>
           {photoName ? (
             <>
-              <span className="max-w-[90%] truncate text-sm font-medium text-green-600">
+              <span
+                className={`max-w-[90%] truncate text-sm font-medium ${mediaKey ? 'text-green-600' : 'text-slate-900'}`}
+              >
                 {photoName}
               </span>
-              <span className="text-xs text-slate-400">Click to change photo</span>
+              {/* Red, not the muted gray used for the idle hint — a failure must
+                  not look identical to "Click to change photo" (mobile already
+                  colours this; web was the odd one out). */}
+              <span
+                className={`text-xs ${photoError ? 'font-medium text-red-700' : 'text-slate-400'}`}
+              >
+                {photoUploading ? 'Uploading…' : photoError ? photoError : 'Click to change photo'}
+              </span>
             </>
           ) : (
             <>
@@ -306,10 +427,22 @@ export function ReportForm() {
             </>
           )}
         </button>
+        {/* Persistently mounted, never conditionally rendered (ADR-0037): a live
+            region that appears at the same moment as its text is frequently
+            missed. All upload state is announced here because the button's
+            `aria-label` hides its own content from assistive tech. */}
+        {/* Named because the form carries more than one live region (the
+            LocationPicker has its own) — the name is what lets a user, and a
+            test, tell them apart. */}
+        <span role="status" aria-label="Photo upload status" className="sr-only">
+          {photoStatus}
+        </span>
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/*"
+          // Narrower than `image/*`: the presigned policy only accepts these
+          // three, so offering HEIC or GIF invites a rejection after the fact.
+          accept={ALLOWED_MEDIA_CONTENT_TYPES.join(',')}
           className="hidden"
           onChange={pickPhoto}
         />
@@ -392,17 +525,17 @@ export function ReportForm() {
         // reached by the keyboard user who most needs it (ADR-0037). The gate
         // itself lives in `handleSubmit`.
         aria-disabled={!canSubmit}
-        // Keyed to the outstanding fields, not to `canSubmit` — while submitting
+        // Keyed to the blocking reason, not to `canSubmit` — while submitting
         // there is nothing outstanding to explain, and pointing at an empty
         // element would give the button a description that says nothing.
-        aria-describedby={outstanding.length > 0 ? 'report-submit-requirements' : undefined}
+        aria-describedby={blockedReason ? 'report-submit-requirements' : undefined}
         className={`flex items-center justify-center rounded-xl bg-blue-600 px-4 py-3.5 text-[15px] font-semibold text-white transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${
           canSubmit ? 'hover:bg-blue-700' : 'opacity-50'
         }`}
       >
         {submitting ? 'Submitting…' : 'Submit Report'}
       </button>
-      {outstanding.length > 0 && (
+      {blockedReason && (
         <span id="report-submit-requirements" className="sr-only">
           {blockedReason}
         </span>
