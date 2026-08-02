@@ -51,9 +51,13 @@ export default function SignupPage() {
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           <div className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700">Email</label>
+              <label htmlFor="signup-email" className="block text-sm font-medium text-slate-700">
+                Email
+              </label>
               <input
+                id="signup-email"
                 type="email"
+                autoComplete="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
@@ -63,21 +67,38 @@ export default function SignupPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700">Password</label>
+              <label htmlFor="signup-password" className="block text-sm font-medium text-slate-700">
+                Password
+              </label>
               <input
+                id="signup-password"
                 type="password"
+                autoComplete="new-password"
+                // The rule hint is the field's description, not loose prose — screen
+                // readers announce it with the field so the constraint is known
+                // *before* a failed submit (CRIS-27).
+                aria-describedby="signup-password-hint"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 className="mt-1 w-full rounded-lg border border-slate-300 px-4 py-2.5 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="Minimum 8 characters"
               />
-              <p className="mt-1 text-xs text-slate-500">{PASSWORD_RULE_HINT}</p>
+              <p id="signup-password-hint" className="mt-1 text-xs text-slate-500">
+                {PASSWORD_RULE_HINT}
+              </p>
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700">Confirm Password</label>
+              <label
+                htmlFor="signup-confirm-password"
+                className="block text-sm font-medium text-slate-700"
+              >
+                Confirm Password
+              </label>
               <input
+                id="signup-confirm-password"
                 type="password"
+                autoComplete="new-password"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 required
@@ -88,7 +109,10 @@ export default function SignupPage() {
           </div>
 
           {error && (
-            <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+            <div
+              role="alert"
+              className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700"
+            >
               {error}
             </div>
           )}

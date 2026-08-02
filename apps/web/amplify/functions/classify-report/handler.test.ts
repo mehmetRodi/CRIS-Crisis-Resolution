@@ -51,6 +51,10 @@ function fakeStore(report: ReportRecord | null, claim = true) {
     markNeedsVerification: vi.fn(async (input) => {
       flagged.push(input);
     }),
+    // Dedup (CRIS-31) is exercised in dedupe.test.ts; here it finds nothing, so
+    // these tests assert the classification path unchanged.
+    findDuplicateCandidates: vi.fn(async () => []),
+    linkDuplicateGroup: vi.fn(async () => true),
   };
   return { store, persisted, flagged };
 }

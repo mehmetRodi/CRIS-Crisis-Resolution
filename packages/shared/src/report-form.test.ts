@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { Category, Urgency } from './domain';
 import {
+  LOCATION_HINT_MAX_LENGTH,
   REPORT_TEXT_MAX_LENGTH,
   REPORT_TEXT_MIN_LENGTH,
   createEmptyReportDraft,
@@ -49,6 +50,17 @@ describe('validateReportDraft', () => {
   it('treats subcategory and contact as optional', () => {
     expect(validateReportDraft(submittableDraft({ subcategory: '', contact: '' }))).toEqual({});
   });
+
+  it('treats location and locationHint as optional', () => {
+    expect(validateReportDraft(submittableDraft({ location: null, locationHint: '' }))).toEqual({});
+  });
+
+  it('rejects a location hint above the maximum length', () => {
+    const oversized = 'x'.repeat(LOCATION_HINT_MAX_LENGTH + 1);
+    expect(validateReportDraft(submittableDraft({ locationHint: oversized }))).toHaveProperty(
+      'locationHint',
+    );
+  });
 });
 
 describe('toReportSubmission', () => {
@@ -89,6 +101,28 @@ describe('toReportSubmission', () => {
     const submission = toReportSubmission(submittableDraft(), ['reports/abc/photo.jpg']);
     expect(submission.mediaKeys).toEqual(['reports/abc/photo.jpg']);
   });
+
+  it('maps a resolved location to lat/lng, or null when uncaptured', () => {
+    const withLocation = toReportSubmission(
+      submittableDraft({ location: { lat: 41.0082, lng: 28.9784 } }),
+    );
+    expect(withLocation.lat).toBe(41.0082);
+    expect(withLocation.lng).toBe(28.9784);
+
+    const without = toReportSubmission(submittableDraft({ location: null }));
+    expect(without.lat).toBeNull();
+    expect(without.lng).toBeNull();
+  });
+
+  it('trims the location hint and normalizes blank to null', () => {
+    const hinted = toReportSubmission(
+      submittableDraft({ locationHint: '  near the blue bridge  ' }),
+    );
+    expect(hinted.locationHint).toBe('near the blue bridge');
+
+    const blank = toReportSubmission(submittableDraft({ locationHint: '   ' }));
+    expect(blank.locationHint).toBeNull();
+  });
 });
 
 describe('toSubmissionText', () => {
@@ -103,5 +137,15 @@ describe('toSubmissionText', () => {
   it('includes the supply hint only when a subcategory was given', () => {
     const text = toSubmissionText(toReportSubmission(submittableDraft({ subcategory: 'Water' })));
     expect(text).toContain('supply: Water');
+  });
+
+  it('includes the location hint only when one was given', () => {
+    const withHint = toSubmissionText(
+      toReportSubmission(submittableDraft({ locationHint: 'near the blue bridge' })),
+    );
+    expect(withHint).toContain('location hint: near the blue bridge');
+
+    const without = toSubmissionText(toReportSubmission(submittableDraft()));
+    expect(without).not.toContain('location hint');
   });
 });

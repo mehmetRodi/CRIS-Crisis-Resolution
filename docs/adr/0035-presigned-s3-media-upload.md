@@ -1,4 +1,4 @@
-# ADR-0034: Presigned S3 media upload (CRIS-17)
+# ADR-0035: Presigned S3 media upload (CRIS-17)
 
 - **Status:** Accepted
 - **Date:** 2026-07-24

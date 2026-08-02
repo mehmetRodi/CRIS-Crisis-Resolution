@@ -34,10 +34,13 @@ function renderLogin() {
       </AuthProvider>
     </MemoryRouter>,
   );
-  fireEvent.change(screen.getByPlaceholderText(/enter your email/i), {
+  // By label, not by placeholder: a placeholder is a hint, not an accessible
+  // name, so querying it would keep passing if the association were dropped
+  // (CRIS-27, ADR-0036).
+  fireEvent.change(screen.getByLabelText(/^email$/i), {
     target: { value: 'citizen@example.com' },
   });
-  fireEvent.change(screen.getByPlaceholderText(/enter your password/i), {
+  fireEvent.change(screen.getByLabelText(/^password$/i), {
     target: { value: 'Passw0rd' },
   });
   fireEvent.click(screen.getByRole('button', { name: /sign in/i }));

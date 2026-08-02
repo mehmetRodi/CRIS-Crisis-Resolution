@@ -11,6 +11,7 @@ import { createBedrockClassifier } from './bedrock';
 import { createBedrockTriageAgent, createTriageAgent, type TriageAgent } from './agent';
 import { createAmazonLocationGeocoder, createNullGeocoder, type Geocoder } from './geocode';
 import { createDynamoStore, type ReportStore } from './store';
+import { resolveDuplicates, type DedupeInput, type DedupeResult } from './dedupe';
 import type { Publisher } from './publish';
 
 /**
@@ -53,6 +54,12 @@ export interface WorkerDeps {
   publisher: Publisher;
   /** Structured-log sink; defaults to console. Override in tests. */
   log?: (entry: Record<string, unknown>) => void;
+  /**
+   * Duplicate grouping (§5.4.3, CRIS-31). Defaults to the real
+   * {@link resolveDuplicates} over `store`; overridden in tests. Not optional in
+   * behaviour — only in wiring, so production can never forget to enable it.
+   */
+  dedupe?: (input: DedupeInput) => Promise<DedupeResult>;
 }
 
 /** Parses the SQS body into a validated message, or null if malformed (poison). */
@@ -98,6 +105,31 @@ async function publishUpdate(
     log({
       event: 'publish.failed',
       reportId: report.reportId,
+      reason: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/**
+ * Group this report with near-duplicates (§5.4.3, CRIS-31) — best-effort, for
+ * the same reason as {@link publishUpdate}: the classification is already
+ * durable, and grouping is an advisory pointer for coordinators. A dedup failure
+ * must not re-drive the SQS message and reclassify an already-classified report,
+ * so it is logged and swallowed.
+ */
+async function groupDuplicates(
+  deps: WorkerDeps,
+  input: DedupeInput,
+  log: (entry: Record<string, unknown>) => void,
+): Promise<void> {
+  const dedupe =
+    deps.dedupe ?? ((i: DedupeInput) => resolveDuplicates({ store: deps.store, log }, i));
+  try {
+    await dedupe(input);
+  } catch (err) {
+    log({
+      event: 'dedupe.failed',
+      reportId: input.reportId,
       reason: err instanceof Error ? err.message : String(err),
     });
   }
@@ -209,6 +241,28 @@ export async function processRecord(
     streamEventId,
   });
 
+  // Conservative duplicate grouping (§5.4.3, CRIS-31). After the durable write,
+  // so a dedup failure can never cost a classification.
+  await groupDuplicates(
+    deps,
+    {
+      reportId,
+      version: claimedVersion + 1,
+      geohashPrefix: location?.geohashPrefix,
+      now: new Date().toISOString(),
+      streamEventId,
+      subject: {
+        category: classification.category,
+        lat: location?.lat,
+        lng: location?.lng,
+        createdAt: report.createdAt ?? new Date().toISOString(),
+        text: report.text,
+        entities: classification.entities,
+      },
+    },
+    log,
+  );
+
   // Fan the redacted result out to subscribers (§5.3, CRIS-19). The durable
   // write above already committed, so this is best-effort. The custom
   // subscriptions that consume `publishReportUpdate` are enabled in CRIS-28.
@@ -257,6 +311,9 @@ async function buildDeps(): Promise<WorkerDeps> {
     store: createDynamoStore({
       report: env('REPORT_TABLE_NAME'),
       reportEvent: env('REPORT_EVENT_TABLE_NAME'),
+      // Physical name of the geohashPrefix/geohash GSI, injected by backend.ts
+      // rather than guessed — see DynamoStoreTables.geoIndex (CRIS-31).
+      geoIndex: env('REPORT_GEO_INDEX_NAME'),
     }),
     // Tool-using Triage Agent (§5.5, CRIS-20), degrading to the MVP single-call
     // classifier (CRIS-10) when agent orchestration is unavailable.

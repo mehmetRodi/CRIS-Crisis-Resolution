@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -25,6 +26,11 @@ export function ReportScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { email, isAuthenticated, signOut } = useAuth();
+  // The location map (CRIS-16) has its own pan/zoom gestures that otherwise
+  // fight this ScrollView for the same touch. Disabling scroll for the
+  // duration of any touch that starts inside the map gives the map exclusive
+  // control of that gesture; scrolling resumes the instant the touch ends.
+  const [scrollEnabled, setScrollEnabled] = useState(true);
 
   return (
     <KeyboardAvoidingView
@@ -38,6 +44,7 @@ export function ReportScreen() {
           { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 32 },
         ]}
         keyboardShouldPersistTaps="handled"
+        scrollEnabled={scrollEnabled}
       >
         {/* Header */}
         <View style={styles.header}>
@@ -73,7 +80,10 @@ export function ReportScreen() {
               Fill in the details below. All information is secure and encrypted.
             </Text>
           </View>
-          <ReportForm />
+          <ReportForm
+            onMapInteractionStart={() => setScrollEnabled(false)}
+            onMapInteractionEnd={() => setScrollEnabled(true)}
+          />
         </View>
 
         <Text style={styles.footer}>

@@ -1,17 +1,26 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 // MapLibre GL needs WebGL, which jsdom does not provide. This file asserts the
 // map's lifecycle, so it overrides the global stub (vitest.setup.ts) with its own
 // factory backed by referenceable spies. `vi.hoisted` lets the spies exist above
 // the hoisted `vi.mock`. See ADR-0025 and docs/conventions.md → Testing.
-const { addControl, remove, MapMock, NavigationControl } = vi.hoisted(() => {
+const { addControl, remove, handlers, MapMock, NavigationControl } = vi.hoisted(() => {
   const addControl = vi.fn();
   const remove = vi.fn();
+  // Captured so a test can drive the map's own `error` event — the only way to
+  // reach the degraded-tiles branch without real WebGL.
+  const handlers = new Map<string, (...args: unknown[]) => void>();
   return {
     addControl,
     remove,
-    MapMock: vi.fn(() => ({ addControl, on: vi.fn(), off: vi.fn(), remove })),
+    handlers,
+    MapMock: vi.fn(() => ({
+      addControl,
+      on: vi.fn((event: string, cb: (...args: unknown[]) => void) => handlers.set(event, cb)),
+      off: vi.fn((event: string) => handlers.delete(event)),
+      remove,
+    })),
     NavigationControl: vi.fn(),
   };
 });
@@ -26,6 +35,7 @@ import IncidentMapView from './IncidentMapView';
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  handlers.clear();
 });
 
 describe('IncidentMapView', () => {
@@ -51,5 +61,21 @@ describe('IncidentMapView', () => {
     const { unmount } = render(<IncidentMapView />);
     unmount();
     expect(remove).toHaveBeenCalledOnce();
+  });
+
+  // CRIS-27: a blank canvas is indistinguishable from a working map without
+  // sight, so the degraded state has to be announced, not just drawn.
+  it('announces the degraded state when the tile source fails', () => {
+    render(<IncidentMapView />);
+
+    // Mounted and empty before anything fails. That is deliberate, not spare
+    // markup: assistive tech only reports a live region it was already
+    // watching, so a region inserted together with its text is missed
+    // (ADR-0037). Asserting emptiness pins the behaviour the fix depends on.
+    expect(screen.getByRole('status')).toBeEmptyDOMElement();
+
+    act(() => handlers.get('error')?.());
+
+    expect(screen.getByRole('status')).toHaveTextContent(/map unavailable/i);
   });
 });

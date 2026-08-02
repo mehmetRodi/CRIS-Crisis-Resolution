@@ -36,13 +36,14 @@ function renderSignup() {
 }
 
 function fill({ password, confirm }: { password: string; confirm: string }) {
-  fireEvent.change(screen.getByPlaceholderText(/enter your email/i), {
+  // By label, not by placeholder — see the note in LoginPage.test.tsx.
+  fireEvent.change(screen.getByLabelText(/^email$/i), {
     target: { value: 'citizen@example.com' },
   });
-  fireEvent.change(screen.getByPlaceholderText(/minimum 8 characters/i), {
+  fireEvent.change(screen.getByLabelText(/^password$/i), {
     target: { value: password },
   });
-  fireEvent.change(screen.getByPlaceholderText(/confirm your password/i), {
+  fireEvent.change(screen.getByLabelText(/confirm password/i), {
     target: { value: confirm },
   });
   fireEvent.click(screen.getByRole('button', { name: /create account/i }));
