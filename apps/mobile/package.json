@@ -5,9 +5,9 @@
   "description": "CrisisMap AI mobile client (Expo + React Native). Citizen emergency reporting (CRIS-6).",
   "main": "index.ts",
   "scripts": {
-    "start": "expo start --go",
-    "android": "expo start --go --android",
-    "ios": "expo start --go --ios",
+    "start": "expo start --dev-client",
+    "android": "expo start --dev-client --android",
+    "ios": "expo start --dev-client --ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },

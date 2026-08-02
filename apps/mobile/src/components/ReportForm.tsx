@@ -36,7 +36,7 @@ interface ReportFormProps {
   onMapInteractionEnd?: () => void;
 }
 
-export function ReportForm({ onMapInteractionStart, onMapInteractionEnd }: ReportFormProps = {}) {
+export function ReportForm({ onMapInteractionStart, onMapInteractionEnd }: ReportFormProps) {
   const [draft, setDraft] = useState(createEmptyReportDraft());
   const [photo, setPhoto] = useState<ImagePicker.ImagePickerAsset | null>(null);
   const [submitted, setSubmitted] = useState(false);

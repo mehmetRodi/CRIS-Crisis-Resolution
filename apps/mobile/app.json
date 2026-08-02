@@ -35,12 +35,6 @@
           "locationWhenInUsePermission": "CrisisMap AI uses your location to attach it to emergency reports you submit."
         }
       ]
-    ],
-    "extra": {
-      "eas": {
-        "projectId": "21f2c3eb-3736-4142-a8ad-0e2c154f4f81"
-      }
-    },
-    "owner": "reisahaveri7"
+    ]
   }
 }
