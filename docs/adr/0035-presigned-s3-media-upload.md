@@ -61,8 +61,24 @@ body: file })`. Simple client code, but a presigned PUT's signature covers the U
 4. **`storage/resource.ts` tightened**: `reports/{entity_id}/*` guest/authenticated **write**
    is removed entirely. Uploads now go exclusively through the presigned-POST path — leaving
    the old direct-write grant active would let any guest bypass the presigned policy's limits
-   by calling `uploadData` straight against the bucket. Authenticated **read** stays broad, for
-   coordinator/responder/volunteer staff viewing report photos.
+   by calling `uploadData` straight against the bucket.
+
+   **Read is group-scoped, not `allow.authenticated`.** Because Decision 2 keys objects by
+   `clientRequestId` rather than identity, the old `reports/{entity_id}/*` owner-scoping no
+   longer matches anything, so the rule had to be rewritten rather than kept. The first
+   attempt — `'reports/*': [allow.authenticated.to(['read'])]` — was wrong: `authenticated`
+   means _every_ signed-in principal, sign-up is open (`auth/resource.ts`), and group
+   membership is assigned manually, so a brand-new self-registered account with no group at
+   all could have read every citizen's photo. It is now
+   `allow.groups(['RESPONDER', 'COORDINATOR', 'ADMIN']).to(['read'])`.
+
+   `VOLUNTEER` is deliberately **excluded**, which diverges from the `Report` model's own gate
+   (where volunteers do have read). The reasoning is in **ADR-0039**: `TRANSITION_ROLES` grants
+   volunteers no report authority whatsoever, and design doc §2.5 groups them with citizens
+   rather than with official responders. The access volunteers will genuinely need for the
+   CRIS-33 task board is per-assignment and per-region, which a bucket-wide group grant cannot
+   express — so it belongs with the deferred signed-delivery work, not here.
+
 5. **Two bugs surfaced live testing the upload, both producing the identical S3 error
    (`MaxPostPreDataLengthExceeded` — a fixed, non-configurable 20 KB cap on the multipart
    request's fields section _before_ the file data):**
@@ -80,8 +96,11 @@ body: file })`. Simple client code, but a presigned PUT's signature covers the U
      eats into the same 20 KB budget. Signing with those was fixed first (before the fields
      bug was found) by having the handler `AssumeRole` into a dedicated, single-purpose
      `MediaUploadPresignRole` (trusted only by this Lambda, via `grantAssumeRole`; granted
-     only `s3:PutObject` on `reports/*`, via `bucket.grantWrite(role, 'reports/*')`) and sign
-     with those short-lived credentials instead. This alone did **not** resolve the error —
+     only put permissions on `reports/*`, via `bucket.grantPut(role, 'reports/*')`) and sign
+     with those short-lived credentials instead. **`grantPut`, not `grantWrite`** — CDK's
+     `grantWrite` bundles `s3:DeleteObject*` in with the put actions, which would have let a
+     role whose sole job is signing upload policies delete any existing report photo; the
+     bucket is unversioned, so that would be unrecoverable. This alone did **not** resolve the error —
      the fields bug above did — but it's kept: it shrinks the Lambda's own execution role to
      zero direct S3 permissions (only `sts:AssumeRole` on one narrowly-scoped role), and
      leaves more of the 20 KB budget for the policy/security-token overhead that's
@@ -99,6 +118,40 @@ body: file })`. Simple client code, but a presigned PUT's signature covers the U
    photo is optional; an emergency report must still go through without one if the upload
    fails — the same "never blocks submission" principle CRIS-16 (location capture, on its own
    unmerged branch) applies to GPS/map-pin input.
+8. **A pick and a submit are never allowed to overlap, and a superseded upload can never write
+   state.** Picking is gated on `photoUploading || submitting`, and each pick claims a
+   monotonic generation before its first `await`; only the newest generation may call
+   `setMediaKey`/`setPhotoError`. A successful submit bumps the generation as it resets.
+
+   This closes a silent cross-report leak. The success path nulls the photo state and re-mints
+   `clientRequestId`, so an upload still running at that moment would resolve into the _reset_
+   form: `mediaKey` set to a key scoped to the previous report, with `photoName` null, so the
+   photo box reads "Click to add a photo" while holding a stale key. The next report the
+   citizen filed would silently carry the previous incident's photo. The gates make the overlap
+   unreachable and the generation counter is defense-in-depth behind them, since a future
+   relaxation of either gate would otherwise reopen the hole.
+
+   Relatedly, the web file input is cleared on **every** pick, not only after a successful
+   submit: re-selecting the same file leaves `value` unchanged, so the browser fires no
+   `change` event at all, and the retry that the failure message explicitly asks for would
+   silently do nothing.
+
+9. **The content type is never guessed.** The presigned policy pins whatever content type the
+   client claims, so the server sees only that claim and cannot catch a wrong one — the client
+   check is the _only_ enforcement point for type (unlike size, which
+   `content-length-range` genuinely enforces). Mobile's original `asset.mimeType ?? 'image/jpeg'`
+   therefore let a HEIC or GIF through mislabelled whenever expo-image-picker omitted
+   `mimeType` (common for Android content-provider URIs), landing a non-JPEG at a `.jpg` key
+   that a coordinator may not be able to render. It now derives the type from the file
+   extension and **rejects** when even that is unknown, rather than assuming.
+10. **Upload state is announced, not just shown** (ADR-0037). The photo control carries
+    `aria-disabled`/`aria-busy` rather than `disabled` — going hard-disabled blurs focus to the
+    document body the moment the upload starts, dropping the user out of the form
+    mid-interaction. Because the control's `aria-label` overrides its own content, upload
+    state is mirrored into a persistently-mounted `role="status"` region; otherwise a screen
+    reader announces "photo selected" for a photo that in fact failed. The confirmation view
+    also says explicitly when a report went out without its photo, rather than letting an
+    unqualified "Report Submitted" imply the photo went too.
 
 ## Tradeoffs & consequences
 

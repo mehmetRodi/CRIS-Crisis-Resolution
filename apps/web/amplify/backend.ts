@@ -117,7 +117,11 @@ const mediaUploadFn = backend.createMediaUploadUrl.resources.lambda;
 const mediaUploadPresignRole = new Role(Stack.of(mediaUploadFn), 'MediaUploadPresignRole', {
   assumedBy: mediaUploadFn.grantPrincipal,
 });
-backend.storage.resources.bucket.grantWrite(mediaUploadPresignRole, 'reports/*');
+// `grantPut`, not `grantWrite`: CDK's `grantWrite` bundles `s3:DeleteObject*`
+// alongside the put actions, which would let a role that only ever signs upload
+// policies delete any existing report photo. The bucket is unversioned, so that
+// would be unrecoverable. Presigning a POST needs `s3:PutObject` and nothing else.
+backend.storage.resources.bucket.grantPut(mediaUploadPresignRole, 'reports/*');
 mediaUploadPresignRole.grantAssumeRole(mediaUploadFn.grantPrincipal);
 
 backend.createMediaUploadUrl.addEnvironment(

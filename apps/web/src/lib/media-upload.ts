@@ -15,13 +15,23 @@ import { client } from './amplify';
  * Never log the file or its contents — media can depict identifiable people
  * or locations tied to a report before it's redacted (§5.6).
  */
-export class MediaUploadError extends Error {}
+export class MediaUploadError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'MediaUploadError';
+  }
+}
 
 /**
  * Uploads a single photo and returns its S3 object key, ready to pass into
- * `submitReport`'s `mediaKeys`. Client-side type/size checks are a fast-fail
- * courtesy — the presigned POST policy (`createMediaUploadUrl` handler)
- * enforces both server-side regardless.
+ * `submitReport`'s `mediaKeys`.
+ *
+ * The client-side *size* check is a fast-fail courtesy — the presigned POST's
+ * `content-length-range` enforces it server-side regardless. The *type* check
+ * matters more than it looks: the policy pins whatever content type we send, so
+ * a wrong type here would be signed and accepted (`File.type` is browser-derived
+ * rather than caller-supplied, so this is sound on web; mobile has to work
+ * harder — see `apps/mobile/src/lib/media-upload.ts`).
  */
 export async function uploadReportMedia(file: File, clientRequestId: string): Promise<string> {
   if (!isAllowedMediaContentType(file.type)) {
@@ -49,7 +59,18 @@ export async function uploadReportMedia(file: File, clientRequestId: string): Pr
   }
   formData.append('file', file); // S3 requires the file field last.
 
-  const response = await fetch(data.url, { method: 'POST', body: formData });
+  // `fetch` rejects (rather than returning !ok) when the request never gets a
+  // response at all — offline, DNS failure, or an S3 error whose response is
+  // missing CORS headers. That surfaces as a bare "TypeError: Failed to fetch",
+  // which is not something to show a citizen mid-emergency.
+  let response: Response;
+  try {
+    response = await fetch(data.url, { method: 'POST', body: formData });
+  } catch {
+    throw new MediaUploadError(
+      'The photo upload could not reach the server. Check your connection and try again.',
+    );
+  }
   if (!response.ok) {
     throw new MediaUploadError('The photo upload failed. Please try again.');
   }

@@ -54,3 +54,4 @@ behind the code — essential when refactoring or extending the system.
 | [0036](0036-frontend-accessibility-baseline.md)                      | Frontend accessibility baseline, asserted in tests     | Refined by ADR-0037              |
 | [0037](0037-reachable-gated-controls-and-persistent-live-regions.md) | Reachable gated controls + persistent live regions     | Accepted                         |
 | [0038](0038-conservative-duplicate-detection.md)                     | Conservative duplicate detection (CRIS-31)             | Accepted                         |
+| [0039](0039-volunteer-authorization-tier.md)                         | Volunteers rank below responders in authorization      | Accepted                         |

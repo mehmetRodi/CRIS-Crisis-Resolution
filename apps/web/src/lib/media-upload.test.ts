@@ -87,6 +87,62 @@ describe('uploadReportMedia', () => {
     expect(sentFormData.get('policy')).toBe('abc');
   });
 
+  it('appends the file field last, after every policy field', async () => {
+    // S3 rejects a presigned POST whose file part is not last, so this ordering
+    // is a hard protocol requirement rather than a stylistic one. Without this
+    // assertion, moving the append earlier breaks every real upload while the
+    // rest of the suite stays green.
+    createMediaUploadUrl.mockResolvedValue({
+      data: {
+        url: 'https://bucket.s3.example/',
+        fields: { key: 'reports/req-1/a.jpg', policy: 'abc', 'x-amz-signature': 'def' },
+        key: 'reports/req-1/a.jpg',
+      },
+      errors: null,
+    });
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true });
+
+    await uploadReportMedia(makeFile('photo.jpg', 'image/jpeg', 1024), 'req-1');
+
+    const [, options] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0] ?? [];
+    const names = Array.from((options.body as FormData).entries()).map(([name]) => name);
+    expect(names[names.length - 1]).toBe('file');
+    expect(names.filter((n) => n === 'file')).toHaveLength(1);
+  });
+
+  it('requests the upload URL over the identity pool so guests can upload', async () => {
+    // The web client defaults to the Cognito user pool. Anonymous reporting is
+    // the primary path (ADR-0024), so dropping this override would break every
+    // guest upload — the case least likely to be caught by hand-testing signed in.
+    createMediaUploadUrl.mockResolvedValue({
+      data: { url: 'https://bucket.s3.example/', fields: {}, key: 'reports/req-1/a.jpg' },
+      errors: null,
+    });
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: true });
+
+    await uploadReportMedia(makeFile('photo.jpg', 'image/jpeg', 1024), 'req-1');
+
+    expect(createMediaUploadUrl).toHaveBeenCalledWith(
+      expect.objectContaining({ clientRequestId: 'req-1', contentType: 'image/jpeg' }),
+      { authMode: 'identityPool' },
+    );
+  });
+
+  it('reports a reachability failure rather than leaking a raw fetch TypeError', async () => {
+    // Offline, DNS failure, or an S3 error response missing CORS headers all
+    // reject rather than resolving !ok — "TypeError: Failed to fetch" is not
+    // something to render to a citizen mid-emergency.
+    createMediaUploadUrl.mockResolvedValue({
+      data: { url: 'https://bucket.s3.example/', fields: {}, key: 'reports/req-1/a.jpg' },
+      errors: null,
+    });
+    (global.fetch as ReturnType<typeof vi.fn>).mockRejectedValue(new TypeError('Failed to fetch'));
+
+    const file = makeFile('photo.jpg', 'image/jpeg', 1024);
+    await expect(uploadReportMedia(file, 'req-1')).rejects.toThrow(MediaUploadError);
+    await expect(uploadReportMedia(file, 'req-1')).rejects.toThrow(/could not reach the server/i);
+  });
+
   it('throws when the mutation returns errors', async () => {
     createMediaUploadUrl.mockResolvedValue({ data: null, errors: [{ message: 'nope' }] });
     const file = makeFile('photo.jpg', 'image/jpeg', 1024);

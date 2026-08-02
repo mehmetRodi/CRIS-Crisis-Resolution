@@ -8,6 +8,15 @@ vi.mock('../lib/submit-report', () => ({
   newClientRequestId: () => 'test-request-id',
 }));
 
+// Mock the upload path too (CRIS-17). Without this, picking a photo below drives
+// the real `uploadReportMedia` into a live Amplify client from jsdom; it only
+// looked harmless because `pickPhoto` swallows the rejection, leaving a floating
+// promise that settles after the test has finished.
+const uploadReportMedia = vi.fn();
+vi.mock('../lib/media-upload', () => ({
+  uploadReportMedia: (...args: unknown[]) => uploadReportMedia(...args),
+}));
+
 // The form embeds the MapLibre LocationPicker (CRIS-16). Mock the package the
 // same way ReportForm.test.tsx does: the global stub in vitest.setup.ts has no
 // `Marker`, so anything that places a pin would fail there for a reason that has
@@ -33,6 +42,12 @@ function firstOptionIn(groupName: RegExp) {
   return screen.getByRole('group', { name: groupName }).querySelector('button');
 }
 
+/** Selects a photo through the visually-hidden file input the box proxies. */
+function pickPhoto(name = 'stairwell.png') {
+  const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+  fireEvent.change(input, { target: { files: [new File(['x'], name, { type: 'image/png' })] } });
+}
+
 /** Fills the three required fields, leaving the form submittable. */
 function fillRequired() {
   fireEvent.change(screen.getByLabelText(/description/i), { target: { value: VALID_TEXT } });
@@ -44,6 +59,8 @@ describe('ReportForm accessibility', () => {
   beforeEach(() => {
     submitReport.mockReset();
     submitReport.mockResolvedValue({ reportId: 'r1', status: 'NEW' });
+    uploadReportMedia.mockReset();
+    uploadReportMedia.mockResolvedValue('reports/test-request-id/a.png');
   });
 
   it('names the form so it is reachable as a landmark', () => {
@@ -134,18 +151,60 @@ describe('ReportForm accessibility', () => {
     expect(screen.getByRole('group', { name: /location/i })).toBeInTheDocument();
   });
 
-  it('gives the photo control a name that reflects the current selection', () => {
+  it('gives the photo control a name that reflects the current selection', async () => {
+    uploadReportMedia.mockResolvedValue('reports/test-request-id/a.png');
     render(<ReportForm />);
 
     expect(screen.getByRole('button', { name: /add a photo/i })).toBeInTheDocument();
 
-    const file = new File(['x'], 'stairwell.png', { type: 'image/png' });
-    // The visible control proxies a visually-hidden file input.
-    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
-    fireEvent.change(input, { target: { files: [file] } });
+    pickPhoto();
 
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: /change photo, stairwell\.png attached/i }),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  it('stays focusable while the upload runs instead of going hard-disabled', async () => {
+    // ADR-0037: a control that is temporarily busy reports `aria-disabled` and
+    // `aria-busy`. Going `disabled` blurs it to the document body the instant the
+    // upload starts, dropping the user out of the form mid-interaction.
+    let finishUpload: (key: string) => void = () => {};
+    uploadReportMedia.mockReturnValue(
+      new Promise<string>((resolve) => {
+        finishUpload = resolve;
+      }),
+    );
+    render(<ReportForm />);
+
+    pickPhoto();
+
+    const photoButton = await screen.findByRole('button', { name: /uploading stairwell\.png/i });
+    expect(photoButton).not.toBeDisabled();
+    expect(photoButton).toHaveAttribute('aria-disabled', 'true');
+    expect(photoButton).toHaveAttribute('aria-busy', 'true');
+
+    finishUpload('reports/test-request-id/a.png');
+    await waitFor(() => expect(photoButton).toHaveAttribute('aria-busy', 'false'));
+  });
+
+  it('announces an upload failure through a live region, not just muted text', async () => {
+    // The button's `aria-label` overrides its own content, so the failure text
+    // inside it is invisible to assistive tech. Without the live region a screen
+    // reader user is told the photo is attached when it is not.
+    uploadReportMedia.mockRejectedValue(new Error('The photo upload failed. Please try again.'));
+    render(<ReportForm />);
+
+    pickPhoto();
+
+    await waitFor(() =>
+      expect(screen.getByRole('status', { name: /photo upload status/i })).toHaveTextContent(
+        /photo upload failed/i,
+      ),
+    );
     expect(
-      screen.getByRole('button', { name: /change photo, stairwell\.png selected/i }),
+      screen.getByRole('button', { name: /retry photo upload, stairwell\.png failed/i }),
     ).toBeInTheDocument();
   });
 
