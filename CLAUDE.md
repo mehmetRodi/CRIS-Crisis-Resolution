@@ -70,12 +70,30 @@ Run from the repo root (npm workspaces):
 | ----------------------------------------- | ------------------------------------------------- |
 | `npm install`                             | Install all workspace dependencies                |
 | `npm run dev`                             | Start the web app (Vite) at http://localhost:5173 |
-| `npm run dev:mobile`                      | Start the Expo dev server for the mobile app      |
+| `npm run dev:mobile`                      | Start the Expo dev server (dev-client, see below) |
 | `npm run build`                           | Build workspaces with a build script              |
 | `npm run typecheck`                       | Type-check all workspaces                         |
 | `npm run lint` / `npm run lint:fix`       | ESLint                                            |
 | `npm run format` / `npm run format:check` | Prettier                                          |
 | `npm test`                                | Test workspaces with a test script                |
+
+**The mobile app no longer runs in Expo Go.** MapLibre's location picker (CRIS-16,
+ADR-0034) needs native code, so `npm run dev:mobile` starts Metro in `--dev-client` mode
+and expects a custom development build already installed on the device or simulator:
+
+```bash
+cd apps/mobile
+eas init                                             # once: links app.json to your EAS project
+eas build --profile development --platform android   # or: npx expo run:android
+```
+
+`app.json` deliberately carries no `owner` or `extra.eas.projectId` — those bind the repo to
+one person's Expo account. `eas init` writes them locally; keep them out of commits until the
+team has a shared Expo organization.
+
+For an iOS simulator, build with a simulator-flagged profile (EAS defaults iOS builds to
+device), then `xcrun simctl install booted <path>` or drag the `.app` onto the simulator.
+Install the resulting build once, then use `npm run dev:mobile` for day-to-day work.
 
 Personal backend sandbox (requires short-lived AWS credentials):
 
