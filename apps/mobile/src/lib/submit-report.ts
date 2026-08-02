@@ -34,6 +34,8 @@ export async function submitReport(
     clientRequestId,
     isAnonymous: submission.anonymous,
     reporterContact: submission.contact,
+    lat: submission.lat,
+    lng: submission.lng,
   });
 
   if ((errors && errors.length > 0) || !data) {

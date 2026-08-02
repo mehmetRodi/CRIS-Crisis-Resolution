@@ -300,6 +300,34 @@ describe('scoreDuplicate (Ds)', () => {
     expect(result.verdict).toBe(DuplicateVerdict.DISTINCT);
   });
 
+  it('bands on the raw score, not the rounded one, at the 0.80 boundary', () => {
+    // Constructed so Ds is exactly 0.795: L=1 (same point), G=1 (same instant),
+    // T=12/25=0.48 (12 shared of 25 distinct tokens), E=1/2 (1 shared of 2).
+    //   0.40·1 + 0.25·0.48 + 0.20·1 + 0.15·0.5 = 0.795
+    // `round2(0.795)` is 0.80, so rounding before banding would auto-group this
+    // pair — silently moving the published threshold. It must stay REVIEW.
+    const shared = Array.from({ length: 12 }, (_, i) => `shared${i}`);
+    const onlyA = Array.from({ length: 8 }, (_, i) => `alpha${i}`);
+    const onlyB = Array.from({ length: 5 }, (_, i) => `bravo${i}`);
+
+    const a = subject({
+      text: [...shared, ...onlyA].join(' '),
+      entities: { peopleAffected: 0, infrastructure: ['north bridge', 'east pier'], hazards: [] },
+    });
+    const b = subject({
+      text: [...shared, ...onlyB].join(' '),
+      entities: { peopleAffected: 0, infrastructure: ['north bridge'], hazards: [] },
+    });
+
+    const result = scoreDuplicate(a, b);
+
+    expect(result.components).toEqual({ location: 1, text: 0.48, time: 1, entity: 0.5 });
+    // Displayed score rounds up to the threshold...
+    expect(result.score).toBe(0.8);
+    // ...but the verdict is decided on the raw 0.795, which is below it.
+    expect(result.verdict).toBe(DuplicateVerdict.REVIEW);
+  });
+
   it('suggests review for a moderately distant, moderately delayed match', () => {
     const a = subject();
     const b = shiftedByMinutes(movedNorth(a, DUPLICATE_RADIUS_METERS / 2), 30);

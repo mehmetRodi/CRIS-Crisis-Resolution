@@ -54,6 +54,13 @@ export interface ObservabilityProps {
   classificationQueue: IQueue;
   /** Redrive DLQ for poison classification messages. */
   classificationDlq: IQueue;
+  /**
+   * Failure sink for the Stream→SQS pipe (CRIS-31). Distinct from
+   * {@link ObservabilityProps.classificationDlq}: these messages are stream
+   * records the pipe could not deliver, and a non-empty queue means reports were
+   * dropped *before* ever reaching classification.
+   */
+  pipeDlq: IQueue;
 }
 
 /** §3.2 targets, in the units CloudWatch reports them. */
@@ -62,7 +69,7 @@ const CLASSIFICATION_P95_SECONDS = 15;
 
 /** Builds the ops alarm topic, alarms, and dashboard. Returns the topic so callers can subscribe. */
 export function addObservability(props: ObservabilityProps): Topic {
-  const { scope, functions, classificationQueue, classificationDlq } = props;
+  const { scope, functions, classificationQueue, classificationDlq, pipeDlq } = props;
 
   /* ---- Ops alarm topic ---------------------------------------------------- */
   // Dedicated to operational alarms, separate from the app's (future) proximity-
@@ -100,6 +107,28 @@ export function addObservability(props: ObservabilityProps): Topic {
       alarmDescription:
         'Classification DLQ is non-empty: a report exhausted its retries (poison message). ' +
         'Inspect the message and redrive after fixing the cause. See docs/runbooks/deploy.md.',
+    }),
+  );
+
+  // Stream→SQS delivery failures (CRIS-31). Strictly worse than the queue DLQ
+  // above: those reports never entered classification at all, and the pipe gave
+  // up on them to stop the shard blocking. Same single-message threshold — §5.4.4
+  // "never lost" applies most strongly to the records nothing else has seen.
+  register(
+    new Alarm(scope, 'ReportStreamPipeDlqNotEmpty', {
+      metric: pipeDlq.metricApproximateNumberOfMessagesVisible({
+        period: Duration.minutes(1),
+        statistic: Stats.MAXIMUM,
+      }),
+      threshold: 1,
+      comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      evaluationPeriods: 1,
+      treatMissingData: TreatMissingData.NOT_BREACHING,
+      alarmDescription:
+        'Stream→SQS pipe DLQ is non-empty: report stream records never reached the ' +
+        'classification queue and were parked. These reports are unclassified and ' +
+        'invisible to the queue DLQ. Do NOT redrive into ClassificationQueue — the ' +
+        'payloads are stream records, not worker messages. See docs/runbooks/deploy.md.',
     }),
   );
 

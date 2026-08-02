@@ -6,7 +6,11 @@ import {
   type DuplicateMatch,
   type DuplicateSubject,
 } from '@crisismap/shared';
-import type { ReportStore } from './store';
+import {
+  DUPLICATE_GROUP_MAX_MEMBERS,
+  type DuplicateGroupMember,
+  type ReportStore,
+} from './store';
 
 /**
  * Conservative duplicate grouping for the classify worker (design doc §5.4.3,
@@ -42,6 +46,22 @@ export interface DedupeInput {
   geohashPrefix?: string | null;
   /** Current time, ISO-8601. Injected so the recency window is testable. */
   now: string;
+  /**
+   * The stream event id driving this classification. Used to derive a stable
+   * `eventId` per audit append, so a redelivery re-appends the same event rather
+   * than a duplicate one (§5.4.4).
+   */
+  streamEventId: string;
+}
+
+/**
+ * A single link writes one audit event per *report* touched, so the stream event
+ * id alone would collide between the self-link and the peer-link. Scoping by
+ * report keeps each append individually idempotent while still tracing both back
+ * to the one classification that caused them.
+ */
+function linkEventId(streamEventId: string, reportId: string): string {
+  return `${streamEventId}#dup#${reportId}`;
 }
 
 export interface DedupeResult {
@@ -100,47 +120,68 @@ export async function resolveDuplicates(
     return { ...EMPTY, suggested };
   }
 
-  const strongest = linked[0]!;
-  // Prefer joining an existing group over minting one: several reports of the
-  // same incident must converge on a single group, not pair off.
-  const existing = linked.find((m) => m.duplicateGroupId)?.duplicateGroupId ?? null;
+  // Prefer joining an existing group over minting one, so several reports of the
+  // same incident converge on a single group instead of pairing off. The anchor
+  // is the strongest match that already belongs to a group; it is what the audit
+  // detail names, so the report a coordinator is pointed at is one that is
+  // genuinely *in* the group they are looking at.
+  const anchor = linked.find((m) => m.duplicateGroupId) ?? null;
+  const groupId = anchor?.duplicateGroupId ?? (deps.newGroupId ?? randomUUID)();
+  const justification = anchor ?? linked[0]!;
 
-  let groupId = existing;
-  if (!groupId) {
-    groupId = (deps.newGroupId ?? randomUUID)();
-    // A new group needs both members written. Link the peer first: if that write
-    // loses its race, we abandon the grouping rather than stranding this report
-    // alone in a group no one else points at.
-    const peer = candidates.find((c) => c.reportId === strongest.reportId);
-    const peerLinked =
-      peer !== undefined &&
-      (await deps.store.linkDuplicateGroup({
-        reportId: peer.reportId,
-        expectedVersion: peer.version,
-        duplicateGroupId: groupId,
-        detail: { score: strongest.score, components: strongest.components, peer: reportId },
-      }));
+  const versions = new Map(candidates.map((c) => [c.reportId, c.version]));
 
-    if (!peerLinked) {
-      deps.log({ event: 'dedupe.peerLinkFailed', reportId, peerId: strongest.reportId });
-      return { ...EMPTY, suggested };
-    }
+  // Every ungrouped strong match joins too, not just this report. Linking only
+  // the subject would strand the others: a third report of the same incident
+  // would stay ungrouped while the first two paired off. Matches already in a
+  // *different* group are left where they are — merging two groups is an
+  // unbounded rewrite of both memberships, deferred (ADR-0038).
+  const joiners = linked.filter((m) => !m.duplicateGroupId && versions.has(m.reportId));
+
+  const members: DuplicateGroupMember[] = [
+    {
+      reportId,
+      expectedVersion: input.version,
+      eventId: linkEventId(input.streamEventId, reportId),
+      detail: {
+        score: justification.score,
+        components: justification.components,
+        matchedReportId: justification.reportId,
+        joinedExistingGroup: anchor !== null,
+      },
+    },
+    ...joiners.map((match) => ({
+      reportId: match.reportId,
+      expectedVersion: versions.get(match.reportId)!,
+      eventId: linkEventId(input.streamEventId, match.reportId),
+      detail: { score: match.score, components: match.components, peer: reportId },
+    })),
+  ];
+
+  // The transaction caps at 50 members. Truncation keeps this report (index 0)
+  // and drops the weakest joiners, and is logged — a silently short group would
+  // read as "these are all the duplicates" when it isn't.
+  if (members.length > DUPLICATE_GROUP_MAX_MEMBERS) {
+    deps.log({
+      event: 'dedupe.membersCapped',
+      reportId,
+      eligible: members.length,
+      linked: DUPLICATE_GROUP_MAX_MEMBERS,
+    });
+    members.length = DUPLICATE_GROUP_MAX_MEMBERS;
   }
 
-  const selfLinked = await deps.store.linkDuplicateGroup({
-    reportId,
-    expectedVersion: input.version,
-    duplicateGroupId: groupId,
-    detail: {
-      score: strongest.score,
-      components: strongest.components,
-      matchedReportId: strongest.reportId,
-      joinedExistingGroup: existing !== null,
-    },
-  });
+  const written = await deps.store.linkDuplicateGroup({ duplicateGroupId: groupId, members });
 
-  if (!selfLinked) {
-    deps.log({ event: 'dedupe.selfLinkFailed', reportId, duplicateGroupId: groupId });
+  if (!written) {
+    // One transaction, so one failure mode: a member moved under us and nothing
+    // was written. No partial grouping to unwind.
+    deps.log({
+      event: 'dedupe.linkFailed',
+      reportId,
+      duplicateGroupId: groupId,
+      members: members.length,
+    });
     return { ...EMPTY, suggested };
   }
 
@@ -148,8 +189,10 @@ export async function resolveDuplicates(
     event: 'dedupe.linked',
     reportId,
     duplicateGroupId: groupId,
-    score: strongest.score,
+    score: justification.score,
     matched: linked.length,
+    members: members.length,
+    joinedExistingGroup: anchor !== null,
   });
   return { duplicateGroupId: groupId, linked, suggested };
 }

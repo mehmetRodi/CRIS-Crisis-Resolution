@@ -31,7 +31,7 @@ import type { TriageEntities } from './classification';
  * > expands `L`/`T`/`G`/`E`. They are read here as **L**ocation, **T**ext, time
  * > **G**ap, and **E**ntity — the only reading under which every concept the
  * > section names ("nearby", "recent", "text similarity", "entity overlap") is a
- * > scored component. See ADR-0037. If the author intended otherwise, the
+ * > scored component. See ADR-0038. If the author intended otherwise, the
  * > mapping is confined to {@link DUPLICATE_WEIGHTS} and the four
  * > `similarity*` functions.
  */
@@ -328,16 +328,20 @@ export function scoreDuplicate(a: DuplicateSubject, b: DuplicateSubject): Duplic
     entity: similarityEntity(a, b),
   };
 
-  const raw =
+  const raw = clamp01(
     DUPLICATE_WEIGHTS.location * components.location +
-    DUPLICATE_WEIGHTS.text * components.text +
-    DUPLICATE_WEIGHTS.time * components.time +
-    DUPLICATE_WEIGHTS.entity * components.entity;
+      DUPLICATE_WEIGHTS.text * components.text +
+      DUPLICATE_WEIGHTS.time * components.time +
+      DUPLICATE_WEIGHTS.entity * components.entity,
+  );
 
-  const score = round2(clamp01(raw));
+  // Band on the raw score, round only for display. Rounding first would make
+  // `round2(0.795) = 0.80` a STRONG link, quietly moving the published threshold
+  // down by half a hundredth — in the one direction this design must never drift
+  // (§5.4.3: every ambiguity resolves *away* from "duplicate").
   return {
-    score,
-    verdict: verdictForScore(score),
+    score: round2(raw),
+    verdict: verdictForScore(raw),
     components: {
       location: round2(components.location),
       text: round2(components.text),

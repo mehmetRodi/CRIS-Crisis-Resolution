@@ -56,9 +56,16 @@ export default function ConfirmSignupPage() {
 
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           <div>
-            <label className="block text-sm font-medium text-slate-700">Verification Code</label>
+            <label htmlFor="confirm-code" className="block text-sm font-medium text-slate-700">
+              Verification Code
+            </label>
             <input
+              id="confirm-code"
               type="text"
+              // `one-time-code` + numeric keypad lets password managers and mobile
+              // keyboards do the right thing with the emailed code (CRIS-27).
+              autoComplete="one-time-code"
+              inputMode="numeric"
               value={code}
               onChange={(e) => setCode(e.target.value)}
               required
@@ -69,7 +76,10 @@ export default function ConfirmSignupPage() {
           </div>
 
           {error && (
-            <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+            <div
+              role="alert"
+              className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700"
+            >
               {error}
             </div>
           )}

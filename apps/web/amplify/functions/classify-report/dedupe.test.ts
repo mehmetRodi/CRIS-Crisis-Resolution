@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Category, DUPLICATE_WINDOW_MINUTES } from '@crisismap/shared';
 import { resolveDuplicates, type DedupeDeps, type DedupeInput } from './dedupe';
+import { DUPLICATE_GROUP_MAX_MEMBERS } from './store';
 import type {
   DuplicateCandidateRecord,
   FindDuplicateCandidatesInput,
@@ -39,6 +40,7 @@ function input(overrides: Partial<DedupeInput> = {}): DedupeInput {
     version: 3,
     geohashPrefix: 'u2edk',
     now: NOW,
+    streamEventId: 'evt-1',
     subject: {
       category: Category.FIRE,
       lat: 48.2,
@@ -119,18 +121,28 @@ describe('resolveDuplicates', () => {
     const result = await resolveDuplicates(deps, input());
 
     expect(result.duplicateGroupId).toBe('group-new');
-    expect(links).toHaveLength(2);
-    // Peer first: a new group must not leave this report alone in it.
-    expect(links[0]).toMatchObject({
-      reportId: 'r-peer',
-      expectedVersion: 5,
-      duplicateGroupId: 'group-new',
-    });
-    expect(links[1]).toMatchObject({
-      reportId: 'r-subject',
-      expectedVersion: 3,
-      duplicateGroupId: 'group-new',
-    });
+    // One atomic write, not two independent ones.
+    expect(links).toHaveLength(1);
+    expect(links[0]?.duplicateGroupId).toBe('group-new');
+    expect(links[0]?.members).toHaveLength(2);
+    expect(links[0]?.members).toEqual([
+      expect.objectContaining({ reportId: 'r-subject', expectedVersion: 3 }),
+      expect.objectContaining({ reportId: 'r-peer', expectedVersion: 5 }),
+    ]);
+  });
+
+  it('gives each linked report its own derived, stable eventId', async () => {
+    // Both appends trace to one classification, so a shared stream event id must
+    // still yield distinct `eventId`s — and a redelivery must reproduce them
+    // rather than append a second pair (§5.4.4).
+    const { deps, links } = fakeDeps([candidate()]);
+
+    await resolveDuplicates(deps, input({ streamEventId: 'evt-42' }));
+
+    expect(links[0]?.members.map((m) => m.eventId)).toEqual([
+      'evt-42#dup#r-subject',
+      'evt-42#dup#r-peer',
+    ]);
   });
 
   it('joins an existing group rather than minting a second one', async () => {
@@ -140,13 +152,15 @@ describe('resolveDuplicates', () => {
 
     expect(result.duplicateGroupId).toBe('group-7');
     // Only the subject is written — the peer is already in the group.
-    expect(links).toHaveLength(1);
-    expect(links[0]).toMatchObject({ reportId: 'r-subject', duplicateGroupId: 'group-7' });
-    expect(links[0]?.detail).toMatchObject({ joinedExistingGroup: true });
+    expect(links[0]?.members).toHaveLength(1);
+    expect(links[0]?.members[0]).toMatchObject({ reportId: 'r-subject' });
+    expect(links[0]?.members[0]?.detail).toMatchObject({ joinedExistingGroup: true });
   });
 
   it('converges several reports of one incident onto a single group', async () => {
-    // Two strong matches, one already grouped — the group must win over minting.
+    // Two strong matches, one already grouped. The existing group wins over
+    // minting, AND the ungrouped match joins it too — leaving r-a stranded would
+    // split one incident across a group and a loose report.
     const { deps, links } = fakeDeps([
       candidate({ reportId: 'r-a', duplicateGroupId: null, version: 2 }),
       candidate({ reportId: 'r-b', duplicateGroupId: 'group-existing', version: 9 }),
@@ -155,29 +169,60 @@ describe('resolveDuplicates', () => {
     const result = await resolveDuplicates(deps, input());
 
     expect(result.duplicateGroupId).toBe('group-existing');
-    expect(links).toHaveLength(1);
-    expect(links[0]?.reportId).toBe('r-subject');
+    expect(links[0]?.duplicateGroupId).toBe('group-existing');
+    expect(links[0]?.members.map((m) => m.reportId).sort()).toEqual(['r-a', 'r-subject']);
+    // r-b is already in the group — no redundant write.
+    expect(links[0]?.members.map((m) => m.reportId)).not.toContain('r-b');
   });
 
-  it('abandons grouping when the peer write loses its race', async () => {
+  it('names a report that is actually in the joined group on the audit detail', async () => {
+    // The anchor must be the match that supplied the group, not merely the
+    // highest-scoring one — otherwise the audit points a coordinator at a report
+    // that is not in the group they are looking at.
+    const near = candidate({ reportId: 'r-near', duplicateGroupId: null, version: 2 });
+    const grouped = candidate({
+      reportId: 'r-grouped',
+      duplicateGroupId: 'group-existing',
+      version: 9,
+      // Slightly weaker than r-near, but it is the one carrying the group.
+      createdAt: new Date(Date.parse(NOW) - 5 * 60_000).toISOString(),
+    });
+    const { deps, links } = fakeDeps([near, grouped]);
+
+    await resolveDuplicates(deps, input());
+
+    const subjectMember = links[0]?.members.find((m) => m.reportId === 'r-subject');
+    expect(subjectMember?.detail).toMatchObject({
+      matchedReportId: 'r-grouped',
+      joinedExistingGroup: true,
+    });
+  });
+
+  it('abandons the whole grouping when the transaction loses its race', async () => {
+    // Atomicity collapses the old two-write failure modes into one: either every
+    // member landed or none did, so there is no partial state to unwind.
     const { deps, links, logs } = fakeDeps([candidate()], [false]);
 
     const result = await resolveDuplicates(deps, input());
 
     expect(result.duplicateGroupId).toBeNull();
-    // Peer attempted, subject never written — no orphan group.
     expect(links).toHaveLength(1);
-    expect(links[0]?.reportId).toBe('r-peer');
-    expect(events(logs)).toContain('dedupe.peerLinkFailed');
+    expect(events(logs)).toContain('dedupe.linkFailed');
   });
 
-  it('reports no group when the subject write loses its race', async () => {
-    const { deps, logs } = fakeDeps([candidate()], [true, false]);
+  it('caps members at the transaction limit and says so', async () => {
+    // A silently short group would read as "these are all the duplicates".
+    const many = Array.from({ length: DUPLICATE_GROUP_MAX_MEMBERS + 5 }, (_, i) =>
+      candidate({ reportId: `r-${i}`, duplicateGroupId: null, version: 2 }),
+    );
+    const { deps, links, logs } = fakeDeps(many);
 
-    const result = await resolveDuplicates(deps, input());
+    await resolveDuplicates(deps, input());
 
-    expect(result.duplicateGroupId).toBeNull();
-    expect(events(logs)).toContain('dedupe.selfLinkFailed');
+    expect(links[0]?.members).toHaveLength(DUPLICATE_GROUP_MAX_MEMBERS);
+    // The subject is never the one dropped.
+    expect(links[0]?.members[0]?.reportId).toBe('r-subject');
+    expect(events(logs)).toContain('dedupe.membersCapped');
   });
 
   it('suggests borderline matches for review without grouping them', async () => {
@@ -215,11 +260,12 @@ describe('resolveDuplicates', () => {
 
     await resolveDuplicates(deps, input());
 
-    expect(links[1]?.detail).toMatchObject({
+    const subjectMember = links[0]?.members[0];
+    expect(subjectMember?.detail).toMatchObject({
       matchedReportId: 'r-peer',
       joinedExistingGroup: false,
     });
-    expect(links[1]?.detail.score).toBeGreaterThanOrEqual(0.8);
-    expect(links[1]?.detail).toHaveProperty('components');
+    expect(subjectMember?.detail.score).toBeGreaterThanOrEqual(0.8);
+    expect(subjectMember?.detail).toHaveProperty('components');
   });
 });

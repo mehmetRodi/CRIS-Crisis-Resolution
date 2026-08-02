@@ -250,6 +250,7 @@ export async function processRecord(
       version: claimedVersion + 1,
       geohashPrefix: location?.geohashPrefix,
       now: new Date().toISOString(),
+      streamEventId,
       subject: {
         category: classification.category,
         lat: location?.lat,
