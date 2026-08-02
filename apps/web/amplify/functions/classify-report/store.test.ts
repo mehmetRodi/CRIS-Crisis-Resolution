@@ -47,12 +47,33 @@ function member(reportId: string, expectedVersion: number) {
 
 const LINK = { duplicateGroupId: 'g-1', members: [member('r-1', 4)] };
 
+/**
+ * The subset of a TransactWriteItems entry these tests inspect. The SDK's own
+ * input type is a wide union of every write kind, so narrowing here is clearer
+ * than asserting through it at each call site.
+ */
+interface TransactItem {
+  Update?: {
+    TableName: string;
+    Key: { id: string };
+    ConditionExpression?: string;
+    ExpressionAttributeValues?: Record<string, unknown>;
+  };
+  Put?: { TableName: string; Item: Record<string, unknown> };
+}
+
 /** The TransactItems of the single transaction the store should have sent. */
-function transactItems(sent: unknown[]) {
+function transactItems(sent: unknown[]): TransactItem[] {
   const tx = sent.filter((c): c is TransactWriteCommand => c instanceof TransactWriteCommand);
   expect(tx).toHaveLength(1);
-  return (tx[0]!.input.TransactItems ?? []) as Array<Record<string, any>>;
+  return (tx[0]!.input.TransactItems ?? []) as TransactItem[];
 }
+
+const updatesOf = (sent: unknown[]) =>
+  transactItems(sent).flatMap((item) => (item.Update ? [item.Update] : []));
+
+const putsOf = (sent: unknown[]) =>
+  transactItems(sent).flatMap((item) => (item.Put ? [item.Put] : []));
 
 describe('linkDuplicateGroup', () => {
   it('writes the audit event with a non-null eventId', async () => {
@@ -65,7 +86,7 @@ describe('linkDuplicateGroup', () => {
 
     await store.linkDuplicateGroup(LINK);
 
-    const put = transactItems(sent).find((i) => i.Put)!.Put;
+    const put = putsOf(sent)[0]!;
     expect(put.TableName).toBe('ReportEvent-test');
     expect(put.Item).toMatchObject({
       reportId: 'r-1',
@@ -82,7 +103,7 @@ describe('linkDuplicateGroup', () => {
 
     await store.linkDuplicateGroup(LINK);
 
-    const put = transactItems(sent).find((i) => i.Put)!.Put;
+    const put = putsOf(sent)[0]!;
     expect(put.Item.detail).toEqual({ duplicateGroupId: 'g-1', score: 0.91 });
   });
 
@@ -92,7 +113,7 @@ describe('linkDuplicateGroup', () => {
 
     await expect(store.linkDuplicateGroup(LINK)).resolves.toBe(true);
 
-    const update = transactItems(sent).find((i) => i.Update)!.Update;
+    const update = updatesOf(sent)[0]!;
     expect(update.TableName).toBe('Report-test');
     expect(update.ConditionExpression).toBe('#v = :expected');
     expect(update.ExpressionAttributeValues).toMatchObject({
@@ -115,17 +136,13 @@ describe('linkDuplicateGroup', () => {
     });
 
     expect(send).toHaveBeenCalledTimes(1);
-    const items = transactItems(sent);
-    expect(items).toHaveLength(6); // 3 members x (update + audit)
-    expect(items.filter((i) => i.Update).map((i) => i.Update.Key.id)).toEqual([
-      'r-1',
-      'r-2',
-      'r-3',
-    ]);
+    expect(transactItems(sent)).toHaveLength(6); // 3 members x (update + audit)
+
+    const updates = updatesOf(sent);
+    expect(updates.map((u) => u.Key.id)).toEqual(['r-1', 'r-2', 'r-3']);
     // Each member's own expected version, not a shared one.
-    expect(
-      items.filter((i) => i.Update).map((i) => i.Update.ExpressionAttributeValues[':expected']),
-    ).toEqual([4, 7, 2]);
+    expect(updates.map((u) => u.ExpressionAttributeValues?.[':expected'])).toEqual([4, 7, 2]);
+    expect(putsOf(sent).map((p) => p.Item.reportId)).toEqual(['r-1', 'r-2', 'r-3']);
   });
 
   it('returns false when the transaction is cancelled, having written nothing', async () => {
