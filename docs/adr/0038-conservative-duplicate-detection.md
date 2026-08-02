@@ -172,7 +172,7 @@ and review caught it before merge. When `@index` carries no explicit `name` (and
 `generateKeyAndQueryNameForConfig`) and passes it to `addGlobalSecondaryIndex({ indexName })`.
 For `Report` / `geohashPrefix` / `geohash` that is **`reportsByGeohashPrefixAndGeohash`**.
 
-`.queryField('reportsByGeohash')` renames the *GraphQL query field* only — the index name and
+`.queryField('reportsByGeohash')` renames the _GraphQL query field_ only — the index name and
 the query field are derived independently, which is what made the original guess plausible.
 Projection is `ALL` by default (`getOrGenerateDefaultProjection`), so `text`, `entities`,
 `version` and `duplicateGroupId` are all readable from the index.
@@ -186,7 +186,7 @@ rather than assumed.
 
 **Audit appends carry an `eventId`.** `ReportEvent.eventId` is `.required()`. The worker writes
 events with a raw `PutCommand`, so DynamoDB accepts a row without it — but AppSync then fails
-non-null resolution on `eventsByReport`, taking down the *entire* coordinator timeline for that
+non-null resolution on `eventsByReport`, taking down the _entire_ coordinator timeline for that
 report (the same failure mode `useIncidentTimeline` documents for `updatedAt`). Each link
 therefore derives `` `${streamEventId}#dup#${reportId}` ``: scoped by report so the self-link
 and peer-link of one classification do not collide, and deterministic so a redelivery

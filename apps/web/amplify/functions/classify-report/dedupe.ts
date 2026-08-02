@@ -6,11 +6,7 @@ import {
   type DuplicateMatch,
   type DuplicateSubject,
 } from '@crisismap/shared';
-import {
-  DUPLICATE_GROUP_MAX_MEMBERS,
-  type DuplicateGroupMember,
-  type ReportStore,
-} from './store';
+import { DUPLICATE_GROUP_MAX_MEMBERS, type DuplicateGroupMember, type ReportStore } from './store';
 
 /**
  * Conservative duplicate grouping for the classify worker (design doc §5.4.3,

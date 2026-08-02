@@ -2,11 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { QueryCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
 import type { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import { ReportEventType } from '@crisismap/shared';
-import {
-  createDynamoStore,
-  DUPLICATE_CANDIDATE_LIMIT,
-  DUPLICATE_GROUP_MAX_MEMBERS,
-} from './store';
+import { createDynamoStore, DUPLICATE_CANDIDATE_LIMIT, DUPLICATE_GROUP_MAX_MEMBERS } from './store';
 
 /**
  * Persistence-layer contract for the duplicate-grouping writes (§5.4.3, CRIS-31).
@@ -127,8 +123,9 @@ describe('linkDuplicateGroup', () => {
       'r-3',
     ]);
     // Each member's own expected version, not a shared one.
-    expect(items.filter((i) => i.Update).map((i) => i.Update.ExpressionAttributeValues[':expected']))
-      .toEqual([4, 7, 2]);
+    expect(
+      items.filter((i) => i.Update).map((i) => i.Update.ExpressionAttributeValues[':expected']),
+    ).toEqual([4, 7, 2]);
   });
 
   it('returns false when the transaction is cancelled, having written nothing', async () => {
@@ -170,15 +167,19 @@ describe('linkDuplicateGroup', () => {
     const { client, send } = fakeClient();
     const store = createDynamoStore(TABLES, client);
 
-    await expect(
-      store.linkDuplicateGroup({ duplicateGroupId: 'g-1', members: [] }),
-    ).resolves.toBe(false);
+    await expect(store.linkDuplicateGroup({ duplicateGroupId: 'g-1', members: [] })).resolves.toBe(
+      false,
+    );
     expect(send).not.toHaveBeenCalled();
   });
 });
 
 describe('findDuplicateCandidates', () => {
-  const QUERY = { geohashPrefix: 'u2edk', excludeReportId: 'r-self', since: '2026-07-31T11:00:00.000Z' };
+  const QUERY = {
+    geohashPrefix: 'u2edk',
+    excludeReportId: 'r-self',
+    since: '2026-07-31T11:00:00.000Z',
+  };
 
   it('queries the injected geo index, not a guessed name', async () => {
     // The physical GSI name is derived in backend.ts from the Amplify
