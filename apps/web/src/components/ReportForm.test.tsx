@@ -23,17 +23,27 @@ describe('web ReportForm', () => {
     submitReport.mockResolvedValue({ reportId: 'r1', status: 'NEW' });
   });
 
-  it('keeps submit disabled until required fields are valid', () => {
+  it('gates submit until required fields are valid', () => {
     render(<ReportForm />);
 
+    // `aria-disabled`, not `disabled` — the button stays focusable so its reason
+    // is reachable; `handleSubmit` holds the actual gate (ADR-0037).
     const submit = screen.getByRole('button', { name: /submit report/i });
-    expect(submit).toBeDisabled();
+    expect(submit).toHaveAttribute('aria-disabled', 'true');
 
     fireEvent.change(screen.getByLabelText(/description/i), { target: { value: VALID_TEXT } });
     fireEvent.click(screen.getByRole('button', { name: /medical/i }));
     fireEvent.click(screen.getByRole('button', { name: /^critical$/i }));
 
-    expect(submit).toBeEnabled();
+    expect(submit).toHaveAttribute('aria-disabled', 'false');
+  });
+
+  it('does not submit an incomplete draft when the gated button is pressed', () => {
+    render(<ReportForm />);
+
+    fireEvent.click(screen.getByRole('button', { name: /submit report/i }));
+
+    expect(submitReport).not.toHaveBeenCalled();
   });
 
   it('submits and shows the confirmation view', async () => {
