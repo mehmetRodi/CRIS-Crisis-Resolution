@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { ReportLocation } from '@crisismap/shared';
 
-import { resolveMapStyle } from '../lib/mapStyle';
+import { resolveMapStyle } from '../surfaces/map/mapStyle';
 
 interface LocationPickerProps {
   value: ReportLocation | null;
@@ -15,16 +15,20 @@ const DEFAULT_ZOOM = 1.2;
 const PIN_ZOOM = 15;
 const MARKER_COLOR = '#2563eb';
 
+function isSameLocation(a: ReportLocation | null, b: ReportLocation | null): boolean {
+  return a !== null && b !== null && a.lat === b.lat && a.lng === b.lng;
+}
+
 /**
  * GPS + map-pin location input (CRIS-16). Citizens can tap "Use my location"
  * (browser Geolocation) or drop/drag a pin directly on the map; both paths
  * report through the same `onChange`. Location is always optional — an
  * emergency report must never be blocked by a denied permission or a bad fix.
  *
- * MapLibre + the free demo style (`lib/mapStyle.ts`) — no API key needed until
- * Amazon Location Service is wired (CRIS-7/CRIS-24). CRIS-13's live map has
- * its own separate copy of the same style-resolution shape; worth de-duping
- * in a follow-up ticket rather than touching CRIS-13's already-merged file here.
+ * MapLibre + the shared style seam (`surfaces/map/mapStyle.ts`, ADR-0025) — no
+ * API key needed until Amazon Location Service is wired (CRIS-7/CRIS-24). The
+ * same helper backs CRIS-13's live incident map, so both surfaces render from
+ * one tile source.
  */
 export function LocationPicker({ value, onChange }: LocationPickerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -33,10 +37,52 @@ export function LocationPicker({ value, onChange }: LocationPickerProps) {
   // Keeps the map's click/dragend handlers (bound once, on mount) calling the
   // latest onChange without recreating the map every time the parent re-renders.
   const onChangeRef = useRef(onChange);
-  onChangeRef.current = onChange;
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  });
+
+  /**
+   * The coordinate most recently emitted *by the map itself* (a click or a
+   * marker drag). The sync effect below compares against it so a map-originated
+   * change doesn't bounce the camera through `flyTo` — otherwise every click
+   * would yank the viewport and force-zoom to `PIN_ZOOM`. Seeded with the
+   * mount-time `value` because the constructor already centres there.
+   */
+  const selfEmittedRef = useRef<ReportLocation | null>(value);
 
   const [gpsLoading, setGpsLoading] = useState(false);
   const [gpsError, setGpsError] = useState<string | null>(null);
+
+  /** Records a coordinate as map-originated, then hands it up. */
+  const commitFromMap = useCallback((location: ReportLocation) => {
+    selfEmittedRef.current = location;
+    onChangeRef.current(location);
+  }, []);
+
+  /**
+   * Creates the marker on first use and moves it thereafter. Shared by the
+   * map's own click handler and by the external-value sync below, so the
+   * drag wiring exists in exactly one place.
+   */
+  const placeMarker = useCallback(
+    (location: ReportLocation) => {
+      const map = mapRef.current;
+      if (!map) return;
+      if (markerRef.current) {
+        markerRef.current.setLngLat([location.lng, location.lat]);
+        return;
+      }
+      const marker = new maplibregl.Marker({ draggable: true, color: MARKER_COLOR })
+        .setLngLat([location.lng, location.lat])
+        .addTo(map);
+      marker.on('dragend', () => {
+        const pos = marker.getLngLat();
+        commitFromMap({ lat: pos.lat, lng: pos.lng });
+      });
+      markerRef.current = marker;
+    },
+    [commitFromMap],
+  );
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -47,62 +93,55 @@ export function LocationPicker({ value, onChange }: LocationPickerProps) {
       style: url,
       center: value ? [value.lng, value.lat] : DEFAULT_CENTER,
       zoom: value ? PIN_ZOOM : DEFAULT_ZOOM,
-      attributionControl: false,
+      // OpenFreeMap serves OpenStreetMap data under ODbL — attribution is
+      // required, not optional. `compact` keeps it to a small (i) on mobile.
+      attributionControl: { compact: true },
     });
+    mapRef.current = map;
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
 
-    function dropMarker(lat: number, lng: number) {
-      if (markerRef.current) {
-        markerRef.current.setLngLat([lng, lat]);
-        return;
-      }
-      const marker = new maplibregl.Marker({ draggable: true, color: MARKER_COLOR })
-        .setLngLat([lng, lat])
-        .addTo(map);
-      marker.on('dragend', () => {
-        const pos = marker.getLngLat();
-        onChangeRef.current({ lat: pos.lat, lng: pos.lng });
-      });
-      markerRef.current = marker;
-    }
-
     if (value) {
-      dropMarker(value.lat, value.lng);
+      placeMarker(value);
     }
     map.on('click', (e) => {
-      dropMarker(e.lngLat.lat, e.lngLat.lng);
-      onChangeRef.current({ lat: e.lngLat.lat, lng: e.lngLat.lng });
+      const location = { lat: e.lngLat.lat, lng: e.lngLat.lng };
+      placeMarker(location);
+      commitFromMap(location);
     });
 
-    mapRef.current = map;
     return () => {
       map.remove();
       mapRef.current = null;
       markerRef.current = null;
     };
     // Map instance is created once on mount; external `value` changes (the GPS
-    // button) are synced by the effect below rather than recreating the map.
+    // button, Clear) are synced by the effect below rather than recreating the
+    // map. `placeMarker`/`commitFromMap` are stable.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Sync marker + camera when `value` changes from outside the map (GPS button).
+  // Sync marker + camera when `value` changes from outside the map.
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !value) return;
-    if (markerRef.current) {
-      markerRef.current.setLngLat([value.lng, value.lat]);
-    } else {
-      const marker = new maplibregl.Marker({ draggable: true, color: MARKER_COLOR })
-        .setLngLat([value.lng, value.lat])
-        .addTo(map);
-      marker.on('dragend', () => {
-        const pos = marker.getLngLat();
-        onChangeRef.current({ lat: pos.lat, lng: pos.lng });
-      });
-      markerRef.current = marker;
+    if (!map) return;
+
+    // Cleared: drop the marker, otherwise a pin lingers on a map that reports
+    // no location.
+    if (!value) {
+      markerRef.current?.remove();
+      markerRef.current = null;
+      selfEmittedRef.current = null;
+      return;
     }
-    map.flyTo({ center: [value.lng, value.lat], zoom: PIN_ZOOM });
-  }, [value]);
+
+    const cameFromMap = isSameLocation(selfEmittedRef.current, value);
+    selfEmittedRef.current = null;
+
+    placeMarker(value);
+    if (!cameFromMap) {
+      map.flyTo({ center: [value.lng, value.lat], zoom: PIN_ZOOM });
+    }
+  }, [value, placeMarker]);
 
   function useMyLocation() {
     if (!('geolocation' in navigator)) {
