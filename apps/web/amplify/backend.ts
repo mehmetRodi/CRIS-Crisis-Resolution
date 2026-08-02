@@ -226,7 +226,7 @@ const pipeDlq = new Queue(pipelineStack, 'ReportStreamPipeDlq', {
 });
 pipeDlq.grantSendMessages(pipeRole);
 
-new CfnPipe(pipelineStack, 'ReportStreamToClassificationQueue', {
+const reportStreamPipe = new CfnPipe(pipelineStack, 'ReportStreamToClassificationQueue', {
   roleArn: pipeRole.roleArn,
   source: streamArn,
   target: classificationQueue.queueArn,
@@ -268,6 +268,17 @@ new CfnPipe(pipelineStack, 'ReportStreamToClassificationQueue', {
     }),
   },
 });
+
+// The pipe only references the role via `roleArn` (`Fn::GetAtt Role.Arn`), which
+// makes CloudFormation order it after the *Role* — but every grant above lands in
+// the role's DefaultPolicy, a sibling resource with no edge to the pipe. EventBridge
+// Pipes validates source/target/DLQ delivery while the pipe stabilizes, so on the
+// deploy that first adds a grant (e.g. `deadLetterConfig`, CRIS-31) CloudFormation
+// updates the pipe and the DefaultPolicy concurrently, the validation hits
+// AccessDenied, and the pipe fails `NotStabilized` — rolling back the whole data
+// stack. Depending on the role construct pulls in its DefaultPolicy subtree, so
+// permissions are always in place before the pipe is touched.
+reportStreamPipe.node.addDependency(pipeRole);
 
 /* -------------------------------------------------------------------------- */
 /* Lambda wiring — SQS event source, IAM, environment                          */

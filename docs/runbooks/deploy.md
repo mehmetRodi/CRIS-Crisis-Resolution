@@ -54,6 +54,22 @@ Also confirm Bedrock model access is enabled for `BEDROCK_MODEL_ID`
 > custom-resource update path. If migrating an existing sandbox, deploy on a fresh environment
 > first to avoid stream-ARN churn orphaning the EventBridge Pipe source.
 
+### Deploy failure: `AWS::Pipes::Pipe` … `NotStabilized`
+
+```
+Resource of type 'AWS::Pipes::Pipe' … did not stabilize. Status Reason is Input parameter
+is invalid from the request due to : Error occurred while sending message to SQS queue: …
+```
+
+The pipe references `StreamToSqsPipeRole` by ARN, but its permissions live in that role's
+**DefaultPolicy** — a sibling resource. EventBridge Pipes validates source/target/DLQ delivery
+while stabilizing, so if CloudFormation updates the pipe before the policy lands, validation
+gets `AccessDenied` and the whole `data` nested stack rolls back (taking unrelated resources
+in the same changeset with it). `backend.ts` pins the ordering with
+`reportStreamPipe.node.addDependency(pipeRole)`; keep that dependency whenever you add a grant
+to `pipeRole`. Recovery is just re-running the deploy — the stack rolls back cleanly to
+`UPDATE_ROLLBACK_COMPLETE`, no manual cleanup needed.
+
 ### Rollback
 
 No automated rollback yet. Re-run an earlier good commit through the pipeline
