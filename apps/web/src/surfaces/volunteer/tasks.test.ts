@@ -65,7 +65,10 @@ describe('volunteer task projection', () => {
 
   it('uses the newest assignment and omits cancelled and rejected work', () => {
     const tasks = buildVolunteerTasks(
-      [report('cancelled'), report('rejected', { status: ReportStatus.REJECTED })],
+      [
+        report('cancelled', { status: ReportStatus.NEEDS_VERIFICATION }),
+        report('rejected', { status: ReportStatus.REJECTED }),
+      ],
       [
         assignment('old', 'cancelled', AssignmentStatus.ASSIGNED),
         assignment('new', 'cancelled', AssignmentStatus.CANCELLED, {

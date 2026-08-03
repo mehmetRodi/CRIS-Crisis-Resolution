@@ -104,13 +104,13 @@ function assignmentColumn(
   reportStatus: ReportStatus,
   assignmentStatus: AssignmentStatus | null,
 ): VolunteerBoardColumn | null {
+  if (assignmentStatus === AssignmentStatus.CANCELLED) return null;
   if (reportStatus === ReportStatus.NEEDS_VERIFICATION) {
     return VolunteerBoardColumn.VERIFICATION_NEEDED;
   }
   if (reportStatus === ReportStatus.RESOLVED || assignmentStatus === AssignmentStatus.COMPLETED) {
     return VolunteerBoardColumn.COMPLETED;
   }
-  if (assignmentStatus === AssignmentStatus.CANCELLED) return null;
   if (
     assignmentStatus === AssignmentStatus.EN_ROUTE ||
     assignmentStatus === AssignmentStatus.ON_SCENE
@@ -209,7 +209,9 @@ export function sortVolunteerTasks(tasks: readonly VolunteerTask[]): VolunteerTa
   return [...tasks].sort((a, b) => {
     const scoreDifference = (b.priorityScore ?? -1) - (a.priorityScore ?? -1);
     if (scoreDifference !== 0) return scoreDifference;
-    return Date.parse(b.createdAt ?? '') - Date.parse(a.createdAt ?? '');
+    const timeA = a.createdAt ? Date.parse(a.createdAt) : 0;
+    const timeB = b.createdAt ? Date.parse(b.createdAt) : 0;
+    return (Number.isNaN(timeB) ? 0 : timeB) - (Number.isNaN(timeA) ? 0 : timeA);
   });
 }
 
