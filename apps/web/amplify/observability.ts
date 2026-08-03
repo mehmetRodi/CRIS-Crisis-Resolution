@@ -12,6 +12,7 @@ import {
   type IMetric,
 } from 'aws-cdk-lib/aws-cloudwatch';
 import { SnsAction } from 'aws-cdk-lib/aws-cloudwatch-actions';
+import type { IKey } from 'aws-cdk-lib/aws-kms';
 import type { IFunction } from 'aws-cdk-lib/aws-lambda';
 import { Topic } from 'aws-cdk-lib/aws-sns';
 import type { IQueue } from 'aws-cdk-lib/aws-sqs';
@@ -61,6 +62,12 @@ export interface ObservabilityProps {
    * dropped *before* ever reaching classification.
    */
   pipeDlq: IQueue;
+  /**
+   * Customer-managed key the ops topic is encrypted with (CRIS-25, ADR-0040).
+   * The caller must also have run `allowCloudWatchAlarmPublish` on it, or every
+   * alarm notification is silently dropped — see `security/encryption.ts`.
+   */
+  encryptionKey: IKey;
 }
 
 /** §3.2 targets, in the units CloudWatch reports them. */
@@ -69,15 +76,22 @@ const CLASSIFICATION_P95_SECONDS = 15;
 
 /** Builds the ops alarm topic, alarms, and dashboard. Returns the topic so callers can subscribe. */
 export function addObservability(props: ObservabilityProps): Topic {
-  const { scope, functions, classificationQueue, classificationDlq, pipeDlq } = props;
+  const { scope, functions, classificationQueue, classificationDlq, pipeDlq, encryptionKey } =
+    props;
 
   /* ---- Ops alarm topic ---------------------------------------------------- */
   // Dedicated to operational alarms, separate from the app's (future) proximity-
   // alert SNS topic (CRIS-34). A human/Slack/PagerDuty subscription is added
   // post-deploy — see docs/runbooks/deploy.md — because the endpoint is
   // environment-specific and must not be committed.
+  //
+  // SSE-KMS under the shared CMK (CRIS-25). Alarm descriptions are operational
+  // text, but the topic is the one place an outside endpoint (a phone, an inbox,
+  // a Slack workspace) is attached to this system, so it gets the same key and
+  // the same CloudTrail record as everything else.
   const alarmTopic = new Topic(scope, 'OpsAlarmTopic', {
     displayName: 'CrisisMap ops alarms',
+    masterKey: encryptionKey,
   });
   const alarmAction = new SnsAction(alarmTopic);
 

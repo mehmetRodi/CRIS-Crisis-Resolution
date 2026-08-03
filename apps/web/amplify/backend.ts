@@ -14,6 +14,7 @@ import { transitionReport } from './functions/transition-report/resource';
 import { publishReportUpdate } from './functions/publish-report-update/resource';
 import { classifyReport } from './functions/classify-report/resource';
 import { createMediaUploadUrl } from './functions/create-media-upload-url/resource';
+import { allowCloudWatchAlarmPublish, createDataKey } from './security/encryption';
 import { addObservability } from './observability';
 
 /**
@@ -75,6 +76,15 @@ backend.auth.resources.cfnResources.cfnUserPool.policies = {
     requireSymbols: false,
   },
 };
+
+/* -------------------------------------------------------------------------- */
+/* Encryption at rest (CRIS-25, ADR-0040) — one customer-managed key            */
+/* -------------------------------------------------------------------------- */
+
+// Created in the ROOT stack so every nested stack can reference it downward as a
+// parameter (see `security/encryption.ts` for why the direction matters).
+const dataKey = createDataKey(backend.stack);
+allowCloudWatchAlarmPublish(dataKey);
 
 const tables = backend.data.resources.tables;
 
@@ -188,13 +198,23 @@ cfnTables['IdempotencyRecord'].timeToLiveAttribute = {
 const pipelineStack = Stack.of(worker);
 
 // Standard queues (reports are independent; idempotency is enforced in-app).
+//
+// `encryptionMasterKey` (CRIS-25) makes every queue SSE-KMS under the shared CMK.
+// The queue bodies are IDs + trace metadata only — no PII crosses this hop by
+// design (see the pipe's `inputTemplate` below) — but a DLQ holds those IDs for
+// 14 days, and CMK encryption is what puts every read of a parked message in
+// CloudTrail. Setting it at construction matters: CDK folds the key's
+// encrypt/decrypt actions into every later `grantSendMessages`/
+// `grantConsumeMessages`, so the pipe role and the worker need no separate grant.
 const classificationDlq = new Queue(pipelineStack, 'ClassificationDlq', {
   retentionPeriod: Duration.days(14),
+  encryptionMasterKey: dataKey,
 });
 const classificationQueue = new Queue(pipelineStack, 'ClassificationQueue', {
   // visibilityTimeout must be ≥ the Lambda timeout; 6× (360s) absorbs retries.
   visibilityTimeout: Duration.seconds(360),
   deadLetterQueue: { queue: classificationDlq, maxReceiveCount: 3 },
+  encryptionMasterKey: dataKey,
 });
 
 /* -------------------------------------------------------------------------- */
@@ -223,6 +243,10 @@ classificationQueue.grantSendMessages(pipeRole);
 // worker bodies it cannot parse (poison). They need a different recovery path.
 const pipeDlq = new Queue(pipelineStack, 'ReportStreamPipeDlq', {
   retentionPeriod: Duration.days(14),
+  // Encrypted like the queues above — and this one needs it most: a parked pipe
+  // record is a raw DynamoDB stream image, so unlike a worker message it DOES
+  // carry the report text and reporter contact (CRIS-25).
+  encryptionMasterKey: dataKey,
 });
 pipeDlq.grantSendMessages(pipeRole);
 
@@ -404,4 +428,5 @@ addObservability({
   classificationQueue,
   classificationDlq,
   pipeDlq,
+  encryptionKey: dataKey,
 });
