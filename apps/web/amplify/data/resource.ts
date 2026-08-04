@@ -276,7 +276,8 @@ const schema = a
       ])
       .authorization((allow) => [
         allow.groups(['COORDINATOR', 'ADMIN']),
-        allow.groups(['RESPONDER', 'VOLUNTEER']).to(['read', 'update']),
+        allow.groups(['RESPONDER']).to(['read', 'update']),
+        allow.groups(['VOLUNTEER']).to(['read']),
       ]),
 
     /* ---------------------------------------------------------------------- */
