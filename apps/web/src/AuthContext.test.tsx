@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider, useAuth } from './AuthContext';
 
@@ -78,7 +78,9 @@ describe('AuthContext', () => {
         <AuthProbe />
       </AuthProvider>,
     );
-    expect(await screen.findByTestId('roles')).toHaveTextContent('RESPONDER,COORDINATOR');
+    await waitFor(() =>
+      expect(screen.getByTestId('roles')).toHaveTextContent('RESPONDER,COORDINATOR'),
+    );
     expect(screen.getByTestId('highest-role')).toHaveTextContent('COORDINATOR');
   });
 

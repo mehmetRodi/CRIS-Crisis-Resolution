@@ -82,13 +82,18 @@ backend.auth.resources.cfnResources.cfnUserPool.policies = {
 /* postConfirmation (CRIS-24, ADR-0040) — grant AdminAddUserToGroup           */
 /* -------------------------------------------------------------------------- */
 
-// Scoped to THIS User Pool only — the trigger's one job is auto-assigning
-// CITIZEN to the account that just confirmed (see handler.ts); it has no
-// broader Cognito admin access.
+// Can't scope this to the User Pool's own ARN: this function IS a trigger ON that
+// pool (the pool's LambdaConfig references the function's ARN), so a policy
+// referencing the pool's ARN back would make the two resources depend on each
+// other inside the same (auth) stack — CloudFormation rejects that as a circular
+// resource dependency. `*` breaks the cycle; the grant stays narrow in practice
+// because it's a single, low-blast-radius action — the function can never do
+// anything but add a user to a group, on whatever pool, matching the existing
+// geo-places:Geocode precedent below (resource-less/cycle-avoiding grant).
 backend.postConfirmation.resources.lambda.addToRolePolicy(
   new PolicyStatement({
     actions: ['cognito-idp:AdminAddUserToGroup'],
-    resources: [backend.auth.resources.userPool.userPoolArn],
+    resources: ['*'],
   }),
 );
 
