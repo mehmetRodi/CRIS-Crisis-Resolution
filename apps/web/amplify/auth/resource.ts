@@ -1,7 +1,8 @@
 import { defineAuth } from '@aws-amplify/backend';
+import { citizenRoleAssignment } from './post-confirmation/resource';
 
 /**
- * Cognito authentication (design doc §5.6, ADR-0024).
+ * Cognito authentication (design doc §5.6, ADR-0024, ADR-0041).
  *
  * Sign-in is optional (ADR-0024): named accounts use this Cognito User Pool,
  * but citizens can submit anonymously as Identity Pool guests. Guest access
@@ -10,9 +11,12 @@ import { defineAuth } from '@aws-amplify/backend';
  * `submitReport` (`amplify/data/resource.ts`) and report media
  * (`amplify/storage/resource.ts`).
  *
- * Deferred, not part of CRIS-7:
- *   - Automatic group assignment for self-signed-up users (all group
- *     membership — including CITIZEN — is manual/admin-assigned for now).
+ * The role-assignment triggers (CRIS-24, ADR-0041) auto-assign `CITIZEN` to
+ * self-signed-up users and retry after authentication if the initial assignment
+ * failed. Staff groups remain manual/admin-assigned.
+ *
+ * Deferred:
+ *   - A staff invite / self-service role-request flow.
  *   - External identity providers (Cognito-only for MVP per §1.2).
  *
  * The five groups mirror the roles in `@crisismap/shared` (UserRole). Keep this
@@ -23,4 +27,8 @@ export const auth = defineAuth({
     email: true,
   },
   groups: ['CITIZEN', 'VOLUNTEER', 'RESPONDER', 'COORDINATOR', 'ADMIN'],
+  triggers: {
+    postConfirmation: citizenRoleAssignment,
+    postAuthentication: citizenRoleAssignment,
+  },
 });
