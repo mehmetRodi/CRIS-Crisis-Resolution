@@ -4,6 +4,7 @@ import { createMediaUploadUrl as createMediaUploadUrlFn } from '../functions/cre
 import { transitionReport as transitionReportFn } from '../functions/transition-report/resource';
 import { publishReportUpdate as publishReportUpdateFn } from '../functions/publish-report-update/resource';
 import { classifyReport as classifyReportFn } from '../functions/classify-report/resource';
+import { listVolunteerTasks as listVolunteerTasksFn } from '../functions/list-volunteer-tasks/resource';
 
 /**
  * GraphQL data model (AppSync + DynamoDB) — design doc §5.1, §5.2, §5.3.
@@ -23,6 +24,8 @@ import { classifyReport as classifyReportFn } from '../functions/classify-report
  * Custom API status:
  *   - `submitReport` implements the guarded, idempotent create path (CRIS-9).
  *   - `updateReportStatus` implements the guarded transition engine (CRIS-18).
+ *   - `listVolunteerTasks` returns the server-redacted task projection
+ *     (CRIS-33, ADR-0042).
  *   - `publishReportUpdate` is the internal fan-out mutation the triage worker
  *     calls over IAM after its durable write; it also carries an `ADMIN` group
  *     gate so it satisfies Amplify's per-operation auth requirement (CRIS-19,
@@ -155,11 +158,13 @@ const schema = a
       ])
       // Coarse role gate. Clients should use the guarded CRIS-9/18 mutations, but
       // generated model operations still exist for the allowed groups. Public-facing
-      // reads must use PublicReport; authenticated internal reads currently remain.
+      // reads must use PublicReport. CRIS-24/ADR-0041: no blanket
+      // `allow.authenticated()` read here — this model carries reporter PII
+      // (`reporterContact`, `text`, `reporterId`) that a signed-in user with no
+      // staff group (e.g. a self-signed-up CITIZEN) must never be able to read.
       .authorization((allow) => [
         allow.groups(['COORDINATOR', 'ADMIN']),
-        allow.groups(['RESPONDER', 'VOLUNTEER']).to(['read']),
-        allow.authenticated().to(['read']),
+        allow.groups(['RESPONDER']).to(['read']),
       ]),
 
     /* ---------------------------------------------------------------------- */
@@ -242,7 +247,7 @@ const schema = a
       })
       .authorization((allow) => [
         allow.groups(['COORDINATOR', 'ADMIN']),
-        allow.groups(['RESPONDER', 'VOLUNTEER']).to(['read']),
+        allow.groups(['RESPONDER']).to(['read']),
       ]),
 
     /* ---------------------------------------------------------------------- */
@@ -274,7 +279,7 @@ const schema = a
       ])
       .authorization((allow) => [
         allow.groups(['COORDINATOR', 'ADMIN']),
-        allow.groups(['RESPONDER', 'VOLUNTEER']).to(['read', 'update']),
+        allow.groups(['RESPONDER']).to(['read', 'update']),
       ]),
 
     /* ---------------------------------------------------------------------- */
@@ -294,7 +299,7 @@ const schema = a
       .secondaryIndexes((index) => [index('regionId').queryField('teamsByRegion')])
       .authorization((allow) => [
         allow.groups(['COORDINATOR', 'ADMIN']),
-        allow.groups(['RESPONDER', 'VOLUNTEER']).to(['read']),
+        allow.groups(['RESPONDER']).to(['read']),
       ]),
 
     /* ---------------------------------------------------------------------- */
@@ -483,6 +488,37 @@ const schema = a
       .returns(a.ref('Report'))
       .handler(a.handler.function(transitionReportFn))
       .authorization((allow) => [allow.groups(['RESPONDER', 'COORDINATOR', 'ADMIN'])]),
+
+    /* ---------------------------------------------------------------------- */
+    /* Volunteer task projection (CRIS-33, ADR-0042)                           */
+    /* ---------------------------------------------------------------------- */
+
+    /**
+     * Narrow operational task shape. It has no wire representation for report
+     * text, reporter data, media, notes, or precise coordinates/geohashes.
+     */
+    VolunteerTask: a.customType({
+      reportId: a.id().required(),
+      status: a.string().required(),
+      category: a.string(),
+      urgency: a.string(),
+      priorityScore: a.float(),
+      priorityBand: a.string(),
+      summary: a.string(),
+      regionId: a.id(),
+      createdAt: a.datetime(),
+      assignmentId: a.id(),
+      assignmentStatus: a.string(),
+      teamId: a.id(),
+      teamName: a.string(),
+      column: a.string().required(),
+    }),
+
+    listVolunteerTasks: a
+      .query()
+      .returns(a.ref('VolunteerTask').array().required())
+      .handler(a.handler.function(listVolunteerTasksFn))
+      .authorization((allow) => [allow.groups(['VOLUNTEER', 'RESPONDER', 'COORDINATOR', 'ADMIN'])]),
 
     /* ---------------------------------------------------------------------- */
     /* Public projection + real-time (CRIS-19, §5.3, §5.6)                     */

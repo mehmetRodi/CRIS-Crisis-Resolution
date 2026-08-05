@@ -7,6 +7,7 @@ import { CfnPipe } from 'aws-cdk-lib/aws-pipes';
 import { Queue } from 'aws-cdk-lib/aws-sqs';
 import { PASSWORD_MIN_LENGTH } from '@crisismap/shared';
 import { auth } from './auth/resource';
+import { citizenRoleAssignment } from './auth/post-confirmation/resource';
 import { data } from './data/resource';
 import { storage } from './storage/resource';
 import { submitReport } from './functions/submit-report/resource';
@@ -14,7 +15,8 @@ import { transitionReport } from './functions/transition-report/resource';
 import { publishReportUpdate } from './functions/publish-report-update/resource';
 import { classifyReport } from './functions/classify-report/resource';
 import { createMediaUploadUrl } from './functions/create-media-upload-url/resource';
-import { allowCloudWatchAlarmPublish, createDataKey } from './security/encryption';
+import { listVolunteerTasks } from './functions/list-volunteer-tasks/resource';
+import { createDataKey } from './security/encryption';
 import { addObservability } from './observability';
 
 /**
@@ -49,6 +51,7 @@ import { addObservability } from './observability';
  */
 const backend = defineBackend({
   auth,
+  citizenRoleAssignment,
   data,
   storage,
   submitReport,
@@ -56,6 +59,7 @@ const backend = defineBackend({
   publishReportUpdate,
   classifyReport,
   createMediaUploadUrl,
+  listVolunteerTasks,
 });
 
 /* -------------------------------------------------------------------------- */
@@ -78,13 +82,36 @@ backend.auth.resources.cfnResources.cfnUserPool.policies = {
 };
 
 /* -------------------------------------------------------------------------- */
-/* Encryption at rest (CRIS-25, ADR-0040) — one customer-managed key            */
+/* Encryption at rest (CRIS-25, ADR-0043) — triage data-plane CMK              */
 /* -------------------------------------------------------------------------- */
 
-// Created in the ROOT stack so every nested stack can reference it downward as a
-// parameter (see `security/encryption.ts` for why the direction matters).
+// Created in the ROOT stack so the data nested stack can reference it downward
+// as a parameter (see `security/encryption.ts` for why the direction matters).
 const dataKey = createDataKey(backend.stack);
-allowCloudWatchAlarmPublish(dataKey);
+
+/* -------------------------------------------------------------------------- */
+/* citizenRoleAssignment (CRIS-24, ADR-0041) — group read + assignment        */
+/* -------------------------------------------------------------------------- */
+
+// Can't scope this to the User Pool's own ARN: this function IS a trigger ON that
+// pool (the pool's LambdaConfig references the function's ARN), so a policy
+// referencing the pool's ARN back would make the two resources depend on each
+// other inside the same stack — CloudFormation rejects that as a circular
+// resource dependency. Constructing an account-and-region-scoped wildcard ARN
+// avoids that reference while preventing access to pools in other accounts or
+// regions. The list action supports the post-authentication reconciliation path.
+const citizenRoleFn = backend.citizenRoleAssignment.resources.lambda;
+const cognitoPoolsInDeploymentScope = Stack.of(citizenRoleFn).formatArn({
+  service: 'cognito-idp',
+  resource: 'userpool',
+  resourceName: '*',
+});
+citizenRoleFn.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['cognito-idp:AdminAddUserToGroup', 'cognito-idp:AdminListGroupsForUser'],
+    resources: [cognitoPoolsInDeploymentScope],
+  }),
+);
 
 const tables = backend.data.resources.tables;
 
@@ -158,6 +185,20 @@ backend.transitionReport.addEnvironment('REPORT_TABLE_NAME', tables['Report'].ta
 backend.transitionReport.addEnvironment('REPORT_EVENT_TABLE_NAME', tables['ReportEvent'].tableName);
 
 /* -------------------------------------------------------------------------- */
+/* listVolunteerTasks (CRIS-33, ADR-0042) — redacted multi-model read         */
+/* -------------------------------------------------------------------------- */
+
+const volunteerTasksFn = backend.listVolunteerTasks.resources.lambda;
+
+tables['Report'].grantReadData(volunteerTasksFn);
+tables['Assignment'].grantReadData(volunteerTasksFn);
+tables['Team'].grantReadData(volunteerTasksFn);
+
+backend.listVolunteerTasks.addEnvironment('REPORT_TABLE_NAME', tables['Report'].tableName);
+backend.listVolunteerTasks.addEnvironment('ASSIGNMENT_TABLE_NAME', tables['Assignment'].tableName);
+backend.listVolunteerTasks.addEnvironment('TEAM_TABLE_NAME', tables['Team'].tableName);
+
+/* -------------------------------------------------------------------------- */
 /* classify-report pipeline (CRIS-10) — Streams → Pipe → SQS → Lambda          */
 /* -------------------------------------------------------------------------- */
 
@@ -202,10 +243,11 @@ const pipelineStack = Stack.of(worker);
 // `encryptionMasterKey` (CRIS-25) makes every queue SSE-KMS under the shared CMK.
 // The queue bodies are IDs + trace metadata only — no PII crosses this hop by
 // design (see the pipe's `inputTemplate` below) — but a DLQ holds those IDs for
-// 14 days, and CMK encryption is what puts every read of a parked message in
-// CloudTrail. Setting it at construction matters: CDK folds the key's
-// encrypt/decrypt actions into every later `grantSendMessages`/
-// `grantConsumeMessages`, so the pipe role and the worker need no separate grant.
+// 14 days. KMS API use is auditable in CloudTrail at the data-key boundary;
+// SQS reuses data keys, so that audit trail is not a per-message access log.
+// Setting the key at construction matters: CDK folds its encrypt/decrypt actions
+// into every later `grantSendMessages`/`grantConsumeMessages`, so the pipe role
+// and the worker need no separate grant.
 const classificationDlq = new Queue(pipelineStack, 'ClassificationDlq', {
   retentionPeriod: Duration.days(14),
   encryptionMasterKey: dataKey,

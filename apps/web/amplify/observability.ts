@@ -17,6 +17,7 @@ import type { IFunction } from 'aws-cdk-lib/aws-lambda';
 import { Topic } from 'aws-cdk-lib/aws-sns';
 import type { IQueue } from 'aws-cdk-lib/aws-sqs';
 import type { Construct } from 'constructs';
+import { configureEncryptedAlarmTopic } from './security/encryption';
 
 /**
  * Observability baseline (design doc §3.1 "CloudWatch / X-Ray", §3.2 SLAs; CRIS-15,
@@ -63,9 +64,8 @@ export interface ObservabilityProps {
    */
   pipeDlq: IQueue;
   /**
-   * Customer-managed key the ops topic is encrypted with (CRIS-25, ADR-0040).
-   * The caller must also have run `allowCloudWatchAlarmPublish` on it, or every
-   * alarm notification is silently dropped — see `security/encryption.ts`.
+   * Customer-managed key the ops topic is encrypted with (CRIS-25, ADR-0043).
+   * `addObservability` installs the required CloudWatch, SNS, and KMS policies.
    */
   encryptionKey: IKey;
 }
@@ -88,11 +88,12 @@ export function addObservability(props: ObservabilityProps): Topic {
   // SSE-KMS under the shared CMK (CRIS-25). Alarm descriptions are operational
   // text, but the topic is the one place an outside endpoint (a phone, an inbox,
   // a Slack workspace) is attached to this system, so it gets the same key and
-  // the same CloudTrail record as everything else.
+  // KMS audit surface as the triage queues.
   const alarmTopic = new Topic(scope, 'OpsAlarmTopic', {
     displayName: 'CrisisMap ops alarms',
     masterKey: encryptionKey,
   });
+  configureEncryptedAlarmTopic(encryptionKey, alarmTopic);
   const alarmAction = new SnsAction(alarmTopic);
 
   const alarms: Alarm[] = [];

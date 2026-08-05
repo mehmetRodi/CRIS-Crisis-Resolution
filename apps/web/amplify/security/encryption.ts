@@ -1,81 +1,77 @@
-import { RemovalPolicy, Stack } from 'aws-cdk-lib';
+import { ArnFormat, RemovalPolicy, Stack } from 'aws-cdk-lib';
 import { PolicyStatement, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { Key, type IKey } from 'aws-cdk-lib/aws-kms';
+import type { ITopic } from 'aws-cdk-lib/aws-sns';
 import type { Construct } from 'constructs';
 
 /**
- * Encryption at rest (design doc §5.6; CRIS-25, ADR-0040).
+ * Encryption at rest for the triage data plane (CRIS-25, ADR-0043).
  *
- * §5.6 asks for one thing by name — "contact data is KMS-encrypted" — but the
- * blast radius of a leaked report is wider than its contact field: the free-text
- * body routinely names an address, a school, or an injured person. So the whole
- * backend shares ONE customer-managed key (CMK) rather than relying on the
- * AWS-owned default keys, and the sensitive field gets a second, application-layer
- * pass on top of it (`security/contact.ts`).
+ * This module owns one customer-managed key (CMK) shared by the three queues in
+ * the DynamoDB Streams -> EventBridge Pipes -> SQS -> Lambda path and the
+ * operational alarm topic that watches that path. The pipe DLQ can contain raw
+ * stream images, including report text and reporter contact, so it is the most
+ * sensitive resource in this boundary.
  *
- * Why a customer-managed key at all, when AWS-owned keys already encrypt every
- * one of these services for free:
+ * DynamoDB tables, report media in S3, and application-layer contact encryption
+ * are not configured by this module. Those resources retain their existing
+ * service-managed encryption until a later decision explicitly extends the CMK
+ * boundary; do not treat this key as field-level encryption for reporter contact.
  *
- *   - **It is auditable.** CMK use shows up in CloudTrail as `kms:Decrypt` with
- *     the caller identity and encryption context. AWS-owned key use does not
- *     appear at all, so "who read the reports" has no answer.
- *   - **It is revocable.** Access to the plaintext can be cut by editing one key
- *     policy, without touching a table, a bucket, or a queue.
- *   - **It rotates on a schedule we own** (`enableKeyRotation`, annual).
+ * A CMK makes KMS API use visible in CloudTrail, permits explicit revocation,
+ * and rotates annually. Service-side data-key caching means KMS audit events are
+ * not a per-message read log; resource access still belongs in service/API audit
+ * controls.
  *
- * ONE key, not one per service, is a deliberate trade. Separate keys would let us
- * revoke media access without revoking report access, but nothing in the MVP
- * draws that boundary — the same responder roles read both — and each extra key
- * carries a monthly charge plus another policy to keep correct. Split the key when
- * a role genuinely needs one and not the other; that is a new ADR, not an edit.
+ * One key is sufficient because the queues and alarm topic form one operational
+ * pipeline with the same administrators. Splitting that trust boundary requires
+ * a new ADR rather than silently adding more keys here.
  */
 
 /**
  * Creates the backend's customer-managed key.
  *
- * Create it in the ROOT stack. Every nested stack (data, storage, function) then
- * receives the key ARN as a CloudFormation *parameter*, which is the direction
- * nested-stack references are free in. The reverse — a key in a nested stack that
- * the root or a sibling reads — would need an Output, and combined with the
- * root's existing dependency on those stacks it risks the same circular
- * dependency the pipeline resources already work around (ADR-0031).
+ * Create it in the ROOT stack. The data nested stack then receives the key ARN as
+ * a CloudFormation parameter, which is the direction nested-stack references are
+ * free in. The reverse would need an Output and risks the same circular dependency
+ * the pipeline resources already work around (ADR-0031).
  */
 export function createDataKey(scope: Construct): Key {
   const stack = Stack.of(scope);
 
   return new Key(scope, 'CrisisMapDataKey', {
     description:
-      'CrisisMap AI — encryption at rest for reports, report media, and the triage pipeline (CRIS-25).',
+      'CrisisMap AI — encryption at rest for triage queues and operational alarms (CRIS-25).',
     // Annual rotation. Rotation re-keys new writes only; KMS keeps prior key
     // material so existing ciphertext stays readable with no re-encrypt step.
     enableKeyRotation: true,
     alias: `alias/${stack.stackName}-data`,
-    // RETAIN, even though it strands a key after `ampx sandbox delete`.
-    // Ciphertext outlives the stack: point-in-time-recovery backups (CRIS-25),
-    // any bucket kept on delete, and CloudTrail-visible copies are all encrypted
-    // with THIS key, and KMS cannot decrypt them once the key is gone. A stranded
-    // $1/month key is recoverable; a deleted key is the permanent loss of every
-    // report it protected. Sweep unused keys manually — docs/runbooks/deploy.md.
+    // RETAIN protects messages encrypted with an older key if an update replaces
+    // the key before those messages expire. It also strands a billable key after
+    // `ampx sandbox delete`; docs/runbooks/deploy.md defines the cleanup check.
     removalPolicy: RemovalPolicy.RETAIN,
   });
 }
 
 /**
- * Lets CloudWatch publish alarm notifications to an SNS topic encrypted with
- * {@link createDataKey}'s key.
+ * Authorizes both sides of CloudWatch -> encrypted SNS alarm delivery.
  *
- * Encrypting the ops topic silently breaks alarms without this. CloudWatch calls
- * `kms:GenerateDataKey*` under its OWN service principal, not the alarm owner's
- * identity, so no `grant*` on an IAM role can authorize it — it has to be a key
- * policy statement. The failure mode is the worst kind: `PutMetricAlarm` still
- * succeeds, the alarm still transitions to ALARM, and the notification is simply
- * dropped. Nothing pages, and the dashboard looks healthy.
+ * CloudWatch needs permission to publish and to use the key while publishing;
+ * SNS also needs key access to encrypt/decrypt messages for delivery. These are
+ * service principals, so the KMS permissions must live in the key policy rather
+ * than an IAM role. Account/ARN/encryption-context conditions keep both grants
+ * inside this deployment without referencing a child-stack resource from the
+ * root key policy.
  *
- * `aws:SourceAccount` pins the grant to this account so another account's alarms
- * cannot use our key (the standard confused-deputy guard for service principals).
+ * The topic policy uses its exact ARN because it lives beside the topic. The key
+ * policy deliberately uses account-scoped wildcard ARNs to avoid a root -> child
+ * reference that would reverse the key's child-stack dependency.
  */
-export function allowCloudWatchAlarmPublish(key: IKey): void {
-  const stack = Stack.of(key);
+export function configureEncryptedAlarmTopic(key: IKey, topic: ITopic): void {
+  const keyStack = Stack.of(key);
+  const topicStack = Stack.of(topic);
+  const alarmsInAccount = alarmArnWildcard(keyStack);
+  const topicsInAccount = keyStack.formatArn({ service: 'sns', resource: '*' });
 
   key.addToResourcePolicy(
     new PolicyStatement({
@@ -84,7 +80,47 @@ export function allowCloudWatchAlarmPublish(key: IKey): void {
       actions: ['kms:Decrypt', 'kms:GenerateDataKey*'],
       // KMS resource policies are attached to the key, so `*` IS this key.
       resources: ['*'],
-      conditions: { StringEquals: { 'aws:SourceAccount': stack.account } },
+      conditions: {
+        ArnLike: { 'aws:SourceArn': alarmsInAccount },
+        StringEquals: { 'aws:SourceAccount': keyStack.account },
+      },
     }),
   );
+
+  key.addToResourcePolicy(
+    new PolicyStatement({
+      sid: 'AllowSnsToUseKeyForAlarmTopic',
+      principals: [new ServicePrincipal('sns.amazonaws.com')],
+      actions: ['kms:Decrypt', 'kms:GenerateDataKey*'],
+      resources: ['*'],
+      conditions: {
+        ArnLike: {
+          'kms:EncryptionContext:aws:sns:topicArn': topicsInAccount,
+        },
+      },
+    }),
+  );
+
+  topic.addToResourcePolicy(
+    new PolicyStatement({
+      sid: 'AllowCloudWatchAlarmsToPublish',
+      principals: [new ServicePrincipal('cloudwatch.amazonaws.com')],
+      actions: ['sns:Publish'],
+      resources: [topic.topicArn],
+      conditions: {
+        ArnLike: { 'aws:SourceArn': alarmArnWildcard(topicStack) },
+        StringEquals: { 'aws:SourceAccount': topicStack.account },
+      },
+    }),
+  );
+}
+
+function alarmArnWildcard(stack: Stack): string {
+  return stack.formatArn({
+    service: 'cloudwatch',
+    resource: 'alarm',
+    resourceName: '*',
+    // CloudWatch alarm ARNs are `alarm:name`, not `alarm/name`.
+    arnFormat: ArnFormat.COLON_RESOURCE_NAME,
+  });
 }
