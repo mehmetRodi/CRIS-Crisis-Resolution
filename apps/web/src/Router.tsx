@@ -13,15 +13,18 @@ import { CoordinatorDashboard } from './surfaces/coordinator/CoordinatorDashboar
 import { useLiveReports } from './surfaces/coordinator/useLiveReports';
 import { useReportTransition } from './surfaces/coordinator/useReportTransition';
 import { useIncidentTimeline } from './surfaces/coordinator/useIncidentTimeline';
+import { VolunteerTaskBoard } from './surfaces/volunteer/VolunteerTaskBoard';
+import { useVolunteerTasks } from './surfaces/volunteer/useVolunteerTasks';
 
 /**
  * Web routes. The web SPA is chiefly the coordinator/responder/volunteer
  * surface, but `/report` is a citizen emergency-fallback form so anyone with a
  * browser can file a report without installing the mobile app (ADR-0021;
  * mobile remains the primary citizen channel per ADR-0020). The coordinator
- * dashboard shell mounts at `/coordinator` (CRIS-12, ADR-0022); the full-screen
- * live map mounts at `/map` (CRIS-13, ADR-0025). `/coordinator` is gated to the
- * `COORDINATOR`/`ADMIN` groups via `RequireRole` (CRIS-24, ADR-0041).
+ * dashboard shell mounts at `/coordinator` (CRIS-12, ADR-0022); the volunteer
+ * task board mounts at `/volunteer` (CRIS-33, ADR-0040); the full-screen live
+ * map mounts at `/map` (CRIS-13, ADR-0025). Operational routes are gated by
+ * Cognito role via `RequireRole` (CRIS-24, ADR-0041/0042).
  */
 
 /**
@@ -63,6 +66,12 @@ function CoordinatorRoute() {
   );
 }
 
+function VolunteerRoute() {
+  const navigate = useNavigate();
+  const { state, refresh } = useVolunteerTasks();
+  return <VolunteerTaskBoard onExit={() => navigate('/')} feed={state} onRefresh={refresh} />;
+}
+
 export function Router() {
   return (
     <BrowserRouter>
@@ -79,6 +88,21 @@ export function Router() {
             element={
               <RequireRole allow={[UserRole.COORDINATOR, UserRole.ADMIN]}>
                 <CoordinatorRoute />
+              </RequireRole>
+            }
+          />
+          <Route
+            path="/volunteer"
+            element={
+              <RequireRole
+                allow={[
+                  UserRole.VOLUNTEER,
+                  UserRole.RESPONDER,
+                  UserRole.COORDINATOR,
+                  UserRole.ADMIN,
+                ]}
+              >
+                <VolunteerRoute />
               </RequireRole>
             }
           />

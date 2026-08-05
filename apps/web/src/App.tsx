@@ -11,7 +11,7 @@ import { useAuth } from './AuthContext';
  * web emergency fallback (ADR 0021). Surface ownership:
  *   - Coordinator dashboard     → CRIS-12 (shell landed at /coordinator; ADR-0022)
  *   - Live map                  → CRIS-13 (base map at /map; ADR-0025)
- *   - Volunteer task board      → CRIS-4 epic (E4)
+ *   - Volunteer task board      → CRIS-33
  *
  * Cards whose shell exists navigate via the router (ADR-0021). Auth is optional
  * (CRIS-7, ADR-0024): sign-in is available but nothing here is gated behind it.
@@ -54,8 +54,9 @@ const SURFACES: Surface[] = [
   {
     title: 'Volunteer task board',
     role: UserRole.VOLUNTEER,
-    ticket: 'E4',
+    ticket: 'CRIS-33',
     description: 'Regional task intake, assignment, and verification workflow.',
+    path: '/volunteer',
   },
 ];
 

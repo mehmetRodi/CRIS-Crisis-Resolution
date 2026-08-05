@@ -15,6 +15,7 @@ import { transitionReport } from './functions/transition-report/resource';
 import { publishReportUpdate } from './functions/publish-report-update/resource';
 import { classifyReport } from './functions/classify-report/resource';
 import { createMediaUploadUrl } from './functions/create-media-upload-url/resource';
+import { listVolunteerTasks } from './functions/list-volunteer-tasks/resource';
 import { addObservability } from './observability';
 
 /**
@@ -57,6 +58,7 @@ const backend = defineBackend({
   publishReportUpdate,
   classifyReport,
   createMediaUploadUrl,
+  listVolunteerTasks,
 });
 
 /* -------------------------------------------------------------------------- */
@@ -172,6 +174,20 @@ tables['ReportEvent'].grantWriteData(transitionFn);
 
 backend.transitionReport.addEnvironment('REPORT_TABLE_NAME', tables['Report'].tableName);
 backend.transitionReport.addEnvironment('REPORT_EVENT_TABLE_NAME', tables['ReportEvent'].tableName);
+
+/* -------------------------------------------------------------------------- */
+/* listVolunteerTasks (CRIS-33, ADR-0042) — redacted multi-model read         */
+/* -------------------------------------------------------------------------- */
+
+const volunteerTasksFn = backend.listVolunteerTasks.resources.lambda;
+
+tables['Report'].grantReadData(volunteerTasksFn);
+tables['Assignment'].grantReadData(volunteerTasksFn);
+tables['Team'].grantReadData(volunteerTasksFn);
+
+backend.listVolunteerTasks.addEnvironment('REPORT_TABLE_NAME', tables['Report'].tableName);
+backend.listVolunteerTasks.addEnvironment('ASSIGNMENT_TABLE_NAME', tables['Assignment'].tableName);
+backend.listVolunteerTasks.addEnvironment('TEAM_TABLE_NAME', tables['Team'].tableName);
 
 /* -------------------------------------------------------------------------- */
 /* classify-report pipeline (CRIS-10) — Streams → Pipe → SQS → Lambda          */

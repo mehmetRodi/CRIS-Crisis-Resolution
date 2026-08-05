@@ -4,6 +4,7 @@ import { BrowserRouter, MemoryRouter, Route, Routes } from 'react-router-dom';
 import App from './App';
 import { AuthProvider } from './AuthContext';
 import { CoordinatorDashboard } from './surfaces/coordinator/CoordinatorDashboard';
+import { VolunteerTaskBoard } from './surfaces/volunteer/VolunteerTaskBoard';
 
 // No signed-in user in these tests; getCurrentUser rejects like it does for a
 // guest, so AuthProvider settles with isAuthenticated: false.
@@ -55,15 +56,37 @@ describe('App shell', () => {
     expect(screen.getByRole('button', { name: 'Open Coordinator dashboard' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open Live map' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open Citizen submission' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open Volunteer task board' })).toBeInTheDocument();
   });
 
-  it('leaves cards without a landed shell out of the tab order', async () => {
+  it('makes the landed volunteer board keyboard reachable', async () => {
     await renderApp();
 
-    // The volunteer board has no route yet — it must not advertise itself as
-    // activatable to keyboard or screen-reader users.
-    expect(screen.queryByRole('button', { name: /volunteer task board/i })).not.toBeInTheDocument();
-    expect(screen.getByText('Volunteer task board')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /volunteer task board/i })).toHaveAttribute(
+      'tabindex',
+      '0',
+    );
+  });
+
+  it('navigates to the volunteer task board when its card is activated', async () => {
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <AuthProvider>
+          <Routes>
+            <Route path="/" element={<App />} />
+            <Route
+              path="/volunteer"
+              element={<VolunteerTaskBoard onExit={() => {}} feed={{ status: 'loading' }} />}
+            />
+          </Routes>
+        </AuthProvider>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /volunteer task board/i }));
+    expect(
+      await screen.findByRole('heading', { level: 1, name: /volunteer task board/i }),
+    ).toBeInTheDocument();
   });
 
   it('navigates to the coordinator dashboard shell when its card is activated', async () => {
