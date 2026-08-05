@@ -5,18 +5,14 @@ import { useVolunteerTasks } from './useVolunteerTasks';
 
 const mocks = vi.hoisted(() => ({
   getCurrentUser: vi.fn(),
-  reportList: vi.fn(),
-  assignmentList: vi.fn(),
-  teamList: vi.fn(),
+  listVolunteerTasks: vi.fn(),
 }));
 
 vi.mock('aws-amplify/auth', () => ({ getCurrentUser: mocks.getCurrentUser }));
 vi.mock('../../lib/amplify', () => ({
   client: {
-    models: {
-      Report: { list: mocks.reportList },
-      Assignment: { list: mocks.assignmentList },
-      Team: { list: mocks.teamList },
+    queries: {
+      listVolunteerTasks: mocks.listVolunteerTasks,
     },
   },
 }));
@@ -25,42 +21,31 @@ describe('useVolunteerTasks', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getCurrentUser.mockResolvedValue({ userId: 'volunteer-1' });
-    mocks.reportList.mockResolvedValue({
+    mocks.listVolunteerTasks.mockResolvedValue({
       data: [
         {
-          id: 'report-1',
+          reportId: 'report-1',
           status: 'AI_CLASSIFIED',
           category: 'MEDICAL',
           urgency: 'HIGH',
           priorityScore: 8,
           summary: 'Deliver first-aid kits',
           regionId: 'north',
-          assignedTeamId: 'team-1',
-        },
-      ],
-    });
-    mocks.assignmentList.mockResolvedValue({
-      data: [
-        {
-          id: 'assignment-1',
-          reportId: 'report-1',
+          assignmentId: 'assignment-1',
+          assignmentStatus: 'ASSIGNED',
           teamId: 'team-1',
-          status: 'ASSIGNED',
+          teamName: 'North volunteers',
+          column: 'ASSIGNED',
         },
       ],
-    });
-    mocks.teamList.mockResolvedValue({
-      data: [{ id: 'team-1', name: 'North volunteers', regionId: 'north' }],
     });
   });
 
-  it('authenticates, reads all three models, and exposes the joined task projection', async () => {
+  it('authenticates and exposes the server-redacted task projection', async () => {
     const { result } = renderHook(() => useVolunteerTasks());
 
     await waitFor(() => expect(result.current.state.status).toBe('ready'));
-    expect(mocks.reportList).toHaveBeenCalledOnce();
-    expect(mocks.assignmentList).toHaveBeenCalledOnce();
-    expect(mocks.teamList).toHaveBeenCalledOnce();
+    expect(mocks.listVolunteerTasks).toHaveBeenCalledOnce();
     expect(result.current.state).toMatchObject({
       tasks: [
         {
@@ -78,19 +63,20 @@ describe('useVolunteerTasks', () => {
     const { result } = renderHook(() => useVolunteerTasks());
 
     await waitFor(() => expect(result.current.state.status).toBe('unauthenticated'));
-    expect(mocks.reportList).not.toHaveBeenCalled();
-    expect(mocks.assignmentList).not.toHaveBeenCalled();
-    expect(mocks.teamList).not.toHaveBeenCalled();
+    expect(mocks.listVolunteerTasks).not.toHaveBeenCalled();
   });
 
   it('surfaces GraphQL failures instead of rendering a partial board', async () => {
-    mocks.assignmentList.mockResolvedValue({
-      data: [],
-      errors: [{ message: 'Assignment read denied' }],
+    mocks.listVolunteerTasks.mockResolvedValue({
+      data: null,
+      errors: [{ message: 'Volunteer task read denied' }],
     });
     const { result } = renderHook(() => useVolunteerTasks());
 
     await waitFor(() => expect(result.current.state.status).toBe('error'));
-    expect(result.current.state).toEqual({ status: 'error', message: 'Assignment read denied' });
+    expect(result.current.state).toEqual({
+      status: 'error',
+      message: 'Volunteer task read denied',
+    });
   });
 });

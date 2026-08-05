@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
-import { AuthProvider } from './AuthContext';
+import { UserRole } from '@crisismap/shared';
+import { AuthProvider, useAuth } from './AuthContext';
+import { RequireRole } from './RequireRole';
 import App from './App';
 import { ReportPage } from './screens/ReportPage';
 import { MapPage } from './screens/MapPage';
@@ -21,8 +23,8 @@ import { useVolunteerTasks } from './surfaces/volunteer/useVolunteerTasks';
  * mobile remains the primary citizen channel per ADR-0020). The coordinator
  * dashboard shell mounts at `/coordinator` (CRIS-12, ADR-0022); the volunteer
  * task board mounts at `/volunteer` (CRIS-33, ADR-0040); the full-screen live
- * map mounts at `/map` (CRIS-13, ADR-0025). Authentication routes exist;
- * role-group enforcement at the route boundary remains deferred.
+ * map mounts at `/map` (CRIS-13, ADR-0025). Operational routes are gated by
+ * Cognito role via `RequireRole` (CRIS-24, ADR-0041/0042).
  */
 
 /**
@@ -32,6 +34,7 @@ import { useVolunteerTasks } from './surfaces/volunteer/useVolunteerTasks';
  */
 function CoordinatorRoute() {
   const navigate = useNavigate();
+  const { highestRole } = useAuth();
   const { state, refresh } = useLiveReports();
   // CRIS-23: per-incident audit timeline. The dashboard owns row selection but
   // reports it here so this wrapper can drive the timeline read; nothing is
@@ -56,6 +59,9 @@ function CoordinatorRoute() {
       transition={transition}
       onSelectIncident={setSelectedId}
       timeline={timeline}
+      // RequireRole (below) only ever mounts this route for COORDINATOR/ADMIN,
+      // but falls back to the dashboard's own default if that were ever null.
+      callerRole={highestRole ?? undefined}
     />
   );
 }
@@ -77,8 +83,29 @@ export function Router() {
           <Route path="/confirm-signup" element={<ConfirmSignupPage />} />
           <Route path="/report" element={<ReportPage />} />
           <Route path="/map" element={<MapPage />} />
-          <Route path="/coordinator" element={<CoordinatorRoute />} />
-          <Route path="/volunteer" element={<VolunteerRoute />} />
+          <Route
+            path="/coordinator"
+            element={
+              <RequireRole allow={[UserRole.COORDINATOR, UserRole.ADMIN]}>
+                <CoordinatorRoute />
+              </RequireRole>
+            }
+          />
+          <Route
+            path="/volunteer"
+            element={
+              <RequireRole
+                allow={[
+                  UserRole.VOLUNTEER,
+                  UserRole.RESPONDER,
+                  UserRole.COORDINATOR,
+                  UserRole.ADMIN,
+                ]}
+              >
+                <VolunteerRoute />
+              </RequireRole>
+            }
+          />
         </Routes>
       </AuthProvider>
     </BrowserRouter>
