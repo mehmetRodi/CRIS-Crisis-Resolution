@@ -1,4 +1,4 @@
-# ADR-0040: Cognito roles, route-level authorization, and Report auth hardening (CRIS-24)
+# ADR-0041: Cognito roles, route-level authorization, and Report auth hardening (CRIS-24)
 
 - **Status:** Accepted
 - **Date:** 2026-07-26
@@ -38,7 +38,7 @@ role-request flow.
 
 ## Options considered
 
-- **Auto-assign a role via `postConfirmation` trigger vs. leave signup group-less forever.**
+- **Auto-assign a role via Cognito triggers vs. leave signup group-less forever.**
   Leaving it manual matches ADR-0024's original stance but means a plain citizen account can
   never do anything role-gated (not even the coordinator dashboard's graceful-degrade path) until
   an admin intervenes — poor for a from-scratch signup flow with no admin UI yet. Chosen:
@@ -64,11 +64,16 @@ role-request flow.
 
 ## Decision
 
-1. **`postConfirmation` trigger** (`amplify/auth/post-confirmation/`) calls
+1. **Citizen-role assignment triggers** (`amplify/auth/post-confirmation/`) call
    `AdminAddUserToGroup` for `CITIZEN` on `PostConfirmation_ConfirmSignUp` (not
-   `ConfirmForgotPassword`). Failures are logged and swallowed — a transient AWS error must never
-   block a user's sign-up confirmation. Scoped IAM grant (`cognito-idp:AdminAddUserToGroup` on
-   this User Pool's ARN only) is added via a CDK escape hatch in `backend.ts`.
+   `ConfirmForgotPassword`). Confirmation-time failures are logged and swallowed so a transient
+   AWS error does not replace successful email confirmation with an error page. The same function
+   also runs after authentication: it calls `AdminListGroupsForUser` and retries the `CITIZEN`
+   assignment only when the account still has no known application role. This makes a transient
+   confirmation-time failure recover on the next sign-in without adding `CITIZEN` to an existing
+   staff account. IAM is limited to these two actions and user pools in the deployment account and
+   region; an exact pool ARN would create a circular CloudFormation dependency because the pool
+   references the trigger function.
 2. **`highestRole(groups)` lives in `@crisismap/shared`** (`domain.ts`, next to `UserRole`).
    `transition-report/handler.ts` imports it instead of keeping a private copy; `AuthContext`
    (web) uses the same function against the ID token's `cognito:groups` claim
@@ -94,7 +99,8 @@ role-request flow.
 
 ## Tradeoffs & consequences
 
-- **Gain:** a self-signed-up account is never group-less; the coordinator dashboard is
+- **Gain:** a self-signed-up account receives `CITIZEN` during confirmation, with a
+  post-authentication reconciliation path if that first assignment fails; the coordinator dashboard is
   unreachable by non-staff sessions; the UI's offered actions match the signed-in caller's real
   authority instead of assuming COORDINATOR; the `Report` PII leak to any authenticated user is
   closed.
@@ -104,8 +110,8 @@ role-request flow.
   Schema/resolver authorization elsewhere (every model but `Report`) remains coarse, and generated
   CRUD still coexists with the guarded custom mutations.
 - **Commits us to:** any future staff-invite ticket must call `AdminAddUserToGroup` (or an
-  equivalent) rather than relying on `postConfirmation`, since that trigger only ever assigns
-  `CITIZEN`; CRIS-32 (or a dedicated hardening ticket) inherits the remaining coarse model
+  equivalent) rather than relying on the automatic role-assignment triggers, since they only ever
+  assign `CITIZEN`; CRIS-32 (or a dedicated hardening ticket) inherits the remaining coarse model
   authorization; a live sandbox/staging deploy is required to verify the trigger and IAM grant
   end-to-end — this ADR's changes are verified here only by unit tests and typecheck, not a
   deployed User Pool.

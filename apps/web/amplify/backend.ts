@@ -7,7 +7,7 @@ import { CfnPipe } from 'aws-cdk-lib/aws-pipes';
 import { Queue } from 'aws-cdk-lib/aws-sqs';
 import { PASSWORD_MIN_LENGTH } from '@crisismap/shared';
 import { auth } from './auth/resource';
-import { postConfirmation } from './auth/post-confirmation/resource';
+import { citizenRoleAssignment } from './auth/post-confirmation/resource';
 import { data } from './data/resource';
 import { storage } from './storage/resource';
 import { submitReport } from './functions/submit-report/resource';
@@ -49,7 +49,7 @@ import { addObservability } from './observability';
  */
 const backend = defineBackend({
   auth,
-  postConfirmation,
+  citizenRoleAssignment,
   data,
   storage,
   submitReport,
@@ -79,21 +79,26 @@ backend.auth.resources.cfnResources.cfnUserPool.policies = {
 };
 
 /* -------------------------------------------------------------------------- */
-/* postConfirmation (CRIS-24, ADR-0040) — grant AdminAddUserToGroup           */
+/* citizenRoleAssignment (CRIS-24, ADR-0041) — group read + assignment        */
 /* -------------------------------------------------------------------------- */
 
 // Can't scope this to the User Pool's own ARN: this function IS a trigger ON that
 // pool (the pool's LambdaConfig references the function's ARN), so a policy
 // referencing the pool's ARN back would make the two resources depend on each
-// other inside the same (auth) stack — CloudFormation rejects that as a circular
-// resource dependency. `*` breaks the cycle; the grant stays narrow in practice
-// because it's a single, low-blast-radius action — the function can never do
-// anything but add a user to a group, on whatever pool, matching the existing
-// geo-places:Geocode precedent below (resource-less/cycle-avoiding grant).
-backend.postConfirmation.resources.lambda.addToRolePolicy(
+// other inside the same stack — CloudFormation rejects that as a circular
+// resource dependency. Constructing an account-and-region-scoped wildcard ARN
+// avoids that reference while preventing access to pools in other accounts or
+// regions. The list action supports the post-authentication reconciliation path.
+const citizenRoleFn = backend.citizenRoleAssignment.resources.lambda;
+const cognitoPoolsInDeploymentScope = Stack.of(citizenRoleFn).formatArn({
+  service: 'cognito-idp',
+  resource: 'userpool',
+  resourceName: '*',
+});
+citizenRoleFn.addToRolePolicy(
   new PolicyStatement({
-    actions: ['cognito-idp:AdminAddUserToGroup'],
-    resources: ['*'],
+    actions: ['cognito-idp:AdminAddUserToGroup', 'cognito-idp:AdminListGroupsForUser'],
+    resources: [cognitoPoolsInDeploymentScope],
   }),
 );
 

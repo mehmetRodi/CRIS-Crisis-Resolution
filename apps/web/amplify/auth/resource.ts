@@ -1,8 +1,8 @@
 import { defineAuth } from '@aws-amplify/backend';
-import { postConfirmation } from './post-confirmation/resource';
+import { citizenRoleAssignment } from './post-confirmation/resource';
 
 /**
- * Cognito authentication (design doc §5.6, ADR-0024, ADR-0040).
+ * Cognito authentication (design doc §5.6, ADR-0024, ADR-0041).
  *
  * Sign-in is optional (ADR-0024): named accounts use this Cognito User Pool,
  * but citizens can submit anonymously as Identity Pool guests. Guest access
@@ -11,9 +11,9 @@ import { postConfirmation } from './post-confirmation/resource';
  * `submitReport` (`amplify/data/resource.ts`) and report media
  * (`amplify/storage/resource.ts`).
  *
- * `postConfirmation` (CRIS-24, ADR-0040) auto-assigns the `CITIZEN` group to
- * every self-signed-up user — closing the ADR-0024 gap where a fresh account
- * had no group at all. Staff groups remain manual/admin-assigned.
+ * The role-assignment triggers (CRIS-24, ADR-0041) auto-assign `CITIZEN` to
+ * self-signed-up users and retry after authentication if the initial assignment
+ * failed. Staff groups remain manual/admin-assigned.
  *
  * Deferred:
  *   - A staff invite / self-service role-request flow.
@@ -28,6 +28,7 @@ export const auth = defineAuth({
   },
   groups: ['CITIZEN', 'VOLUNTEER', 'RESPONDER', 'COORDINATOR', 'ADMIN'],
   triggers: {
-    postConfirmation,
+    postConfirmation: citizenRoleAssignment,
+    postAuthentication: citizenRoleAssignment,
   },
 });

@@ -4,7 +4,7 @@ import type { UserRole } from '@crisismap/shared';
 import { useAuth } from './AuthContext';
 
 /**
- * Route-level role gate (CRIS-24, ADR-0040).
+ * Route-level role gate (CRIS-24, ADR-0041).
  *
  * Closes the gap named in ADR-0028/docs/architecture.md: authenticated routes
  * (e.g. `/coordinator`) previously required only *a* session, not a specific

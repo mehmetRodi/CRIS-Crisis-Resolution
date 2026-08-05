@@ -21,7 +21,7 @@ import { useIncidentTimeline } from './surfaces/coordinator/useIncidentTimeline'
  * mobile remains the primary citizen channel per ADR-0020). The coordinator
  * dashboard shell mounts at `/coordinator` (CRIS-12, ADR-0022); the full-screen
  * live map mounts at `/map` (CRIS-13, ADR-0025). `/coordinator` is gated to the
- * `COORDINATOR`/`ADMIN` groups via `RequireRole` (CRIS-24, ADR-0040).
+ * `COORDINATOR`/`ADMIN` groups via `RequireRole` (CRIS-24, ADR-0041).
  */
 
 /**

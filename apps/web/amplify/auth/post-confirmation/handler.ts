@@ -1,5 +1,6 @@
 /**
- * postConfirmation trigger (CRIS-24) — auto-assigns `CITIZEN` on self sign-up.
+ * Cognito role-assignment triggers (CRIS-24) — auto-assign `CITIZEN` on self
+ * sign-up and reconcile a failed assignment on the user's next authentication.
  *
  * Before this, every self-signed-up user (web `SignupPage`, mobile `SignupScreen`)
  * landed with NO Cognito group at all (ADR-0024 deferred this). `CITIZEN` is the
@@ -7,31 +8,48 @@
  * (`VOLUNTEER`/`RESPONDER`/`COORDINATOR`/`ADMIN`) stays admin-assigned, since
  * granting staff authority can't be a side effect of confirming an email address.
  *
- * Cognito ignores whatever a trigger returns beyond the required shape, but a
- * *thrown* error blocks the user's confirmation outright — so a transient
- * `AdminAddUserToGroup` failure (network blip, throttling) must never fail the
- * sign-up flow itself. Log and continue; the user ends up confirmed but
- * group-less, same as before this trigger existed, rather than locked out.
+ * A transient `AdminAddUserToGroup` failure must not turn successful email
+ * confirmation into an error page. The post-confirmation path therefore logs and
+ * returns, while the post-authentication path checks for an existing application
+ * role and retries the default assignment when the user is still role-less.
  *
- * Only runs on the initial sign-up confirmation, not `ConfirmForgotPassword`
- * (postConfirmation fires for both `triggerSource`s).
+ * Assignment runs on the initial sign-up confirmation and role reconciliation
+ * runs after authentication. `ConfirmForgotPassword` never alters roles.
  */
-import type { PostConfirmationTriggerHandler } from 'aws-lambda';
+import type { PostAuthenticationTriggerEvent, PostConfirmationTriggerEvent } from 'aws-lambda';
 import {
   AdminAddUserToGroupCommand,
+  AdminListGroupsForUserCommand,
   CognitoIdentityProviderClient,
 } from '@aws-sdk/client-cognito-identity-provider';
 import { UserRole } from '@crisismap/shared';
-import { shouldAutoAssignCitizen } from './core';
+import { hasKnownRole, shouldEnsureCitizenRole } from './core';
 
 const client = new CognitoIdentityProviderClient({});
 
-export const handler: PostConfirmationTriggerHandler = async (event) => {
-  if (!shouldAutoAssignCitizen(event.triggerSource)) {
+type CitizenRoleEvent = PostConfirmationTriggerEvent | PostAuthenticationTriggerEvent;
+
+export const handler = async (event: CitizenRoleEvent): Promise<CitizenRoleEvent> => {
+  if (!shouldEnsureCitizenRole(event.triggerSource)) {
     return event;
   }
 
   try {
+    // Authentication is the recovery path for a transient confirmation-time
+    // failure. Do not add CITIZEN to an account that already has any application
+    // role (for example an admin-created staff account).
+    if (event.triggerSource === 'PostAuthentication_Authentication') {
+      const existing = await client.send(
+        new AdminListGroupsForUserCommand({
+          UserPoolId: event.userPoolId,
+          Username: event.userName,
+        }),
+      );
+      if (hasKnownRole(existing.Groups, Object.values(UserRole))) {
+        return event;
+      }
+    }
+
     await client.send(
       new AdminAddUserToGroupCommand({
         UserPoolId: event.userPoolId,
@@ -42,6 +60,7 @@ export const handler: PostConfirmationTriggerHandler = async (event) => {
   } catch (err) {
     console.error('Failed to auto-assign CITIZEN group', {
       userPoolId: event.userPoolId,
+      triggerSource: event.triggerSource,
       err: err instanceof Error ? err.message : String(err),
     });
   }

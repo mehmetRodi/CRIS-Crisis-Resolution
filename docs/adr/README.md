@@ -55,4 +55,4 @@ behind the code — essential when refactoring or extending the system.
 | [0037](0037-reachable-gated-controls-and-persistent-live-regions.md) | Reachable gated controls + persistent live regions                  | Accepted                         |
 | [0038](0038-conservative-duplicate-detection.md)                     | Conservative duplicate detection (CRIS-31)                          | Accepted                         |
 | [0039](0039-volunteer-authorization-tier.md)                         | Volunteers rank below responders in authorization                   | Accepted                         |
-| [0040](0040-cognito-roles-and-route-authorization.md)                | Cognito roles, route authorization, Report auth hardening (CRIS-24) | Accepted                         |
+| [0041](0041-cognito-roles-and-route-authorization.md)                | Cognito roles, route authorization, Report auth hardening (CRIS-24) | Accepted                         |
