@@ -58,3 +58,4 @@ behind the code — essential when refactoring or extending the system.
 | [0040](0040-read-only-volunteer-task-board-projection.md)            | Read-only volunteer task-board projection                           | Partially superseded by ADR-0042 |
 | [0041](0041-cognito-roles-and-route-authorization.md)                | Cognito roles, route authorization, Report auth hardening (CRIS-24) | Accepted                         |
 | [0042](0042-server-enforced-volunteer-task-projection.md)            | Server-enforced volunteer task projection                           | Accepted                         |
+| [0043](0043-customer-managed-key-for-triage-data-plane.md)           | Customer-managed key for the triage data plane (CRIS-25)            | Accepted                         |
