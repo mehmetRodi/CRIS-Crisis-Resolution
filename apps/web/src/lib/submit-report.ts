@@ -1,4 +1,4 @@
-import { toSubmissionText, type ReportSubmission } from '@crisismap/shared';
+import { ReportSubmitError, toSubmissionText, type ReportSubmission } from '@crisismap/shared';
 
 import { client } from './amplify';
 
@@ -14,6 +14,12 @@ import { client } from './amplify';
  * identity and the `allow.guest()` rule on `submitReport` accepts it.
  *
  * Never log the submission: it can carry contact PII (design doc §5.4.1, §5.6).
+ *
+ * Throws `ReportSubmitError` (CRIS-26), not a bare `Error`: the offline queue
+ * needs to tell a transport failure (the call never got a response — offline,
+ * DNS, timeout) from a server-side rejection (the call resolved with `errors`)
+ * apart. Only the former is safe to queue and retry later — retrying an
+ * identical rejection converges on nothing.
  */
 
 /**
@@ -35,21 +41,33 @@ export async function submitReport(
   submission: ReportSubmission,
   clientRequestId: string,
 ): Promise<SubmitReportResult> {
-  const { data, errors } = await client.mutations.submitReport(
-    {
-      text: toSubmissionText(submission),
-      clientRequestId,
-      isAnonymous: submission.anonymous,
-      reporterContact: submission.contact,
-      mediaKeys: submission.mediaKeys,
-      lat: submission.lat,
-      lng: submission.lng,
-    },
-    { authMode: 'identityPool' },
-  );
+  let result: Awaited<ReturnType<typeof client.mutations.submitReport>>;
+  try {
+    result = await client.mutations.submitReport(
+      {
+        text: toSubmissionText(submission),
+        clientRequestId,
+        isAnonymous: submission.anonymous,
+        reporterContact: submission.contact,
+        mediaKeys: submission.mediaKeys,
+        lat: submission.lat,
+        lng: submission.lng,
+      },
+      { authMode: 'identityPool' },
+    );
+  } catch (err) {
+    throw new ReportSubmitError(
+      err instanceof Error && err.message ? err.message : 'The report could not be submitted.',
+      true,
+    );
+  }
 
+  const { data, errors } = result;
   if ((errors && errors.length > 0) || !data) {
-    throw new Error(errors?.[0]?.message ?? 'The report could not be submitted.');
+    throw new ReportSubmitError(
+      errors?.[0]?.message ?? 'The report could not be submitted.',
+      false,
+    );
   }
   return { reportId: data.id, status: data.status ?? 'NEW' };
 }

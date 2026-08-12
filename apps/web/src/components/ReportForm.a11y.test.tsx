@@ -17,6 +17,13 @@ vi.mock('../lib/media-upload', () => ({
   uploadReportMedia: (...args: unknown[]) => uploadReportMedia(...args),
 }));
 
+// Mock the offline queue (CRIS-26) — defaults to "online" so these
+// accessibility assertions exercise the normal send path unchanged.
+const useOfflineQueueMock = vi.fn();
+vi.mock('../OfflineQueueContext', () => ({
+  useOfflineQueue: () => useOfflineQueueMock(),
+}));
+
 // The form embeds the MapLibre LocationPicker (CRIS-16). Mock the package the
 // same way ReportForm.test.tsx does: the global stub in vitest.setup.ts has no
 // `Marker`, so anything that places a pin would fail there for a reason that has
@@ -61,6 +68,13 @@ describe('ReportForm accessibility', () => {
     submitReport.mockResolvedValue({ reportId: 'r1', status: 'NEW' });
     uploadReportMedia.mockReset();
     uploadReportMedia.mockResolvedValue('reports/test-request-id/a.png');
+    useOfflineQueueMock.mockReset();
+    useOfflineQueueMock.mockReturnValue({
+      isOnline: true,
+      pendingCount: 0,
+      isStale: false,
+      enqueue: vi.fn().mockResolvedValue(undefined),
+    });
   });
 
   it('names the form so it is reachable as a landmark', () => {
@@ -217,10 +231,21 @@ describe('ReportForm accessibility', () => {
 
     // role=status makes the swap audible; focus makes it navigable. Without both,
     // a screen-reader user is stranded on a control that no longer exists.
-    const confirmation = await screen.findByRole('status');
+    // Two `role="status"` regions coexist here — the offline-queue banner
+    // (CRIS-26, always mounted, empty text while there is nothing queued) and
+    // the confirmation — so this is scoped by name to the unnamed one.
+    const confirmation = await screen.findByRole('status', { name: '' });
     expect(confirmation).toHaveTextContent(/report submitted/i);
 
     const heading = screen.getByRole('heading', { name: /report submitted/i });
     await waitFor(() => expect(heading).toHaveFocus());
+  });
+
+  it('keeps the offline-queue status region mounted from initial render (CRIS-26)', () => {
+    // Always mounted, never conditionally rendered — a live region that
+    // appears at the same moment as its text is frequently missed (ADR-0037's
+    // reasoning, applied here too).
+    render(<ReportForm />);
+    expect(screen.getByRole('status', { name: /offline queue status/i })).toHaveTextContent('');
   });
 });

@@ -4,6 +4,7 @@ import {
   Category,
   LOCATION_HINT_MAX_LENGTH,
   REPORT_TEXT_MAX_LENGTH,
+  ReportSubmitError,
   Urgency,
   createEmptyReportDraft,
   toReportSubmission,
@@ -11,8 +12,10 @@ import {
 } from '@crisismap/shared';
 import type { ReportDraft } from '@crisismap/shared';
 
+import { useOfflineQueue } from '../OfflineQueueContext';
 import { uploadReportMedia } from '../lib/media-upload';
 import { LocationPicker } from './LocationPicker';
+import { OfflineQueueBanner } from './OfflineQueueBanner';
 import { newClientRequestId, submitReport } from '../lib/submit-report';
 
 /**
@@ -79,9 +82,14 @@ export function ReportForm() {
   // Set on a submit that went out without the photo the user had picked, so the
   // confirmation can say so rather than claiming an unqualified success.
   const [photoDropped, setPhotoDropped] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
+  // 'submitted': the server confirmed it. 'queued': saved locally, offline or
+  // after a retryable failure, will send automatically (CRIS-26). Both render
+  // the same confirmation view with different copy — from the citizen's side,
+  // either way they're done and don't need to do anything else.
+  const [outcome, setOutcome] = useState<'submitted' | 'queued' | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { isOnline, enqueue } = useOfflineQueue();
   // Idempotency token (§5.4.4): stable across retries of the same report so a
   // flaky network can't create duplicates; re-minted only after success. Also
   // scopes the media upload's S3 key (CRIS-17) — a photo is picked before a
@@ -155,8 +163,8 @@ export function ReportForm() {
   // reader or keyboard user is left on a button that no longer exists and hears
   // nothing — so send focus to the confirmation heading once it mounts (CRIS-27).
   useEffect(() => {
-    if (submitted) confirmationRef.current?.focus();
-  }, [submitted]);
+    if (outcome) confirmationRef.current?.focus();
+  }, [outcome]);
 
   async function pickPhoto(e: React.ChangeEvent<HTMLInputElement>) {
     const input = e.target;
@@ -199,6 +207,29 @@ export function ReportForm() {
     }
   }
 
+  /**
+   * Common reset after either a real send or an offline save (CRIS-26): both
+   * are "done" from the citizen's side, so they share every reset step —
+   * only the confirmation copy (driven by `outcome`) differs.
+   */
+  function finishSubmission(outcome: 'submitted' | 'queued') {
+    setOutcome(outcome);
+    // Tell the user their photo didn't make it, rather than letting an
+    // unqualified confirmation imply it did.
+    setPhotoDropped(photoName !== null && mediaKey === null);
+    setDraft(createEmptyReportDraft());
+    // Retire any upload still in flight along with the report it belonged to:
+    // its key is scoped to the `clientRequestId` we are about to replace, so
+    // letting it land would attach this report's photo to the next one.
+    uploadSeq.current++;
+    setPhotoName(null);
+    setMediaKey(null);
+    setPhotoError(null);
+    setPhotoUploading(false);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    setClientRequestId(newClientRequestId());
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (submitting) return;
@@ -213,335 +244,352 @@ export function ReportForm() {
     setSubmitting(true);
     setError(null);
 
+    const submission = toReportSubmission(draft, mediaKey ? [mediaKey] : []);
+
     try {
-      await submitReport(toReportSubmission(draft, mediaKey ? [mediaKey] : []), clientRequestId);
-      setSubmitted(true);
-      // Tell the user their photo didn't make it, rather than letting an
-      // unqualified "Report Submitted" imply it did.
-      setPhotoDropped(photoName !== null && mediaKey === null);
-      setDraft(createEmptyReportDraft());
-      // Retire any upload still in flight along with the report it belonged to:
-      // its key is scoped to the `clientRequestId` we are about to replace, so
-      // letting it land would attach this report's photo to the next one.
-      uploadSeq.current++;
-      setPhotoName(null);
-      setMediaKey(null);
-      setPhotoError(null);
-      setPhotoUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-      setClientRequestId(newClientRequestId());
+      // Known-offline: skip the network call entirely rather than waiting on
+      // a call that can only time out (CRIS-26).
+      if (!isOnline) {
+        await enqueue(submission, clientRequestId);
+        finishSubmission('queued');
+        return;
+      }
+      await submitReport(submission, clientRequestId);
+      finishSubmission('submitted');
     } catch (err) {
-      const message = err instanceof Error && err.message ? err.message : null;
-      setError(message ?? 'Something went wrong. Please try again.');
+      if (err instanceof ReportSubmitError && !err.retryable) {
+        // The server actively rejected this — retrying an identical payload
+        // would too, so this stays a same-session error the citizen can see
+        // and act on, not something silently queued.
+        setError(err.message || 'Something went wrong. Please try again.');
+      } else {
+        // Either a transport failure (offline, DNS, timeout) or an unexpected
+        // error of unknown shape — safe to assume retryable and queue it
+        // rather than lose the report (CRIS-26 §5.4.4 idempotency).
+        await enqueue(submission, clientRequestId);
+        finishSubmission('queued');
+      }
     } finally {
       setSubmitting(false);
     }
   }
 
-  if (submitted) {
+  if (outcome) {
     return (
-      <div
-        role="status"
-        className="flex flex-col items-center gap-2 rounded-xl border border-green-200 bg-green-50 p-6 text-center"
-      >
+      <>
+        <OfflineQueueBanner />
         <div
-          aria-hidden="true"
-          className="mb-2 flex h-16 w-16 items-center justify-center rounded-full bg-green-200 text-3xl font-bold text-green-600"
+          role="status"
+          className="flex flex-col items-center gap-2 rounded-xl border border-green-200 bg-green-50 p-6 text-center"
         >
-          ✓
-        </div>
-        <h2 ref={confirmationRef} tabIndex={-1} className="text-xl font-bold text-green-800">
-          Report Submitted
-        </h2>
-        <p className="text-sm text-green-800">
-          Thank you for your report. Emergency coordinators will review it shortly.
-        </p>
-        {photoDropped && (
-          <p className="text-sm font-medium text-green-900">
-            Your photo could not be uploaded, so the report was sent without it.
+          <div
+            aria-hidden="true"
+            className="mb-2 flex h-16 w-16 items-center justify-center rounded-full bg-green-200 text-3xl font-bold text-green-600"
+          >
+            ✓
+          </div>
+          <h2 ref={confirmationRef} tabIndex={-1} className="text-xl font-bold text-green-800">
+            {outcome === 'queued' ? 'Report Saved' : 'Report Submitted'}
+          </h2>
+          <p className="text-sm text-green-800">
+            {outcome === 'queued'
+              ? "Your report has been saved on this device and will send automatically once you're back online."
+              : 'Thank you for your report. Emergency coordinators will review it shortly.'}
           </p>
-        )}
-        <button
-          type="button"
-          onClick={() => setSubmitted(false)}
-          className="mt-2 text-sm text-blue-600 underline hover:text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
-          Submit another report
-        </button>
-      </div>
+          {photoDropped && (
+            <p className="text-sm font-medium text-green-900">
+              Your photo could not be uploaded, so the report was sent without it.
+            </p>
+          )}
+          <button
+            type="button"
+            onClick={() => setOutcome(null)}
+            className="mt-2 text-sm text-blue-600 underline hover:text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            Submit another report
+          </button>
+        </div>
+      </>
     );
   }
 
   return (
-    <form
-      className="flex flex-col gap-5"
-      aria-label="Emergency report"
-      onSubmit={handleSubmit}
-      noValidate
-    >
-      {/* Description */}
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="report-text" className="text-sm font-semibold text-slate-900">
-          Description <RequiredMark />
-        </label>
-        <textarea
-          id="report-text"
-          ref={textRef}
-          // The form is `noValidate` (shared logic owns the gate), so the required
-          // state has to be conveyed to assistive tech explicitly (CRIS-27).
-          aria-required="true"
-          aria-describedby="report-text-count"
-          className={`${inputBase} min-h-[110px] resize-y`}
-          placeholder="Provide clear details about what's happening and what's needed."
-          value={draft.text}
-          onChange={(e) => setDraft((d) => ({ ...d, text: e.target.value }))}
-          maxLength={REPORT_TEXT_MAX_LENGTH}
-        />
-        <span id="report-text-count" className="self-end text-xs text-slate-400">
-          {draft.text.length}/{REPORT_TEXT_MAX_LENGTH} characters
-        </span>
-      </div>
-
-      {/* Category */}
-      <fieldset ref={categoryRef} className="flex flex-col gap-1.5">
-        <legend className="text-sm font-semibold text-slate-900">
-          Category <RequiredMark />
-        </legend>
-        <div className="flex flex-wrap gap-2">
-          {CATEGORY_OPTIONS.map((c) => {
-            const selected = draft.category === c;
-            return (
-              <button
-                key={c}
-                type="button"
-                aria-pressed={selected}
-                onClick={() => setDraft((d) => ({ ...d, category: selected ? '' : c }))}
-                className={`${chipBase} ${selected ? chipSelected : chipIdle}`}
-              >
-                {categoryLabel(c)}
-              </button>
-            );
-          })}
+    <>
+      <OfflineQueueBanner />
+      <form
+        className="flex flex-col gap-5"
+        aria-label="Emergency report"
+        onSubmit={handleSubmit}
+        noValidate
+      >
+        {/* Description */}
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="report-text" className="text-sm font-semibold text-slate-900">
+            Description <RequiredMark />
+          </label>
+          <textarea
+            id="report-text"
+            ref={textRef}
+            // The form is `noValidate` (shared logic owns the gate), so the required
+            // state has to be conveyed to assistive tech explicitly (CRIS-27).
+            aria-required="true"
+            aria-describedby="report-text-count"
+            className={`${inputBase} min-h-[110px] resize-y`}
+            placeholder="Provide clear details about what's happening and what's needed."
+            value={draft.text}
+            onChange={(e) => setDraft((d) => ({ ...d, text: e.target.value }))}
+            maxLength={REPORT_TEXT_MAX_LENGTH}
+          />
+          <span id="report-text-count" className="self-end text-xs text-slate-400">
+            {draft.text.length}/{REPORT_TEXT_MAX_LENGTH} characters
+          </span>
         </div>
-      </fieldset>
 
-      {/* Subcategory */}
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="report-subcategory" className="text-sm font-semibold text-slate-900">
-          Supply Type (Subcategory)
-        </label>
-        <input
-          id="report-subcategory"
-          className={inputBase}
-          placeholder="e.g., Water, Food, Medical"
-          value={draft.subcategory}
-          onChange={(e) => setDraft((d) => ({ ...d, subcategory: e.target.value }))}
-        />
-      </div>
+        {/* Category */}
+        <fieldset ref={categoryRef} className="flex flex-col gap-1.5">
+          <legend className="text-sm font-semibold text-slate-900">
+            Category <RequiredMark />
+          </legend>
+          <div className="flex flex-wrap gap-2">
+            {CATEGORY_OPTIONS.map((c) => {
+              const selected = draft.category === c;
+              return (
+                <button
+                  key={c}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => setDraft((d) => ({ ...d, category: selected ? '' : c }))}
+                  className={`${chipBase} ${selected ? chipSelected : chipIdle}`}
+                >
+                  {categoryLabel(c)}
+                </button>
+              );
+            })}
+          </div>
+        </fieldset>
 
-      {/* Location */}
-      {/* A fieldset/legend, matching Category and Urgency: the picker is a group
+        {/* Subcategory */}
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="report-subcategory" className="text-sm font-semibold text-slate-900">
+            Supply Type (Subcategory)
+          </label>
+          <input
+            id="report-subcategory"
+            className={inputBase}
+            placeholder="e.g., Water, Food, Medical"
+            value={draft.subcategory}
+            onChange={(e) => setDraft((d) => ({ ...d, subcategory: e.target.value }))}
+          />
+        </div>
+
+        {/* Location */}
+        {/* A fieldset/legend, matching Category and Urgency: the picker is a group
           of controls, so its heading has to name the group programmatically
           rather than sit beside it as loose text (CRIS-27). */}
-      <fieldset className="flex flex-col gap-1.5">
-        <legend className="text-sm font-semibold text-slate-900">Location (Optional)</legend>
-        <LocationPicker
-          value={draft.location}
-          onChange={(location) => setDraft((d) => ({ ...d, location }))}
-        />
-      </fieldset>
+        <fieldset className="flex flex-col gap-1.5">
+          <legend className="text-sm font-semibold text-slate-900">Location (Optional)</legend>
+          <LocationPicker
+            value={draft.location}
+            onChange={(location) => setDraft((d) => ({ ...d, location }))}
+          />
+        </fieldset>
 
-      {/* Location hint */}
-      <div className="flex flex-col gap-1.5">
-        <label htmlFor="report-location-hint" className="text-sm font-semibold text-slate-900">
-          Location Hint (Optional)
-        </label>
-        <input
-          id="report-location-hint"
-          ref={locationHintRef}
-          className={inputBase}
-          placeholder="e.g., near the blue bridge, 2nd floor"
-          value={draft.locationHint}
-          onChange={(e) => setDraft((d) => ({ ...d, locationHint: e.target.value }))}
-          maxLength={LOCATION_HINT_MAX_LENGTH}
-        />
-      </div>
+        {/* Location hint */}
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="report-location-hint" className="text-sm font-semibold text-slate-900">
+            Location Hint (Optional)
+          </label>
+          <input
+            id="report-location-hint"
+            ref={locationHintRef}
+            className={inputBase}
+            placeholder="e.g., near the blue bridge, 2nd floor"
+            value={draft.locationHint}
+            onChange={(e) => setDraft((d) => ({ ...d, locationHint: e.target.value }))}
+            maxLength={LOCATION_HINT_MAX_LENGTH}
+          />
+        </div>
 
-      {/* Photo */}
-      <div className="flex flex-col gap-1.5">
-        <span className="text-sm font-semibold text-slate-900">Add Photo (Optional)</span>
-        <button
-          type="button"
-          // The visible copy is split across three spans and an emoji, which
-          // concatenates into a noisy name. State it once, and reflect the
-          // current selection so the control is not just "button" (CRIS-27).
-          // Because this label overrides the element's content, it also has to
-          // carry the upload outcome — otherwise the only mention of a failure
-          // is text the label hides (see the live region below).
-          aria-label={photoLabel}
-          // `aria-disabled`/`aria-busy` rather than `disabled` (ADR-0037): a
-          // disabled button is blurred to the document body the instant the
-          // upload starts, dropping the user out of the form mid-interaction.
-          // The gate is the re-entry guard in the handler instead.
-          aria-disabled={photoBusy}
-          aria-busy={photoUploading}
-          onClick={() => {
-            if (photoBusy) return;
-            fileInputRef.current?.click();
-          }}
-          className={`flex flex-col items-center gap-0.5 rounded-xl border-2 border-dashed p-5 text-center transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-            photoBusy ? 'opacity-70' : ''
-          } ${
-            mediaKey
-              ? 'border-green-600 bg-green-50'
-              : photoError
-                ? 'border-red-300 bg-red-50'
-                : 'border-slate-300 hover:border-blue-400'
-          }`}
-        >
-          <span aria-hidden="true" className="text-3xl">
-            📷
-          </span>
-          {photoName ? (
-            <>
-              <span
-                className={`max-w-[90%] truncate text-sm font-medium ${mediaKey ? 'text-green-600' : 'text-slate-900'}`}
-              >
-                {photoName}
-              </span>
-              {/* Red, not the muted gray used for the idle hint — a failure must
+        {/* Photo */}
+        <div className="flex flex-col gap-1.5">
+          <span className="text-sm font-semibold text-slate-900">Add Photo (Optional)</span>
+          <button
+            type="button"
+            // The visible copy is split across three spans and an emoji, which
+            // concatenates into a noisy name. State it once, and reflect the
+            // current selection so the control is not just "button" (CRIS-27).
+            // Because this label overrides the element's content, it also has to
+            // carry the upload outcome — otherwise the only mention of a failure
+            // is text the label hides (see the live region below).
+            aria-label={photoLabel}
+            // `aria-disabled`/`aria-busy` rather than `disabled` (ADR-0037): a
+            // disabled button is blurred to the document body the instant the
+            // upload starts, dropping the user out of the form mid-interaction.
+            // The gate is the re-entry guard in the handler instead.
+            aria-disabled={photoBusy}
+            aria-busy={photoUploading}
+            onClick={() => {
+              if (photoBusy) return;
+              fileInputRef.current?.click();
+            }}
+            className={`flex flex-col items-center gap-0.5 rounded-xl border-2 border-dashed p-5 text-center transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+              photoBusy ? 'opacity-70' : ''
+            } ${
+              mediaKey
+                ? 'border-green-600 bg-green-50'
+                : photoError
+                  ? 'border-red-300 bg-red-50'
+                  : 'border-slate-300 hover:border-blue-400'
+            }`}
+          >
+            <span aria-hidden="true" className="text-3xl">
+              📷
+            </span>
+            {photoName ? (
+              <>
+                <span
+                  className={`max-w-[90%] truncate text-sm font-medium ${mediaKey ? 'text-green-600' : 'text-slate-900'}`}
+                >
+                  {photoName}
+                </span>
+                {/* Red, not the muted gray used for the idle hint — a failure must
                   not look identical to "Click to change photo" (mobile already
                   colours this; web was the odd one out). */}
-              <span
-                className={`text-xs ${photoError ? 'font-medium text-red-700' : 'text-slate-400'}`}
-              >
-                {photoUploading ? 'Uploading…' : photoError ? photoError : 'Click to change photo'}
-              </span>
-            </>
-          ) : (
-            <>
-              <span className="text-sm font-medium text-slate-900">Click to add a photo</span>
-              <span className="text-xs text-slate-400">
-                Images help responders understand the situation
-              </span>
-            </>
-          )}
-        </button>
-        {/* Persistently mounted, never conditionally rendered (ADR-0037): a live
+                <span
+                  className={`text-xs ${photoError ? 'font-medium text-red-700' : 'text-slate-400'}`}
+                >
+                  {photoUploading
+                    ? 'Uploading…'
+                    : photoError
+                      ? photoError
+                      : 'Click to change photo'}
+                </span>
+              </>
+            ) : (
+              <>
+                <span className="text-sm font-medium text-slate-900">Click to add a photo</span>
+                <span className="text-xs text-slate-400">
+                  Images help responders understand the situation
+                </span>
+              </>
+            )}
+          </button>
+          {/* Persistently mounted, never conditionally rendered (ADR-0037): a live
             region that appears at the same moment as its text is frequently
             missed. All upload state is announced here because the button's
             `aria-label` hides its own content from assistive tech. */}
-        {/* Named because the form carries more than one live region (the
+          {/* Named because the form carries more than one live region (the
             LocationPicker has its own) — the name is what lets a user, and a
             test, tell them apart. */}
-        <span role="status" aria-label="Photo upload status" className="sr-only">
-          {photoStatus}
-        </span>
-        <input
-          ref={fileInputRef}
-          type="file"
-          // Narrower than `image/*`: the presigned policy only accepts these
-          // three, so offering HEIC or GIF invites a rejection after the fact.
-          accept={ALLOWED_MEDIA_CONTENT_TYPES.join(',')}
-          className="hidden"
-          onChange={pickPhoto}
-        />
-      </div>
-
-      {/* Urgency */}
-      <fieldset ref={urgencyRef} className="flex flex-col gap-1.5">
-        <legend className="text-sm font-semibold text-slate-900">
-          Urgency <RequiredMark />
-        </legend>
-        <div className="flex flex-wrap gap-2">
-          {URGENCY_OPTIONS.map((u) => {
-            const selected = draft.urgency === u;
-            return (
-              <button
-                key={u}
-                type="button"
-                aria-pressed={selected}
-                onClick={() => setDraft((d) => ({ ...d, urgency: u }))}
-                className={`${chipBase} grow basis-[45%] ${selected ? chipSelected : chipIdle}`}
-              >
-                {u}
-              </button>
-            );
-          })}
-        </div>
-      </fieldset>
-
-      {/* Anonymous */}
-      <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
-        <div className="flex flex-1 flex-col gap-0.5">
-          <label htmlFor="report-anonymous" className="text-sm font-semibold text-slate-900">
-            Anonymous Report
-          </label>
-          <span className="text-xs text-slate-500">
-            Hide my identity from other users and responders
+          <span role="status" aria-label="Photo upload status" className="sr-only">
+            {photoStatus}
           </span>
-        </div>
-        <input
-          id="report-anonymous"
-          type="checkbox"
-          className="h-5 w-9 shrink-0 cursor-pointer accent-blue-600"
-          checked={draft.anonymous}
-          onChange={(e) => setDraft((d) => ({ ...d, anonymous: e.target.checked }))}
-        />
-      </div>
-
-      {/* Contact (hidden when anonymous) */}
-      {!draft.anonymous && (
-        <div className="flex flex-col gap-1.5">
-          <label htmlFor="report-contact" className="text-sm font-semibold text-slate-900">
-            Contact Info (Optional)
-          </label>
           <input
-            id="report-contact"
-            className={inputBase}
-            placeholder="Phone or email"
-            autoCapitalize="none"
-            inputMode="email"
-            value={draft.contact}
-            onChange={(e) => setDraft((d) => ({ ...d, contact: e.target.value }))}
+            ref={fileInputRef}
+            type="file"
+            // Narrower than `image/*`: the presigned policy only accepts these
+            // three, so offering HEIC or GIF invites a rejection after the fact.
+            accept={ALLOWED_MEDIA_CONTENT_TYPES.join(',')}
+            className="hidden"
+            onChange={pickPhoto}
           />
         </div>
-      )}
 
-      {error && (
-        <div
-          role="alert"
-          className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700"
-        >
-          {error}
+        {/* Urgency */}
+        <fieldset ref={urgencyRef} className="flex flex-col gap-1.5">
+          <legend className="text-sm font-semibold text-slate-900">
+            Urgency <RequiredMark />
+          </legend>
+          <div className="flex flex-wrap gap-2">
+            {URGENCY_OPTIONS.map((u) => {
+              const selected = draft.urgency === u;
+              return (
+                <button
+                  key={u}
+                  type="button"
+                  aria-pressed={selected}
+                  onClick={() => setDraft((d) => ({ ...d, urgency: u }))}
+                  className={`${chipBase} grow basis-[45%] ${selected ? chipSelected : chipIdle}`}
+                >
+                  {u}
+                </button>
+              );
+            })}
+          </div>
+        </fieldset>
+
+        {/* Anonymous */}
+        <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+          <div className="flex flex-1 flex-col gap-0.5">
+            <label htmlFor="report-anonymous" className="text-sm font-semibold text-slate-900">
+              Anonymous Report
+            </label>
+            <span className="text-xs text-slate-500">
+              Hide my identity from other users and responders
+            </span>
+          </div>
+          <input
+            id="report-anonymous"
+            type="checkbox"
+            className="h-5 w-9 shrink-0 cursor-pointer accent-blue-600"
+            checked={draft.anonymous}
+            onChange={(e) => setDraft((d) => ({ ...d, anonymous: e.target.checked }))}
+          />
         </div>
-      )}
 
-      {/* Submit */}
-      <button
-        type="submit"
-        // `aria-disabled` rather than `disabled`: a disabled button leaves the
-        // tab order, so the reason hanging off `aria-describedby` could never be
-        // reached by the keyboard user who most needs it (ADR-0037). The gate
-        // itself lives in `handleSubmit`.
-        aria-disabled={!canSubmit}
-        // Keyed to the blocking reason, not to `canSubmit` — while submitting
-        // there is nothing outstanding to explain, and pointing at an empty
-        // element would give the button a description that says nothing.
-        aria-describedby={blockedReason ? 'report-submit-requirements' : undefined}
-        className={`flex items-center justify-center rounded-xl bg-blue-600 px-4 py-3.5 text-[15px] font-semibold text-white transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-          canSubmit ? 'hover:bg-blue-700' : 'opacity-50'
-        }`}
-      >
-        {submitting ? 'Submitting…' : 'Submit Report'}
-      </button>
-      {blockedReason && (
-        <span id="report-submit-requirements" className="sr-only">
-          {blockedReason}
-        </span>
-      )}
+        {/* Contact (hidden when anonymous) */}
+        {!draft.anonymous && (
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="report-contact" className="text-sm font-semibold text-slate-900">
+              Contact Info (Optional)
+            </label>
+            <input
+              id="report-contact"
+              className={inputBase}
+              placeholder="Phone or email"
+              autoCapitalize="none"
+              inputMode="email"
+              value={draft.contact}
+              onChange={(e) => setDraft((d) => ({ ...d, contact: e.target.value }))}
+            />
+          </div>
+        )}
 
-      <p className="text-center text-xs text-slate-400">All reports are secure and encrypted</p>
-    </form>
+        {error && (
+          <div
+            role="alert"
+            className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+          >
+            {error}
+          </div>
+        )}
+
+        {/* Submit */}
+        <button
+          type="submit"
+          // `aria-disabled` rather than `disabled`: a disabled button leaves the
+          // tab order, so the reason hanging off `aria-describedby` could never be
+          // reached by the keyboard user who most needs it (ADR-0037). The gate
+          // itself lives in `handleSubmit`.
+          aria-disabled={!canSubmit}
+          // Keyed to the blocking reason, not to `canSubmit` — while submitting
+          // there is nothing outstanding to explain, and pointing at an empty
+          // element would give the button a description that says nothing.
+          aria-describedby={blockedReason ? 'report-submit-requirements' : undefined}
+          className={`flex items-center justify-center rounded-xl bg-blue-600 px-4 py-3.5 text-[15px] font-semibold text-white transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+            canSubmit ? 'hover:bg-blue-700' : 'opacity-50'
+          }`}
+        >
+          {submitting ? 'Submitting…' : 'Submit Report'}
+        </button>
+        {blockedReason && (
+          <span id="report-submit-requirements" className="sr-only">
+            {blockedReason}
+          </span>
+        )}
+
+        <p className="text-center text-xs text-slate-400">All reports are secure and encrypted</p>
+      </form>
+    </>
   );
 }

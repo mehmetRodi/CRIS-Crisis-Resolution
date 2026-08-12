@@ -13,6 +13,7 @@ import {
   Category,
   LOCATION_HINT_MAX_LENGTH,
   REPORT_TEXT_MAX_LENGTH,
+  ReportSubmitError,
   Urgency,
   createEmptyReportDraft,
   isReportDraftSubmittable,
@@ -20,7 +21,9 @@ import {
 } from '@crisismap/shared';
 
 import { LocationPicker } from './LocationPicker';
+import { OfflineQueueBanner } from './OfflineQueueBanner';
 import { colors, radii } from '../theme';
+import { useOfflineQueue } from '../lib/OfflineQueueContext';
 import { uploadReportMedia } from '../lib/media-upload';
 import { newClientRequestId, submitReport } from '../lib/submit-report';
 
@@ -46,9 +49,13 @@ export function ReportForm({ onMapInteractionStart, onMapInteractionEnd }: Repor
   // Set on a submit that went out without the photo the user had picked, so the
   // confirmation can say so rather than claiming an unqualified success.
   const [photoDropped, setPhotoDropped] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
+  // 'submitted': the server confirmed it. 'queued': saved locally, offline or
+  // after a retryable failure, will send automatically (CRIS-26). Both render
+  // the same confirmation view with different copy.
+  const [outcome, setOutcome] = useState<'submitted' | 'queued' | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { isOnline, enqueue } = useOfflineQueue();
   // Idempotency token (§5.4.4): stable across retries of the same report so a
   // flaky network can't create duplicates; re-minted only after success. Also
   // scopes the media upload's S3 key (CRIS-17) — a photo is picked before a
@@ -128,59 +135,95 @@ export function ReportForm({ onMapInteractionStart, onMapInteractionEnd }: Repor
     }
   }
 
+  /**
+   * Common reset after either a real send or an offline save (CRIS-26): both
+   * are "done" from the citizen's side, so they share every reset step —
+   * only the confirmation copy (driven by `outcome`) differs.
+   */
+  function finishSubmission(outcome: 'submitted' | 'queued') {
+    setOutcome(outcome);
+    // Tell the user their photo didn't make it, rather than letting an
+    // unqualified confirmation imply it did.
+    setPhotoDropped(photo !== null && mediaKey === null);
+    setDraft(createEmptyReportDraft());
+    // Retire any upload still in flight along with the report it belonged to:
+    // its key is scoped to the `clientRequestId` we are about to replace, so
+    // letting it land would attach this report's photo to the next one.
+    uploadSeq.current++;
+    setPhoto(null);
+    setMediaKey(null);
+    setPhotoError(null);
+    setPhotoUploading(false);
+    setClientRequestId(newClientRequestId());
+  }
+
   async function handleSubmit() {
     if (!canSubmit) return;
     setSubmitting(true);
     setError(null);
 
+    const submission = toReportSubmission(draft, mediaKey ? [mediaKey] : []);
+
     try {
-      await submitReport(toReportSubmission(draft, mediaKey ? [mediaKey] : []), clientRequestId);
-      setSubmitted(true);
-      // Tell the user their photo didn't make it, rather than letting an
-      // unqualified "Report Submitted" imply it did.
-      setPhotoDropped(photo !== null && mediaKey === null);
-      setDraft(createEmptyReportDraft());
-      // Retire any upload still in flight along with the report it belonged to:
-      // its key is scoped to the `clientRequestId` we are about to replace, so
-      // letting it land would attach this report's photo to the next one.
-      uploadSeq.current++;
-      setPhoto(null);
-      setMediaKey(null);
-      setPhotoError(null);
-      setPhotoUploading(false);
-      setClientRequestId(newClientRequestId());
+      // Known-offline: skip the network call entirely rather than waiting on
+      // a call that can only time out (CRIS-26).
+      if (!isOnline) {
+        await enqueue(submission, clientRequestId);
+        finishSubmission('queued');
+        return;
+      }
+      await submitReport(submission, clientRequestId);
+      finishSubmission('submitted');
     } catch (e) {
-      const message = e instanceof Error && e.message ? e.message : null;
-      setError(message ?? 'Something went wrong. Please try again.');
+      if (e instanceof ReportSubmitError && !e.retryable) {
+        // The server actively rejected this — retrying an identical payload
+        // would too, so this stays a same-session error the citizen can see
+        // and act on, not something silently queued.
+        setError(e.message || 'Something went wrong. Please try again.');
+      } else {
+        // Either a transport failure (offline, DNS, timeout) or an unexpected
+        // error of unknown shape — safe to assume retryable and queue it
+        // rather than lose the report (CRIS-26 §5.4.4 idempotency).
+        await enqueue(submission, clientRequestId);
+        finishSubmission('queued');
+      }
     } finally {
       setSubmitting(false);
     }
   }
 
-  if (submitted) {
+  if (outcome) {
     return (
-      <View style={styles.successBox}>
-        <View style={styles.successBadge}>
-          <Text style={styles.successCheck}>✓</Text>
-        </View>
-        <Text style={styles.successTitle}>Report Submitted</Text>
-        <Text style={styles.successBody}>
-          Thank you for your report. Emergency coordinators will review it shortly.
-        </Text>
-        {photoDropped && (
-          <Text style={styles.successCaveat}>
-            Your photo could not be uploaded, so the report was sent without it.
+      <>
+        <OfflineQueueBanner />
+        <View style={styles.successBox}>
+          <View style={styles.successBadge}>
+            <Text style={styles.successCheck}>✓</Text>
+          </View>
+          <Text style={styles.successTitle}>
+            {outcome === 'queued' ? 'Report Saved' : 'Report Submitted'}
           </Text>
-        )}
-        <Pressable onPress={() => setSubmitted(false)} hitSlop={8}>
-          <Text style={styles.successAgain}>Submit another report</Text>
-        </Pressable>
-      </View>
+          <Text style={styles.successBody}>
+            {outcome === 'queued'
+              ? "Your report has been saved on this device and will send automatically once you're back online."
+              : 'Thank you for your report. Emergency coordinators will review it shortly.'}
+          </Text>
+          {photoDropped && (
+            <Text style={styles.successCaveat}>
+              Your photo could not be uploaded, so the report was sent without it.
+            </Text>
+          )}
+          <Pressable onPress={() => setOutcome(null)} hitSlop={8}>
+            <Text style={styles.successAgain}>Submit another report</Text>
+          </Pressable>
+        </View>
+      </>
     );
   }
 
   return (
     <View style={styles.form}>
+      <OfflineQueueBanner />
       {/* Description */}
       <View style={styles.field}>
         <Text style={styles.label}>
