@@ -1,15 +1,17 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider, useAuth } from './AuthContext';
 
-const { getCurrentUserMock, fetchUserAttributesMock } = vi.hoisted(() => ({
+const { getCurrentUserMock, fetchUserAttributesMock, fetchAuthSessionMock } = vi.hoisted(() => ({
   getCurrentUserMock: vi.fn(),
   fetchUserAttributesMock: vi.fn(),
+  fetchAuthSessionMock: vi.fn(),
 }));
 
 vi.mock('aws-amplify/auth', () => ({
   getCurrentUser: getCurrentUserMock,
   fetchUserAttributes: fetchUserAttributesMock,
+  fetchAuthSession: fetchAuthSessionMock,
   signIn: vi.fn(),
   signUp: vi.fn(),
   signOut: vi.fn(),
@@ -18,14 +20,22 @@ vi.mock('aws-amplify/auth', () => ({
 }));
 
 function AuthProbe() {
-  const { isAuthenticated, email } = useAuth();
-  return <div>{isAuthenticated ? `in:${email}` : 'out'}</div>;
+  const { isAuthenticated, email, roles, highestRole } = useAuth();
+  return (
+    <div>
+      {isAuthenticated ? `in:${email}` : 'out'}
+      <span data-testid="roles">{roles.join(',')}</span>
+      <span data-testid="highest-role">{highestRole ?? 'none'}</span>
+    </div>
+  );
 }
 
 describe('AuthContext', () => {
   beforeEach(() => {
     getCurrentUserMock.mockReset();
     fetchUserAttributesMock.mockReset();
+    fetchAuthSessionMock.mockReset();
+    fetchAuthSessionMock.mockResolvedValue({ tokens: undefined });
   });
 
   it('throws when useAuth is used outside an AuthProvider', () => {
@@ -54,5 +64,36 @@ describe('AuthContext', () => {
       </AuthProvider>,
     );
     expect(await screen.findByText('out')).toBeInTheDocument();
+    expect(screen.getByTestId('highest-role')).toHaveTextContent('none');
+  });
+
+  it('exposes Cognito groups from the ID token as roles, and the highest as highestRole', async () => {
+    getCurrentUserMock.mockResolvedValue({ userId: 'u1', username: 'coordinator@example.com' });
+    fetchUserAttributesMock.mockResolvedValue({ email: 'coordinator@example.com' });
+    fetchAuthSessionMock.mockResolvedValue({
+      tokens: { idToken: { payload: { 'cognito:groups': ['RESPONDER', 'COORDINATOR'] } } },
+    });
+    render(
+      <AuthProvider>
+        <AuthProbe />
+      </AuthProvider>,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId('roles')).toHaveTextContent('RESPONDER,COORDINATOR'),
+    );
+    expect(screen.getByTestId('highest-role')).toHaveTextContent('COORDINATOR');
+  });
+
+  it('degrades to no roles when the session has no ID token (e.g. guest identity)', async () => {
+    getCurrentUserMock.mockResolvedValue({ userId: 'u1', username: 'citizen@example.com' });
+    fetchUserAttributesMock.mockResolvedValue({ email: 'citizen@example.com' });
+    fetchAuthSessionMock.mockRejectedValue(new Error('no session'));
+    render(
+      <AuthProvider>
+        <AuthProbe />
+      </AuthProvider>,
+    );
+    expect(await screen.findByText('in:citizen@example.com')).toBeInTheDocument();
+    expect(screen.getByTestId('highest-role')).toHaveTextContent('none');
   });
 });

@@ -17,7 +17,7 @@ import { loadQueue, saveQueue } from './offline-queue-storage';
 import { submitReport } from './submit-report';
 
 /**
- * Offline report queue (CRIS-26, ADR-0040). Mobile twin of the web
+ * Offline report queue (CRIS-26, ADR-0044). Mobile twin of the web
  * `OfflineQueueContext` (`apps/web/src/OfflineQueueContext.tsx`) — same shared
  * queue/backoff/staleness logic from `@crisismap/shared`, same single-shared-
  * instance-via-context design (not a bare hook, so the banner and the report

@@ -151,6 +151,34 @@ export const UserRole = {
 
 export type UserRole = (typeof UserRole)[keyof typeof UserRole];
 
+/**
+ * Privilege order for resolving a caller's *single* effective role out of
+ * however many Cognito groups their token carries (CRIS-24). Used both
+ * server-side (an AppSync Cognito identity's `groups`) and client-side (the ID
+ * token's `cognito:groups` claim in `AuthContext`) so the two never drift.
+ */
+const ROLE_RANK: readonly UserRole[] = [
+  UserRole.CITIZEN,
+  UserRole.VOLUNTEER,
+  UserRole.RESPONDER,
+  UserRole.COORDINATOR,
+  UserRole.ADMIN,
+];
+
+/** The highest-ranked `UserRole` among `groups`, or `null` if none match. */
+export function highestRole(groups?: readonly string[] | null): UserRole | null {
+  let best: UserRole | null = null;
+  let bestRank = -1;
+  for (const group of groups ?? []) {
+    const rank = ROLE_RANK.indexOf(group as UserRole);
+    if (rank > bestRank) {
+      bestRank = rank;
+      best = group as UserRole;
+    }
+  }
+  return best;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Priority bands — design doc §5.4.2                                          */
 /* -------------------------------------------------------------------------- */

@@ -1,4 +1,4 @@
-# ADR-0040: Offline save, retry, and recovery for citizen report submission (CRIS-26)
+# ADR-0044: Offline save, retry, and recovery for citizen report submission (CRIS-26)
 
 - **Status:** Accepted
 - **Date:** 2026-08-06
