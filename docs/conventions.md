@@ -70,7 +70,9 @@ rationale in ADR-0011):
   resolver and granted table access in `backend.ts`, set `resourceGroupName: 'data'` to avoid
   a nested-stack circular dependency.
 - **Custom subscriptions need a `.handler()`**, not just an auth rule (an AppSync JS resolver
-  that sets the filter).
+  that sets the filter). With the currently pinned Amplify schema processor,
+  `a.handler.custom` does not support Identity Pool guest/authenticated rules; decide and document
+  another public auth mode before exposing an anonymous subscription (ADR-0046).
 
 ## Testing
 

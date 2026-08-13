@@ -121,8 +121,9 @@ CloudFormation cannot recover ciphertext after the waiting window closes.
   role-assignment trigger are known tracing gaps.
 - **Dashboard:** CloudWatch → Dashboards → `CrisisMap-<stackName>`. One screen for the §3.2
   service targets (submission p95 < 800 ms, classification p95 < 15 s, real-time p95 < 2 s,
-  99.9%). Publish invocation/error metrics are active because worker fan-out is wired; end-to-end
-  subscription propagation cannot be measured until CRIS-28 connects subscribers.
+  99.9%). Publish invocation/error metrics cover classification and transition fan-out. CRIS-28
+  connects subscribers, but end-to-end browser delivery latency still requires the deployed
+  integration/system measurement owned by CRIS-29/35.
 - **Alarms → SNS:** all alarms publish to the CMK-encrypted ops topic `OpsAlarmTopic`; its key and
   topic policies authorize same-account CloudWatch alarms and SNS delivery (ADR-0043). **Subscribe an
   endpoint post-deploy** (it is environment-specific, so it is not in code):
@@ -142,7 +143,26 @@ CloudFormation cannot recover ciphertext after the waiting window closes.
 | `ClassifyWorkerThrottles`     | Worker hitting the concurrency ceiling under load                                 | Review reserved concurrency vs the 1,000 writes/min target (§3.2); raise account concurrency if needed.                                                     |
 | `SubmitReportErrors`          | Citizens may be unable to file reports (availability, §3.2)                       | Check `submit-report` logs, DynamoDB throttling/conditional-check failures, AppSync health.                                                                 |
 | `TransitionReportErrors`      | Coordinator status transitions failing                                            | Check `transition-report` logs — often a version conflict (`CONFLICT`) or an invalid transition.                                                            |
-| `PublishReportUpdateErrors`   | The worker-facing publish resolver is failing                                     | Check `publish-report-update` and `publish.failed` logs. Once subscriptions land, also check AppSync subscription health.                                   |
+| `PublishReportUpdateErrors`   | The internal publish resolver is failing; live clients may be stale               | Check `publish-report-update`, `publish.failed`, and `transition.publish.failed` logs, then AppSync real-time connection health.                            |
+
+### CRIS-28 post-deploy smoke test
+
+1. Sign in to two browser sessions with operational roles and open `/coordinator` in both. Confirm
+   each header reaches **Live updates connected**; an unauthenticated browser must not be able to
+   register the subscription.
+2. Submit a report and wait for classification. Confirm both coordinator queues update without
+   pressing Refresh and that neither client receives raw report text, reporter identity/contact,
+   media keys, or internal notes in the subscription payload.
+3. Change the report status in one coordinator session. Confirm the second session updates its
+   queue and selected timeline, proving `transition-report` publishes after its durable write.
+4. Open `/volunteer` with an allowed role and confirm the redacted task moves lanes after a report
+   status update while its existing assignment/team label remains intact.
+5. Interrupt one browser's network connection, perform another update elsewhere, and restore the
+   connection. Confirm the indicator reconnects and the durable snapshot reload catches the missed
+   state. If any step fails, manual Refresh must still recover the current DynamoDB-backed state.
+
+The public `/map` is intentionally not part of this smoke test: anonymous subscription auth, the
+baseline public query, and incident markers are deferred together by ADR-0046.
 
 ### Recover records from the pipe DLQ
 
