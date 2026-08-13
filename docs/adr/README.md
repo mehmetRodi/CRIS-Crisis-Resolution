@@ -59,4 +59,6 @@ behind the code — essential when refactoring or extending the system.
 | [0041](0041-cognito-roles-and-route-authorization.md)                | Cognito roles, route authorization, Report auth hardening (CRIS-24) | Accepted                         |
 | [0042](0042-server-enforced-volunteer-task-projection.md)            | Server-enforced volunteer task projection                           | Accepted                         |
 | [0043](0043-customer-managed-key-for-triage-data-plane.md)           | Customer-managed key for the triage data plane (CRIS-25)            | Accepted                         |
+| [0044](0044-offline-save-retry-and-recovery.md)                      | Offline save, retry, and recovery (CRIS-26)                         | Accepted                         |
+| [0045](0045-offline-queue-omits-contact-pii.md)                      | Offline queue omits optional contact PII                            | Accepted                         |
 | [0046](0046-api-integration-test-strategy.md)                        | API integration tests: mocked adapter + live sandbox (CRIS-29)      | Accepted                         |

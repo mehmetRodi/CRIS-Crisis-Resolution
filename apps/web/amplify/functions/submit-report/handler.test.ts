@@ -93,6 +93,13 @@ describe('submitReport handler integration', () => {
     expect(items[1]?.Put.Item).not.toHaveProperty('reporterContact');
   });
 
+  it('preserves the stable VALIDATION prefix without touching DynamoDB', async () => {
+    await expect(
+      invokeHandler(handler, appSyncEvent({ ...validArgs, text: '   ' })),
+    ).rejects.toThrow(/^VALIDATION:/);
+    expect(fakeDynamo.sent).toHaveLength(0);
+  });
+
   it.each(['TransactionCanceledException', 'IdempotentParameterMismatchException'])(
     'returns the original report when DynamoDB signals %s',
     async (errorName) => {

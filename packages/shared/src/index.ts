@@ -5,4 +5,5 @@ export * from './duplicate';
 export * from './report-form';
 export * from './auth';
 export * from './media';
+export * from './offline-queue';
 export * from './volunteer';

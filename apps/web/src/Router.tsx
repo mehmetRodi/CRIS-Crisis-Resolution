@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import { UserRole } from '@crisismap/shared';
 import { AuthProvider, useAuth } from './AuthContext';
+import { OfflineQueueProvider } from './OfflineQueueContext';
 import { RequireRole } from './RequireRole';
 import App from './App';
 import { ReportPage } from './screens/ReportPage';
@@ -76,37 +77,42 @@ export function Router() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <Routes>
-          <Route path="/" element={<App />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/signup" element={<SignupPage />} />
-          <Route path="/confirm-signup" element={<ConfirmSignupPage />} />
-          <Route path="/report" element={<ReportPage />} />
-          <Route path="/map" element={<MapPage />} />
-          <Route
-            path="/coordinator"
-            element={
-              <RequireRole allow={[UserRole.COORDINATOR, UserRole.ADMIN]}>
-                <CoordinatorRoute />
-              </RequireRole>
-            }
-          />
-          <Route
-            path="/volunteer"
-            element={
-              <RequireRole
-                allow={[
-                  UserRole.VOLUNTEER,
-                  UserRole.RESPONDER,
-                  UserRole.COORDINATOR,
-                  UserRole.ADMIN,
-                ]}
-              >
-                <VolunteerRoute />
-              </RequireRole>
-            }
-          />
-        </Routes>
+        {/* Root-level (CRIS-26), not per-route: the flush loop and
+            connectivity subscription must persist across navigation, not
+            restart every time ReportForm mounts. */}
+        <OfflineQueueProvider>
+          <Routes>
+            <Route path="/" element={<App />} />
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/signup" element={<SignupPage />} />
+            <Route path="/confirm-signup" element={<ConfirmSignupPage />} />
+            <Route path="/report" element={<ReportPage />} />
+            <Route path="/map" element={<MapPage />} />
+            <Route
+              path="/coordinator"
+              element={
+                <RequireRole allow={[UserRole.COORDINATOR, UserRole.ADMIN]}>
+                  <CoordinatorRoute />
+                </RequireRole>
+              }
+            />
+            <Route
+              path="/volunteer"
+              element={
+                <RequireRole
+                  allow={[
+                    UserRole.VOLUNTEER,
+                    UserRole.RESPONDER,
+                    UserRole.COORDINATOR,
+                    UserRole.ADMIN,
+                  ]}
+                >
+                  <VolunteerRoute />
+                </RequireRole>
+              }
+            />
+          </Routes>
+        </OfflineQueueProvider>
       </AuthProvider>
     </BrowserRouter>
   );

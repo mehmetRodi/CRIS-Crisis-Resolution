@@ -355,6 +355,22 @@ describe('live AppSync API contract', () => {
     expect(first.updatedAt).toEqual(expect.any(String));
   });
 
+  it('returns the stable validation prefix for a deterministic submission rejection', async () => {
+    const response = await graphql(
+      tokenFor(UserRole.CITIZEN),
+      `
+        mutation SubmitInvalidReport($text: String!, $clientRequestId: String!) {
+          submitReport(text: $text, clientRequestId: $clientRequestId) {
+            id
+          }
+        }
+      `,
+      { text: '   ', clientRequestId: `cris29-invalid-submit-${RUN_ID}` },
+    );
+
+    expectErrorPrefix(response, 'VALIDATION:');
+  });
+
   it('accepts reporting clients through guest and authenticated Identity Pool auth', async () => {
     await signOut().catch(() => undefined);
     const reportingClient = generateClient<Schema>({ authMode: 'identityPool' });

@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ReportSubmitError } from '@crisismap/shared';
 
 // Mock the submit path so the test never hits the network. `submitReport`
 // resolves; `newClientRequestId` is deterministic.
@@ -13,6 +14,16 @@ vi.mock('../lib/submit-report', () => ({
 const uploadReportMedia = vi.fn();
 vi.mock('../lib/media-upload', () => ({
   uploadReportMedia: (...args: unknown[]) => uploadReportMedia(...args),
+}));
+
+// Mock the offline queue (CRIS-26) so this file tests ReportForm's own
+// behavior in isolation from the queue's own logic (covered by
+// OfflineQueueContext.test.tsx). Defaults to "online" so all the pre-existing
+// tests below exercise the normal send path unchanged.
+const enqueue = vi.fn();
+const useOfflineQueueMock = vi.fn();
+vi.mock('../OfflineQueueContext', () => ({
+  useOfflineQueue: () => useOfflineQueueMock(),
 }));
 
 // jsdom has no WebGL; maplibre-gl throws on import outside a real browser.
@@ -54,6 +65,15 @@ describe('web ReportForm', () => {
     submitReport.mockResolvedValue({ reportId: 'r1', status: 'NEW' });
     uploadReportMedia.mockReset();
     uploadReportMedia.mockResolvedValue('reports/test-request-id/photo.jpg');
+    enqueue.mockReset();
+    enqueue.mockResolvedValue(undefined);
+    useOfflineQueueMock.mockReset();
+    useOfflineQueueMock.mockReturnValue({
+      isOnline: true,
+      pendingCount: 0,
+      isStale: false,
+      enqueue,
+    });
   });
 
   it('gates submit until required fields are valid', () => {
@@ -214,5 +234,91 @@ describe('web ReportForm', () => {
     // An unqualified "Report Submitted" would let the user believe the photo
     // went with it.
     expect(await screen.findByText(/sent without it/i)).toBeInTheDocument();
+  });
+
+  describe('offline save and retry (CRIS-26)', () => {
+    it('saves the report locally instead of submitting when known offline', async () => {
+      useOfflineQueueMock.mockReturnValue({
+        isOnline: false,
+        pendingCount: 0,
+        isStale: false,
+        enqueue,
+      });
+      render(<ReportForm />);
+
+      fillRequired(/fire/i, /^high$/i);
+      fireEvent.click(screen.getByRole('button', { name: /submit report/i }));
+
+      await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
+      expect(submitReport).not.toHaveBeenCalled();
+      expect(await screen.findByText(/report saved/i)).toBeInTheDocument();
+
+      const [submission, requestId] = enqueue.mock.calls[0] ?? [];
+      expect(requestId).toBe('test-request-id');
+      expect(submission).toMatchObject({ category: 'FIRE', urgency: 'HIGH' });
+    });
+
+    it('keeps the form intact when durable offline storage fails', async () => {
+      useOfflineQueueMock.mockReturnValue({
+        isOnline: false,
+        pendingCount: 0,
+        isStale: false,
+        enqueue,
+      });
+      enqueue.mockRejectedValue(new DOMException('Quota exceeded', 'QuotaExceededError'));
+      render(<ReportForm />);
+
+      fillRequired();
+      fireEvent.click(screen.getByRole('button', { name: /submit report/i }));
+
+      expect(await screen.findByText(/could not be saved on this device/i)).toBeInTheDocument();
+      expect(screen.getByRole('form', { name: /emergency report/i })).toBeInTheDocument();
+      expect(screen.getByLabelText(/description/i)).toHaveValue(VALID_TEXT);
+      expect(screen.queryByText(/report saved/i)).not.toBeInTheDocument();
+    });
+
+    it('discloses that contact information is omitted from the offline copy', async () => {
+      useOfflineQueueMock.mockReturnValue({
+        isOnline: false,
+        pendingCount: 0,
+        isStale: false,
+        enqueue,
+      });
+      render(<ReportForm />);
+
+      fillRequired();
+      fireEvent.change(screen.getByLabelText(/contact info/i), {
+        target: { value: 'citizen@example.com' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /submit report/i }));
+
+      expect(await screen.findByText(/contact information was not stored/i)).toBeInTheDocument();
+    });
+
+    it('queues the report for retry when submission fails as retryable', async () => {
+      submitReport.mockRejectedValue(new ReportSubmitError('Network request failed', true));
+      render(<ReportForm />);
+
+      fillRequired();
+      fireEvent.click(screen.getByRole('button', { name: /submit report/i }));
+
+      await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
+      expect(await screen.findByText(/report saved/i)).toBeInTheDocument();
+    });
+
+    it('shows the inline error and does not queue when submission fails as non-retryable', async () => {
+      submitReport.mockRejectedValue(
+        new ReportSubmitError('Report text failed validation.', false),
+      );
+      render(<ReportForm />);
+
+      fillRequired();
+      fireEvent.click(screen.getByRole('button', { name: /submit report/i }));
+
+      expect(await screen.findByText(/report text failed validation/i)).toBeInTheDocument();
+      expect(enqueue).not.toHaveBeenCalled();
+      // Still the form, not the confirmation — the citizen is present and can retry.
+      expect(screen.getByRole('form', { name: /emergency report/i })).toBeInTheDocument();
+    });
   });
 });
