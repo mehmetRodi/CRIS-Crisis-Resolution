@@ -1,5 +1,5 @@
 /**
- * Live API contract tests for a disposable personal sandbox (CRIS-29, ADR-0044).
+ * Live API contract tests for a disposable personal sandbox (CRIS-29, ADR-0046).
  *
  * These tests create Cognito users, DynamoDB-backed model rows, append-only audit/
  * idempotency records, and one S3 object. They must never point at a shared stage.
@@ -14,8 +14,10 @@ import {
 } from '@aws-sdk/client-cognito-identity-provider';
 import { Amplify } from 'aws-amplify';
 import { fetchAuthSession, signIn, signOut } from 'aws-amplify/auth';
+import { generateClient } from 'aws-amplify/data';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { ReportStatus, UserRole } from '@crisismap/shared';
+import { parseMediaUploadFields, ReportStatus, UserRole } from '@crisismap/shared';
+import type { Schema } from '../../amplify/data/resource';
 import outputs from '../../amplify_outputs.json';
 
 const REQUIRED_TARGET = 'personal-sandbox';
@@ -69,10 +71,11 @@ const config = outputs as SandboxOutputs;
 const createdUsers: string[] = [];
 const cleanupMutations: Array<{ query: string; variables: Record<string, unknown> }> = [];
 const tokens = new Map<UserRole, string>();
+const usernames = new Map<UserRole, string>();
+const submittedReportIds = new Set<string>();
 let cognito: CognitoIdentityProviderClient;
 let userPoolId: string;
 let endpoint: string;
-let submittedReportId: string | undefined;
 let fixtureReportId: string;
 let amplifyConfigured = false;
 
@@ -166,6 +169,12 @@ function tokenFor(role: UserRole): string {
   const token = tokens.get(role);
   if (!token) throw new Error(`No live-test token was created for ${role}.`);
   return token;
+}
+
+function usernameFor(role: UserRole): string {
+  const username = usernames.get(role);
+  if (!username) throw new Error(`No live-test username was created for ${role}.`);
+  return username;
 }
 
 async function createCoordinatorFixture(): Promise<{
@@ -276,7 +285,8 @@ describe('live AppSync API contract', () => {
       UserRole.RESPONDER,
       UserRole.COORDINATOR,
     ]) {
-      const { token } = await createRoleUser(role);
+      const { username, token } = await createRoleUser(role);
+      usernames.set(role, username);
       tokens.set(role, token);
     }
     fixtureReportId = (await createCoordinatorFixture()).reportId;
@@ -288,11 +298,11 @@ describe('live AppSync API contract', () => {
       for (const cleanup of cleanupMutations) {
         await graphql(coordinatorToken, cleanup.query, cleanup.variables).catch(() => undefined);
       }
-      if (submittedReportId) {
+      for (const reportId of submittedReportIds) {
         await graphql(
           coordinatorToken,
           'mutation DeleteReport($input: DeleteReportInput!) { deleteReport(input: $input) { id } }',
-          { input: { id: submittedReportId } },
+          { input: { id: reportId } },
         ).catch(() => undefined);
       }
     }
@@ -333,7 +343,7 @@ describe('live AppSync API contract', () => {
         variables,
       ),
     ).submitReport;
-    submittedReportId = first.id;
+    submittedReportIds.add(first.id);
 
     expect(replay.id).toBe(first.id);
     expect(first).toMatchObject({
@@ -343,6 +353,62 @@ describe('live AppSync API contract', () => {
     });
     expect(first.reporterId).toEqual(expect.any(String));
     expect(first.updatedAt).toEqual(expect.any(String));
+  });
+
+  it('accepts reporting clients through guest and authenticated Identity Pool auth', async () => {
+    await signOut().catch(() => undefined);
+    const reportingClient = generateClient<Schema>({ authMode: 'identityPool' });
+
+    const guestResult = await reportingClient.mutations.submitReport({
+      text: 'CRIS-29 guest Identity Pool report',
+      clientRequestId: `cris29-guest-submit-${RUN_ID}`,
+      isAnonymous: true,
+      reporterContact: 'must-be-discarded@example.com',
+    });
+    if (guestResult.errors?.length || !guestResult.data) {
+      throw new Error(
+        `Guest Identity Pool submission failed: ${JSON.stringify(guestResult.errors ?? guestResult)}`,
+      );
+    }
+    submittedReportIds.add(guestResult.data.id);
+    expect(guestResult.data).toMatchObject({
+      status: ReportStatus.NEW,
+      reporterId: null,
+      reporterContact: null,
+      isAnonymous: true,
+    });
+
+    const citizenUsername = usernameFor(UserRole.CITIZEN);
+    const signInResult = await signIn({ username: citizenUsername, password: PASSWORD });
+    if (!signInResult.isSignedIn) {
+      throw new Error(
+        `Citizen did not complete sign-in (${signInResult.nextStep.signInStep}) for Identity Pool coverage.`,
+      );
+    }
+    try {
+      const authenticatedResult = await reportingClient.mutations.submitReport({
+        text: 'CRIS-29 authenticated Identity Pool report',
+        clientRequestId: `cris29-authenticated-submit-${RUN_ID}`,
+        isAnonymous: false,
+        reporterContact: 'cris29-identity-pool@example.com',
+      });
+      if (authenticatedResult.errors?.length || !authenticatedResult.data) {
+        throw new Error(
+          `Authenticated Identity Pool submission failed: ${JSON.stringify(
+            authenticatedResult.errors ?? authenticatedResult,
+          )}`,
+        );
+      }
+      submittedReportIds.add(authenticatedResult.data.id);
+      expect(authenticatedResult.data).toMatchObject({
+        status: ReportStatus.NEW,
+        reporterId: null,
+        reporterContact: 'cris29-identity-pool@example.com',
+        isAnonymous: false,
+      });
+    } finally {
+      await signOut().catch(() => undefined);
+    }
   });
 
   it('enforces role, legality, and optimistic locking on report transitions', async () => {
@@ -409,9 +475,7 @@ describe('live AppSync API contract', () => {
         `,
       ),
     );
-    const task = response.listVolunteerTasks.find(({ reportId }) =>
-      reportId.startsWith('cris29-report-'),
-    );
+    const task = response.listVolunteerTasks.find(({ reportId }) => reportId === fixtureReportId);
     expect(task).toMatchObject({
       summary: 'Deliver emergency supplies',
       teamName: 'CRIS-29 volunteers',
@@ -431,26 +495,24 @@ describe('live AppSync API contract', () => {
     ).toBe(true);
   });
 
-  it('uploads a small object through the signed media POST policy', async () => {
-    const upload = requireData(
-      await graphql<{
-        createMediaUploadUrl: { url: string; fields: Record<string, string>; key: string };
-      }>(
-        tokenFor(UserRole.CITIZEN),
-        `
-          mutation CreateMediaUploadUrl($clientRequestId: String!, $contentType: String!) {
-            createMediaUploadUrl(clientRequestId: $clientRequestId, contentType: $contentType) {
-              url
-              fields
-              key
-            }
-          }
-        `,
-        { clientRequestId: `cris29-media-${RUN_ID}`, contentType: 'image/png' },
-      ),
-    ).createMediaUploadUrl;
+  it('uploads a small object through the guest Identity Pool signed media POST policy', async () => {
+    await signOut().catch(() => undefined);
+    const reportingClient = generateClient<Schema>({ authMode: 'identityPool' });
+    const uploadResult = await reportingClient.mutations.createMediaUploadUrl({
+      clientRequestId: `cris29-media-${RUN_ID}`,
+      contentType: 'image/png',
+    });
+    if (uploadResult.errors?.length || !uploadResult.data) {
+      throw new Error(
+        `Guest Identity Pool media presign failed: ${JSON.stringify(
+          uploadResult.errors ?? uploadResult,
+        )}`,
+      );
+    }
+    const upload = uploadResult.data;
     const body = new FormData();
-    for (const [name, value] of Object.entries(upload.fields)) body.append(name, value);
+    const fields = parseMediaUploadFields(upload.fields);
+    for (const [name, value] of Object.entries(fields)) body.append(name, value);
     body.append(
       'file',
       new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' }),

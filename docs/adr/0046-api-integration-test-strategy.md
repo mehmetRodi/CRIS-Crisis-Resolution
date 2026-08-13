@@ -1,10 +1,11 @@
-# ADR-0044: API integration tests — mocked adapter layer in CI, opt-in live sandbox suite
+# ADR-0046: API integration tests — mocked adapter layer in CI, opt-in live sandbox suite
 
 - **Status:** Accepted
 - **Date:** 2026-08-13
 - **Deciders:** Team (CRIS-29)
 - **Relates to:** ADR-0011 (custom resolver conventions), ADR-0012 (amplify_outputs in CI),
-  ADR-0016/0018 (CD pipeline), ADR-0030 (publish auth), ADR-0042 (volunteer projection)
+  ADR-0016/0018 (CD pipeline), ADR-0030 (publish auth), ADR-0042 (volunteer projection),
+  ADR-0044/0045 (offline retry/error contract and offline PII boundary)
 
 ## Context
 
@@ -12,9 +13,10 @@ Every custom AppSync operation follows ADR-0011's split: pure logic in `core.ts`
 and a thin AWS adapter in `handler.ts`. The adapter layer had **no tests at all**: identity
 extraction (`AppSyncIdentityCognito` → `reporterId`/role), the exact DynamoDB transaction
 shapes, the idempotent-replay branches, and the stable error-code contract
-(`CONFLICT:` / `FORBIDDEN:` / `ILLEGAL_TRANSITION:` / `NOT_FOUND:` prefixes parsed by
-`apps/web/src/lib/transition-report.ts`) were unasserted, and `publish-report-update` had no
-test file. ADR-0011 exists precisely because unit tests missed live failures in this layer.
+(`VALIDATION:` for deterministic submission rejections plus `CONFLICT:` / `FORBIDDEN:` /
+`ILLEGAL_TRANSITION:` / `NOT_FOUND:` for transitions) were not asserted at this boundary, and
+`publish-report-update` had no test file. ADR-0011 exists precisely because unit tests missed
+live failures in this layer.
 
 The only end-to-end guidance was a manual instruction in `docs/conventions.md`: smoke-test
 write paths by hand against a personal sandbox. CI has no AWS credentials (ADR-0012 builds
@@ -52,9 +54,10 @@ against "CRIS-29/35".
    `*.int.test.ts`, excluded from `npm test` and run explicitly with
    `npm run test:integration` against a deployed personal sandbox (`npx ampx sandbox`) with
    real AWS credentials. It provisions throwaway role users via Cognito admin APIs, exercises
-   the guarded mutations end-to-end (idempotent replay, transition legality/role/lock
-   errors, the volunteer projection's PII boundary, presigned media upload), and replaces the
-   manual smoke-test instruction in `docs/conventions.md`.
+   submission through User Pool plus guest/authenticated Identity Pool authorization, and covers
+   guarded mutations end-to-end (idempotent replay, transition legality/role/lock errors, the
+   volunteer projection's PII boundary, presigned media upload). It replaces the manual
+   smoke-test instruction in `docs/conventions.md`.
 4. **The API reference is `docs/api.md`** — hand-written, covering every operation, its auth
    modes, arguments/returns, error contract, and known contract quirks (e.g. `ReportEvent`
    rows written by custom resolvers carry no `updatedAt`, so reads must use an explicit

@@ -77,7 +77,7 @@ rationale in ADR-0011):
 - Domain logic (state machine, scoring) must have unit tests — it's the safety-critical core.
 - Every custom resolver has a co-located handler integration test that imports the real handler
   and fakes only its AWS SDK boundary. These tests run in `npm test` and pin identity extraction,
-  command/transaction shapes, error prefixes, and redaction contracts (ADR-0044).
+  command/transaction shapes, error prefixes, and redaction contracts (ADR-0046).
 - Live AWS coverage is opt-in and sandbox-only. Start `npx ampx sandbox`, then run
   `CRISISMAP_INTEGRATION_TARGET=personal-sandbox npm run test:integration` from the repository
   root. The exact flag is a destructive-write acknowledgement: the suite creates temporary users,

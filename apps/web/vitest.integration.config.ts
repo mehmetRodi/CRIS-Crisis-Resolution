@@ -1,7 +1,7 @@
 import { defineConfig } from 'vitest/config';
 
 /**
- * Opt-in tests against a deployed personal Amplify sandbox (ADR-0044).
+ * Opt-in tests against a deployed personal Amplify sandbox (ADR-0046).
  * Kept separate from vite.config.ts so `npm test` never needs AWS credentials.
  */
 export default defineConfig({

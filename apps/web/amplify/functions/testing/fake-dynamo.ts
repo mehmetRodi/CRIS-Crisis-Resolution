@@ -1,5 +1,5 @@
 /**
- * Hand-rolled stand-in for `DynamoDBDocumentClient` (ADR-0044).
+ * Hand-rolled stand-in for `DynamoDBDocumentClient` (ADR-0046).
  *
  * Handler modules build their document client at import time
  * (`DynamoDBDocumentClient.from(...)` at module scope), so a per-test instance

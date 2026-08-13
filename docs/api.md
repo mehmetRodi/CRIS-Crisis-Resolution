@@ -43,10 +43,10 @@ idempotency record in one DynamoDB transaction.
 when AppSync presents a Cognito User Pool identity. Identity Pool and guest calls do not expose a
 User Pool `sub` to this handler, so their stored `reporterId` is null.
 
-**Errors:** validation errors are descriptive `SubmitValidationError` messages without a stable
-prefix. DynamoDB failures propagate unless they are either idempotent-replay signal
-(`TransactionCanceledException` or `IdempotentParameterMismatchException`) and the original
-report can be loaded.
+**Errors:** deterministic input rejections use the stable `VALIDATION:` prefix; clients may strip
+the prefix for display and must not retry the same rejected input unchanged. Other DynamoDB
+failures propagate unless they are an idempotent-replay signal (`TransactionCanceledException` or
+`IdempotentParameterMismatchException`) and the original report can be loaded.
 
 ### `createMediaUploadUrl` mutation
 
@@ -167,7 +167,8 @@ custom mutations.
 ## Integration testing
 
 Handler-level integration tests run under normal `npm test` with fake AWS SDK boundaries. The live
-suite exercises Cognito, AppSync, Lambda, DynamoDB, and S3 against a deployed personal sandbox.
+suite exercises Cognito, AppSync, Lambda, DynamoDB, and S3 against a deployed personal sandbox,
+including User Pool and both guest/authenticated Identity Pool authorization paths.
 
 Start the sandbox in one terminal:
 

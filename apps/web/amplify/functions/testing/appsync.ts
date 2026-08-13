@@ -1,5 +1,5 @@
 /**
- * Builders for AppSync resolver events (ADR-0044).
+ * Builders for AppSync resolver events (ADR-0046).
  *
  * Handler integration tests exercise the real `handler.ts` modules, so they
  * need structurally-complete `AppSyncResolverEvent`s and Cognito identities —
