@@ -25,7 +25,7 @@ behind the code — essential when refactoring or extending the system.
 | [0007](0007-submit-report-write-path.md)                             | submitReport write path                                             | Accepted                         |
 | [0008](0008-report-transition-engine.md)                             | Report transition engine                                            | Accepted                         |
 | [0009](0009-public-projection-and-realtime-publish.md)               | Public projection + real-time                                       | Accepted                         |
-| [0010](0010-classification-contract-and-scoring.md)                  | AI classification contract + scoring                                | Accepted                         |
+| [0010](0010-classification-contract-and-scoring.md)                  | AI classification contract + scoring                                | Scoring superseded by ADR-0045   |
 | [0011](0011-custom-resolver-conventions-amplify-gen2.md)             | Custom AppSync resolver conventions                                 | Accepted                         |
 | [0012](0012-amplify-outputs-in-ci.md)                                | Amplify outputs handling in CI                                      | Accepted                         |
 | [0013](0013-async-classification-pipeline.md)                        | Async classification pipeline                                       | Accepted                         |
@@ -59,3 +59,4 @@ behind the code — essential when refactoring or extending the system.
 | [0041](0041-cognito-roles-and-route-authorization.md)                | Cognito roles, route authorization, Report auth hardening (CRIS-24) | Accepted                         |
 | [0042](0042-server-enforced-volunteer-task-projection.md)            | Server-enforced volunteer task projection                           | Accepted                         |
 | [0043](0043-customer-managed-key-for-triage-data-plane.md)           | Customer-managed key for the triage data plane (CRIS-25)            | Accepted                         |
+| [0045](0045-deterministic-priority-scoring-v2.md)                    | Deterministic priority scoring v2 (CRIS-30)                         | Accepted                         |
