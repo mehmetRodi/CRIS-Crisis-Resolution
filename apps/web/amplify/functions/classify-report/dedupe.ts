@@ -26,7 +26,10 @@ import { DUPLICATE_GROUP_MAX_MEMBERS, type DuplicateGroupMember, type ReportStor
  */
 
 export interface DedupeDeps {
-  store: Pick<ReportStore, 'findDuplicateCandidates' | 'linkDuplicateGroup'>;
+  store: Pick<
+    ReportStore,
+    'findDuplicateCandidates' | 'countDuplicateGroupPeers' | 'linkDuplicateGroup'
+  >;
   log: (entry: Record<string, unknown>) => void;
   /** Group-id factory. Injected so tests are deterministic. */
   newGroupId?: () => string;
@@ -67,9 +70,16 @@ export interface DedupeResult {
   linked: DuplicateMatch[];
   /** Borderline matches (0.65 ≤ Ds < 0.80) — surfaced, never auto-grouped. */
   suggested: DuplicateMatch[];
+  /** OTHER reports confirmed in the subject's chosen group after this write. */
+  strongDuplicateReports: number;
 }
 
-const EMPTY: DedupeResult = { duplicateGroupId: null, linked: [], suggested: [] };
+const EMPTY: DedupeResult = {
+  duplicateGroupId: null,
+  linked: [],
+  suggested: [],
+  strongDuplicateReports: 0,
+};
 
 /**
  * Finds near-duplicates of a just-classified report and groups it with them.
@@ -181,6 +191,36 @@ export async function resolveDuplicates(
     return { ...EMPTY, suggested };
   }
 
+  // Count only reports that are now confirmed in this chosen group. Strong
+  // matches already belonging to a different group are intentionally excluded,
+  // as are joiners truncated by the transaction cap.
+  const groupPeers = new Set(
+    linked.filter((match) => match.duplicateGroupId === groupId).map((match) => match.reportId),
+  );
+  for (const member of members.slice(1)) groupPeers.add(member.reportId);
+
+  // Candidate discovery is intentionally bounded by geohash, age, and read
+  // limit, so it is not a complete membership query for an existing group.
+  // Read the group's dedicated GSI after the link and use the larger of that
+  // count and the peers known to this transaction. The latter is a conservative
+  // fallback while the eventually consistent GSI catches up to the new writes.
+  let strongDuplicateReports = groupPeers.size;
+  try {
+    const persistedPeers = await deps.store.countDuplicateGroupPeers({
+      duplicateGroupId: groupId,
+      excludeReportId: reportId,
+    });
+    strongDuplicateReports = Math.max(strongDuplicateReports, persistedPeers);
+  } catch (err) {
+    deps.log({
+      event: 'dedupe.groupCountFailed',
+      reportId,
+      duplicateGroupId: groupId,
+      knownPeers: strongDuplicateReports,
+      reason: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   deps.log({
     event: 'dedupe.linked',
     reportId,
@@ -190,5 +230,10 @@ export async function resolveDuplicates(
     members: members.length,
     joinedExistingGroup: anchor !== null,
   });
-  return { duplicateGroupId: groupId, linked, suggested };
+  return {
+    duplicateGroupId: groupId,
+    linked,
+    suggested,
+    strongDuplicateReports,
+  };
 }

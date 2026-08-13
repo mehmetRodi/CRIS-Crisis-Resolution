@@ -81,7 +81,7 @@ to `pipeRole`. Recovery is just re-running the deploy — the stack rolls back c
 
 No automated rollback yet. Re-run an earlier good commit through the pipeline
 (`workflow_dispatch` from that ref, or revert-commit to `main`). Post-deploy smoke tests are a
-follow-up (CRIS-29/35).
+follow-up owned by CRIS-35; CRIS-29 provides the reusable personal-sandbox integration suite.
 
 ### Retained KMS keys after sandbox deletion
 
@@ -162,7 +162,7 @@ CloudFormation cannot recover ciphertext after the waiting window closes.
    state. If any step fails, manual Refresh must still recover the current DynamoDB-backed state.
 
 The public `/map` is intentionally not part of this smoke test: anonymous subscription auth, the
-baseline public query, and incident markers are deferred together by ADR-0046.
+baseline public query, and incident markers are deferred together by ADR-0048.
 
 ### Recover records from the pipe DLQ
 

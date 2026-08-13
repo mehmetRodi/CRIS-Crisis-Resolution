@@ -332,33 +332,40 @@ describe('CoordinatorDashboard incident detail (CRIS-23)', () => {
   it('renders the explainable score breakdown factors', () => {
     renderSelected({
       scoreBreakdown: {
-        urgencyWeight: 3.5,
-        categoryWeight: 3,
-        recencyWeight: 1.2,
-        corroborationWeight: 0.5,
-        manualAdjustment: 0,
+        urgencyWeight: 4,
+        categoryWeight: 1.9,
+        affectedPeopleWeight: 0.75,
+        verificationWeight: 0.5,
+        recencyWeight: 0.8,
+        duplicateWeight: 0.75,
+        uncertaintyPenalty: 0.25,
+        stalenessPenalty: 0,
       },
     });
     expect(within(detail()).getByText(/why this priority/i)).toBeInTheDocument();
-    // "Corroboration" / "Recency" only appear in the score breakdown ("Urgency"
-    // and "Category" also label the classification snapshot above).
-    expect(within(detail()).getByText('Corroboration')).toBeInTheDocument();
+    expect(within(detail()).getByText('Duplicate corroboration')).toBeInTheDocument();
+    expect(within(detail()).getByText('Affected people')).toBeInTheDocument();
     expect(within(detail()).getByText('Recency')).toBeInTheDocument();
-    expect(within(detail()).getByText('+3.50')).toBeInTheDocument();
+    expect(within(detail()).getByText('+4.00')).toBeInTheDocument();
+    expect(within(detail()).getByText('−0.25')).toBeInTheDocument();
   });
 
-  it('surfaces a non-zero manual adjustment separately', () => {
+  it('surfaces uncertainty and staleness as subtractive penalties', () => {
     renderSelected({
       scoreBreakdown: {
         urgencyWeight: 2,
         categoryWeight: 1,
+        affectedPeopleWeight: 0,
+        verificationWeight: 0,
         recencyWeight: 0,
-        corroborationWeight: 0,
-        manualAdjustment: -1.5,
+        duplicateWeight: 0,
+        uncertaintyPenalty: 1,
+        stalenessPenalty: 1.5,
       },
     });
-    expect(within(detail()).getByText(/manual adjustment/i)).toBeInTheDocument();
-    expect(within(detail()).getByText('-1.50')).toBeInTheDocument();
+    expect(within(detail()).getByText('Uncertainty')).toBeInTheDocument();
+    expect(within(detail()).getByText('Staleness')).toBeInTheDocument();
+    expect(within(detail()).getByText('−1.50')).toBeInTheDocument();
   });
 
   it('renders extracted entities (people affected, infrastructure, hazards)', () => {

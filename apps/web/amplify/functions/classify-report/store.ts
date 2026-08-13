@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import {
   DynamoDBDocumentClient,
@@ -7,12 +7,14 @@ import {
   QueryCommand,
   TransactWriteCommand,
   UpdateCommand,
+  type QueryCommandInput,
 } from '@aws-sdk/lib-dynamodb';
 import {
   ReportEventType,
   ReportStatus,
   SYSTEM_ACTOR,
   type ClassificationResult,
+  type ScoringResult,
   type ScoreBreakdown,
   type TriageEntities,
 } from '@crisismap/shared';
@@ -79,6 +81,17 @@ export interface MarkNeedsVerificationInput {
   streamEventId: string;
 }
 
+/** Version-checked score snapshot written after evidence changes. */
+export interface PersistPriorityScoreInput {
+  reportId: string;
+  expectedVersion: number;
+  scoring: ScoringResult;
+  /** Stable audit id derived from the event that caused the rescore. */
+  eventId: string;
+  reason: 'DUPLICATE_LINKED' | 'VERIFICATION_RECORDED';
+  now: string;
+}
+
 /** A neighbouring report considered as a possible duplicate (§5.4.3, CRIS-31). */
 export interface DuplicateCandidateRecord {
   reportId: string;
@@ -99,6 +112,13 @@ export interface FindDuplicateCandidatesInput {
   excludeReportId: string;
   /** ISO-8601 lower bound on `createdAt` (the §5.4.3 recency window). */
   since: string;
+}
+
+export interface CountDuplicateGroupPeersInput {
+  /** The chosen duplicate group whose complete persisted membership is counted. */
+  duplicateGroupId: string;
+  /** The newly classified subject is not evidence for itself. */
+  excludeReportId: string;
 }
 
 /** One report being pointed at a duplicate group. */
@@ -131,8 +151,12 @@ export interface ReportStore {
   claimProcessing(reportId: string, expectedVersion: number): Promise<boolean>;
   persistClassification(input: PersistClassificationInput): Promise<void>;
   markNeedsVerification(input: MarkNeedsVerificationInput): Promise<void>;
+  /** Persists a new score + PRIORITY_SCORED audit atomically. False = lost version race. */
+  persistPriorityScore(input: PersistPriorityScoreInput): Promise<boolean>;
   /** Recent, nearby reports to score for duplication (§5.4.3, CRIS-31). */
   findDuplicateCandidates(input: FindDuplicateCandidatesInput): Promise<DuplicateCandidateRecord[]>;
+  /** Counts every OTHER report persisted in a chosen duplicate group, across all GSI pages. */
+  countDuplicateGroupPeers(input: CountDuplicateGroupPeersInput): Promise<number>;
   /**
    * Points every member at a duplicate group and appends their DUPLICATE_LINKED
    * audit events — atomically. Each member is version-checked; `false` means at
@@ -152,6 +176,8 @@ export interface DynamoStoreTables {
    * tests (ADR-0011) — it only fails in a deployed environment.
    */
   geoIndex: string;
+  /** Physical name of the duplicateGroupId/createdAt GSI used for complete group counts. */
+  duplicateGroupIndex: string;
 }
 
 /**
@@ -181,6 +207,11 @@ function isConditionalCheckFailed(err: unknown): boolean {
  */
 function isTransactionCancelled(err: unknown): boolean {
   return (err as { name?: string })?.name === 'TransactionCanceledException';
+}
+
+/** DynamoDB transaction tokens are limited to 36 characters; hash a stable event id to fit. */
+function transactionToken(eventId: string): string {
+  return createHash('sha256').update(eventId).digest('hex').slice(0, 36);
 }
 
 /**
@@ -350,6 +381,67 @@ export function createDynamoStore(
       );
     },
 
+    async persistPriorityScore(input) {
+      const nextVersion = input.expectedVersion + 1;
+      const { scoring } = input;
+      try {
+        await doc.send(
+          new TransactWriteCommand({
+            ClientRequestToken: transactionToken(input.eventId),
+            TransactItems: [
+              {
+                Update: {
+                  TableName: tables.report,
+                  Key: { id: input.reportId },
+                  UpdateExpression:
+                    'SET priorityScore = :score, priorityBand = :band, scoreVersion = :sv, scoreBreakdown = :breakdown, #updatedAt = :now, #v = :next',
+                  ConditionExpression: '#v = :expected',
+                  ExpressionAttributeNames: { '#v': 'version', '#updatedAt': 'updatedAt' },
+                  ExpressionAttributeValues: {
+                    ':score': scoring.priorityScore,
+                    ':band': scoring.priorityBand,
+                    ':sv': scoring.scoreVersion,
+                    ':breakdown': scoring.breakdown,
+                    ':now': input.now,
+                    ':expected': input.expectedVersion,
+                    ':next': nextVersion,
+                  },
+                },
+              },
+              {
+                Put: {
+                  TableName: tables.reportEvent,
+                  Item: {
+                    // The stable event id is also the primary key, making the
+                    // audit append itself idempotent across caller-level retries.
+                    id: input.eventId,
+                    reportId: input.reportId,
+                    type: ReportEventType.PRIORITY_SCORED,
+                    actorId: SYSTEM_ACTOR,
+                    version: nextVersion,
+                    eventId: input.eventId,
+                    detail: {
+                      reason: input.reason,
+                      priorityScore: scoring.priorityScore,
+                      priorityBand: scoring.priorityBand,
+                      scoreVersion: scoring.scoreVersion,
+                      scoreBreakdown: scoring.breakdown,
+                    },
+                    createdAt: input.now,
+                  },
+                  ConditionExpression: 'attribute_not_exists(id)',
+                },
+              },
+            ],
+          }),
+        );
+        return true;
+      } catch (err) {
+        if (isTransactionCancelled(err)) return false;
+        throw err;
+      }
+    },
+
     async findDuplicateCandidates(input) {
       // Queries the map-viewport GSI (data/resource.ts index #4). The sort key is
       // `geohash`, not time, so recency is a filter rather than a key condition —
@@ -380,6 +472,39 @@ export function createDynamoStore(
         duplicateGroupId: (item.duplicateGroupId as string | undefined) ?? null,
         version: (item.version as number | undefined) ?? 0,
       }));
+    },
+
+    async countDuplicateGroupPeers(input) {
+      let count = 0;
+      let exclusiveStartKey: QueryCommandInput['ExclusiveStartKey'];
+
+      // Query every page. The candidate lookup is deliberately bounded, but it
+      // cannot stand in for group membership once an existing group grows or
+      // ages past that lookup's spatial/time window.
+      do {
+        const page = await doc.send(
+          new QueryCommand({
+            TableName: tables.report,
+            IndexName: tables.duplicateGroupIndex,
+            KeyConditionExpression: '#group = :group',
+            FilterExpression: '#id <> :self',
+            ExpressionAttributeNames: {
+              '#group': 'duplicateGroupId',
+              '#id': 'id',
+            },
+            ExpressionAttributeValues: {
+              ':group': input.duplicateGroupId,
+              ':self': input.excludeReportId,
+            },
+            Select: 'COUNT',
+            ExclusiveStartKey: exclusiveStartKey,
+          }),
+        );
+        count += page.Count ?? 0;
+        exclusiveStartKey = page.LastEvaluatedKey;
+      } while (exclusiveStartKey);
+
+      return count;
     },
 
     async linkDuplicateGroup(input) {

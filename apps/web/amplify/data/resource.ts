@@ -31,7 +31,7 @@ import { listVolunteerTasks as listVolunteerTasksFn } from '../functions/list-vo
  *     gate so it satisfies Amplify's per-operation auth requirement (CRIS-19,
  *     ADR-0009/0029/0030). CRIS-28's authenticated custom subscriptions consume
  *     this mutation; both the triage worker and transition resolver publish
- *     after their durable writes (ADR-0046).
+ *     after their durable writes (ADR-0048).
  *
  * ENUM SYNC: `a.enum()` requires literal arrays, so the members below are
  * duplicated from `@crisismap/shared` (the source of truth). When you change an
@@ -597,7 +597,7 @@ const schema = a
       .authorization((allow) => [allow.groups(['ADMIN'])]),
 
     /**
-     * CRIS-28 real-time read paths (ADR-0046). Every event is the redacted
+     * CRIS-28 real-time read paths (ADR-0048). Every event is the redacted
      * `PublicReport` returned by `publishReportUpdate`; raw report text and
      * reporter data have no representation on this channel. The custom AppSync
      * JS handlers are required by Amplify Gen 2. Region/status variants install
@@ -635,7 +635,7 @@ const schema = a
    * function access to the API surface, then scopes it by operation *type*. We
    * grant both direct DynamoDB writers `mutate` so they can call the internal
    * `publishReportUpdate` after their durable writes: the classify worker and
-   * the human transition resolver (CRIS-28, ADR-0046).
+   * the human transition resolver (CRIS-28, ADR-0048).
    *
    * Consequence to accept: these are API-wide `mutate` grants, so either trusted
    * function role could technically call other mutations over IAM — Amplify

@@ -72,7 +72,7 @@ rationale in ADR-0011):
 - **Custom subscriptions need a `.handler()`**, not just an auth rule (an AppSync JS resolver
   that sets the filter). With the currently pinned Amplify schema processor,
   `a.handler.custom` does not support Identity Pool guest/authenticated rules; decide and document
-  another public auth mode before exposing an anonymous subscription (ADR-0046).
+  another public auth mode before exposing an anonymous subscription (ADR-0048).
 
 ## Testing
 
@@ -80,9 +80,14 @@ rationale in ADR-0011):
 - CI runs `npm test` across workspaces that expose a `test` script. The mobile workspace does
   not currently expose one; add a mobile test script when its test harness lands.
 - Domain logic (state machine, scoring) must have unit tests — it's the safety-critical core.
-- **Unit tests assert in-memory shapes and will not catch DynamoDB/GraphQL contract breaks**
-  (see ADR-0011). Before a write path is "done", smoke-test it end-to-end against a sandbox
-  (`npx ampx sandbox` → sign in → call the mutation → assert the returned record).
+- Every custom resolver has a co-located handler integration test that imports the real handler
+  and fakes only its AWS SDK boundary. These tests run in `npm test` and pin identity extraction,
+  command/transaction shapes, error prefixes, and redaction contracts (ADR-0046).
+- Live AWS coverage is opt-in and sandbox-only. Start `npx ampx sandbox`, then run
+  `CRISISMAP_INTEGRATION_TARGET=personal-sandbox npm run test:integration` from the repository
+  root. The exact flag is a destructive-write acknowledgement: the suite creates temporary users,
+  reports, audit/idempotency rows, and an S3 object. It refuses to run without the flag and must
+  never target a shared environment.
 
 ## Accessibility (ADR-0036)
 

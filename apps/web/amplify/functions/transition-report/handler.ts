@@ -128,7 +128,7 @@ export const handler: AppSyncResolverHandler<
 
   // The report + audit event are already durable. Fan the redacted projection
   // out best-effort so other operational clients converge without making their
-  // availability part of the transition transaction (CRIS-28, ADR-0046).
+  // availability part of the transition transaction (CRIS-28, ADR-0048).
   await publishTransitionUpdate({
     ...updated,
     id: current.id,

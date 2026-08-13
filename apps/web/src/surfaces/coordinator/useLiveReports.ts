@@ -37,7 +37,7 @@ import {
  * to the redacted `onReportUpdate` stream. Each signal is reconciled through a
  * staff-authorized `Report.get` before entering the UI so the coordinator-only
  * detail fields and optimistic-lock `version` stay current. After a WebSocket
- * gap, the hook reloads the snapshot to recover any missed events (ADR-0046).
+ * gap, the hook reloads the snapshot to recover any missed events (ADR-0048).
  */
 
 /** How many reports to pull for the queue. Bounded until pagination (CRIS-22). */

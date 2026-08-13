@@ -1,4 +1,4 @@
-# ADR-0046: Authenticated AppSync subscriptions with durable snapshot reconciliation
+# ADR-0048: Authenticated AppSync subscriptions with durable snapshot reconciliation
 
 - **Status:** Accepted
 - **Date:** 2026-08-14
