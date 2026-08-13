@@ -1,5 +1,5 @@
 /**
- * CrisisMap AI — AI triage contract & deterministic priority scoring (CRIS-11).
+ * CrisisMap AI — AI triage contract & deterministic priority scoring (CRIS-11/30).
  *
  * This module is the single source of truth for two things the async pipeline
  * (CRIS-10) depends on:
@@ -51,7 +51,7 @@ export const CLASSIFICATION_CONTRACT_VERSION = 2;
  * versions are comparable/recomputable. Bump on any change to the weights,
  * curves, or band cutoffs below.
  */
-export const SCORE_VERSION = 1;
+export const SCORE_VERSION = 2;
 
 /* -------------------------------------------------------------------------- */
 /* 1. Classification JSON contract (§2.2)                                     */
@@ -321,39 +321,44 @@ export function shouldEscalateToVerification(result: ClassificationResult): bool
 /* -------------------------------------------------------------------------- */
 
 /**
- * Additive priority factors, each expressed in final score-points so they sum
- * (before clamping) to `priorityScore`. Mirrors the Amplify `ScoreBreakdown`
- * custom type — keep the two in sync (guard test enforces this).
+ * Priority factors expressed in final score-points. Positive evidence is added,
+ * penalties are subtracted, and the result is clamped to [0, 10]. Mirrors the
+ * persisted `scoreBreakdown` JSON contract — keep consumers in sync (the guard
+ * test enforces this).
  */
 export interface ScoreBreakdown {
   /** Points from assessed urgency (dominant term). */
   urgencyWeight: number;
   /** Points from incident category. */
   categoryWeight: number;
-  /** Points from recency (time-decayed). */
+  /** Points from the estimated number of people affected. */
+  affectedPeopleWeight: number;
+  /** Points from confirmed human verifications. */
+  verificationWeight: number;
+  /** Points from freshness (time-decayed). */
   recencyWeight: number;
-  /** Points from corroborating reports/verifications. */
-  corroborationWeight: number;
-  /** Coordinator override applied on top (may be negative). */
-  manualAdjustment: number;
-  /** Optional human-readable note (e.g. reason for a manual adjustment). */
-  notes?: string;
+  /** Points from strongly linked duplicate reports. */
+  duplicateWeight: number;
+  /** Penalty caused by classification uncertainty (stored as a positive magnitude). */
+  uncertaintyPenalty: number;
+  /** Penalty caused by report staleness (stored as a positive magnitude). */
+  stalenessPenalty: number;
 }
 
-/** Inputs to the scoring formula. Only `urgency` and `category` are required. */
+/** Inputs to the v2 scoring formula at a specific scoring event. */
 export interface ScoreInput {
   urgency: Urgency;
   category: Category;
-  /** Report age in minutes (now − submittedAt). Defaults to 0 (just submitted). */
-  ageMinutes?: number;
-  /** Count of OTHER reports believed to describe the same incident (§5.4.3). */
-  corroboratingReports?: number;
-  /** Count of CONFIRMED verification signals (§2.6). */
-  confirmedVerifications?: number;
-  /** Coordinator manual delta in score-points; clamped to ±{@link MANUAL_ADJUSTMENT_LIMIT}. */
-  manualAdjustment?: number;
-  /** Optional note carried into the breakdown. */
-  notes?: string;
+  /** Validated classification confidence in [0, 1]. */
+  confidence: number;
+  /** Report age in minutes (score time − submission time). */
+  ageMinutes: number;
+  /** Estimated people affected; absent/unknown evidence contributes zero. */
+  peopleAffected?: number | null;
+  /** Count of CONFIRMED HUMAN verification records. */
+  confirmedHumanVerifications?: number;
+  /** Count of OTHER reports strongly linked to this incident (§5.4.3). */
+  strongDuplicateReports?: number;
 }
 
 /** Result of scoring: the score, its band, the formula version, and the explainable breakdown. */
@@ -365,21 +370,20 @@ export interface ScoringResult {
 }
 
 /** Max points contributed by urgency. CRITICAL saturates this term. */
-export const URGENCY_MAX_POINTS = 5;
+export const URGENCY_MAX_POINTS = 5.5;
 const URGENCY_POINTS: Record<Urgency, number> = {
-  CRITICAL: 5,
-  HIGH: 3.5,
+  CRITICAL: 5.5,
+  HIGH: 4,
   MEDIUM: 2,
-  LOW: 0.8,
+  LOW: 0.5,
 };
 
 /** Max points contributed by category (category factor × this). */
-export const CATEGORY_MAX_POINTS = 3;
+export const CATEGORY_MAX_POINTS = 2;
 /**
- * Per-category weight in [0, 1] — life-threat categories rank highest.
- * These are the shared defaults; a deployed `CategoryConfig.baseWeight` (CRIS-8
- * model) can override at runtime, but this table keeps scoring deterministic
- * offline and in tests.
+ * Versioned per-category weight in [0, 1] — life-threat categories rank highest.
+ * Runtime `CategoryConfig` overrides are deliberately excluded: without a
+ * config version they would make identical score inputs irreproducible.
  */
 const CATEGORY_WEIGHT: Record<Category, number> = {
   MEDICAL: 1.0,
@@ -395,17 +399,36 @@ const CATEGORY_WEIGHT: Record<Category, number> = {
 };
 
 /** Max points contributed by recency; decays with a half-life. */
-export const RECENCY_MAX_POINTS = 1.5;
+export const RECENCY_MAX_POINTS = 1;
 /** Minutes for the recency contribution to halve (exponential decay). */
-export const RECENCY_HALF_LIFE_MINUTES = 45;
+export const RECENCY_HALF_LIFE_MINUTES = 60;
 
-/** Max points contributed by corroboration (saturating). */
-export const CORROBORATION_MAX_POINTS = 2;
-/** Signal count at which corroboration reaches half of its max (saturation midpoint). */
-export const CORROBORATION_HALF_SATURATION = 2;
+/** Max points contributed by the estimated affected population. */
+export const AFFECTED_PEOPLE_MAX_POINTS = 1.5;
+/** Population count at which the affected-people factor reaches half its max. */
+export const AFFECTED_PEOPLE_HALF_SATURATION = 5;
 
-/** Absolute cap on a coordinator manual adjustment, in score-points. */
-export const MANUAL_ADJUSTMENT_LIMIT = 3;
+/** Max points contributed by confirmed human verifications. */
+export const VERIFICATION_MAX_POINTS = 1;
+/** Verification count at which the verification factor reaches half its max. */
+export const VERIFICATION_HALF_SATURATION = 1;
+
+/** Max points contributed by strong duplicate corroboration. */
+export const DUPLICATE_MAX_POINTS = 1.5;
+/** Strong-duplicate count at which corroboration reaches half its max. */
+export const DUPLICATE_HALF_SATURATION = 2;
+
+/** Confidence at or above which no uncertainty penalty is applied. */
+export const UNCERTAINTY_FREE_CONFIDENCE = 0.8;
+/** Largest uncertainty penalty, reached at zero confidence. */
+export const UNCERTAINTY_MAX_PENALTY = 2;
+
+/** Report age before a staleness penalty starts. */
+export const STALENESS_GRACE_MINUTES = 6 * 60;
+/** Largest staleness penalty. */
+export const STALENESS_MAX_PENALTY = 1.5;
+/** Minutes beyond the grace period at which staleness reaches half its max. */
+export const STALENESS_HALF_SATURATION_MINUTES = 12 * 60;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -416,48 +439,87 @@ function round2(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
+/** A finite, non-negative evidence count; malformed/absent evidence contributes zero. */
+function evidenceCount(value: number | null | undefined): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0;
+}
+
+/** Saturating contribution `max * n/(n + half)` for independently bounded evidence. */
+function saturatingWeight(value: number, max: number, half: number): number {
+  return round2(max * (value / (value + half)));
+}
+
 /**
  * Compute a deterministic, explainable priority score in [0, 10] and its band.
  *
- * priorityScore = clamp(urgency + category + recency + corroboration + manual, 0, 10)
+ * P = clamp(U + C + A + V + R + D − uncertainty − staleness, 0, 10)
  *
  * Each term is bounded and independently explainable; the returned
  * `breakdown` records every contribution so the UI can render the "why".
  * Pure and deterministic — identical inputs always yield identical output.
  */
 export function scoreReport(input: ScoreInput): ScoringResult {
-  const ageMinutes = Math.max(0, input.ageMinutes ?? 0);
-  const corroboratingReports = Math.max(0, input.corroboratingReports ?? 0);
-  const confirmedVerifications = Math.max(0, input.confirmedVerifications ?? 0);
+  // Invalid age must not be treated as fresh. The staleness curve approaches
+  // its cap at large finite ages, so this sentinel stays deterministic.
+  const ageMinutes = Number.isFinite(input.ageMinutes)
+    ? Math.max(0, input.ageMinutes)
+    : Number.MAX_SAFE_INTEGER;
+  const confidence = Number.isFinite(input.confidence) ? clamp(input.confidence, 0, 1) : 0;
+  const peopleAffected = evidenceCount(input.peopleAffected);
+  const confirmedHumanVerifications = evidenceCount(input.confirmedHumanVerifications);
+  const strongDuplicateReports = evidenceCount(input.strongDuplicateReports);
 
   const urgencyWeight = URGENCY_POINTS[input.urgency];
   const categoryWeight = round2(CATEGORY_WEIGHT[input.category] * CATEGORY_MAX_POINTS);
+  const affectedPeopleWeight = saturatingWeight(
+    peopleAffected,
+    AFFECTED_PEOPLE_MAX_POINTS,
+    AFFECTED_PEOPLE_HALF_SATURATION,
+  );
+  const verificationWeight = saturatingWeight(
+    confirmedHumanVerifications,
+    VERIFICATION_MAX_POINTS,
+    VERIFICATION_HALF_SATURATION,
+  );
   const recencyWeight = round2(
     RECENCY_MAX_POINTS * Math.pow(0.5, ageMinutes / RECENCY_HALF_LIFE_MINUTES),
   );
-
-  const signals = corroboratingReports + confirmedVerifications;
-  const corroborationWeight = round2(
-    CORROBORATION_MAX_POINTS * (signals / (signals + CORROBORATION_HALF_SATURATION)),
+  const duplicateWeight = saturatingWeight(
+    strongDuplicateReports,
+    DUPLICATE_MAX_POINTS,
+    DUPLICATE_HALF_SATURATION,
   );
-
-  const manualAdjustment = clamp(
-    input.manualAdjustment ?? 0,
-    -MANUAL_ADJUSTMENT_LIMIT,
-    MANUAL_ADJUSTMENT_LIMIT,
+  const uncertaintyPenalty = round2(
+    UNCERTAINTY_MAX_PENALTY *
+      (Math.max(0, UNCERTAINTY_FREE_CONFIDENCE - confidence) / UNCERTAINTY_FREE_CONFIDENCE),
+  );
+  const staleMinutes = Math.max(0, ageMinutes - STALENESS_GRACE_MINUTES);
+  const stalenessPenalty = saturatingWeight(
+    staleMinutes,
+    STALENESS_MAX_PENALTY,
+    STALENESS_HALF_SATURATION_MINUTES,
   );
 
   const raw =
-    urgencyWeight + categoryWeight + recencyWeight + corroborationWeight + manualAdjustment;
+    urgencyWeight +
+    categoryWeight +
+    affectedPeopleWeight +
+    verificationWeight +
+    recencyWeight +
+    duplicateWeight -
+    uncertaintyPenalty -
+    stalenessPenalty;
   const priorityScore = round2(clamp(raw, 0, 10));
 
   const breakdown: ScoreBreakdown = {
     urgencyWeight,
     categoryWeight,
+    affectedPeopleWeight,
+    verificationWeight,
     recencyWeight,
-    corroborationWeight,
-    manualAdjustment,
-    ...(input.notes !== undefined ? { notes: input.notes } : {}),
+    duplicateWeight,
+    uncertaintyPenalty,
+    stalenessPenalty,
   };
 
   return {
@@ -480,8 +542,8 @@ function finiteNumber(value: unknown): number | null {
  * this is the read-side counterpart the coordinator incident-detail view (CRIS-23)
  * uses to render *why* a report ranks where it does.
  *
- * Strict on the five numeric factors (all must be finite numbers, since the UI
- * renders each as a contribution to the score); lenient on the optional `notes`.
+ * Strict on the eight numeric factors (all must be finite numbers, since the UI
+ * renders each as a contribution to the score).
  * A breakdown missing any factor is treated as absent rather than partially
  * rendered — the detail view simply omits the "why" panel for that report.
  * Never throws.
@@ -490,25 +552,32 @@ export function parseScoreBreakdown(raw: unknown): ScoreBreakdown | null {
   if (!isRecord(raw)) return null;
   const urgencyWeight = finiteNumber(raw.urgencyWeight);
   const categoryWeight = finiteNumber(raw.categoryWeight);
+  const affectedPeopleWeight = finiteNumber(raw.affectedPeopleWeight);
+  const verificationWeight = finiteNumber(raw.verificationWeight);
   const recencyWeight = finiteNumber(raw.recencyWeight);
-  const corroborationWeight = finiteNumber(raw.corroborationWeight);
-  const manualAdjustment = finiteNumber(raw.manualAdjustment);
+  const duplicateWeight = finiteNumber(raw.duplicateWeight);
+  const uncertaintyPenalty = finiteNumber(raw.uncertaintyPenalty);
+  const stalenessPenalty = finiteNumber(raw.stalenessPenalty);
   if (
     urgencyWeight === null ||
     categoryWeight === null ||
+    affectedPeopleWeight === null ||
+    verificationWeight === null ||
     recencyWeight === null ||
-    corroborationWeight === null ||
-    manualAdjustment === null
+    duplicateWeight === null ||
+    uncertaintyPenalty === null ||
+    stalenessPenalty === null
   ) {
     return null;
   }
-  const notes = typeof raw.notes === 'string' ? raw.notes : undefined;
   return {
     urgencyWeight,
     categoryWeight,
+    affectedPeopleWeight,
+    verificationWeight,
     recencyWeight,
-    corroborationWeight,
-    manualAdjustment,
-    ...(notes !== undefined ? { notes } : {}),
+    duplicateWeight,
+    uncertaintyPenalty,
+    stalenessPenalty,
   };
 }

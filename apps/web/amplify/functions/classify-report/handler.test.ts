@@ -90,12 +90,15 @@ const NEW_REPORT: ReportRecord = {
   regionId: 'region-1',
 };
 
+const NOW = new Date('2026-07-22T00:00:00.000Z');
+
 const message = { reportId: 'r1', version: 3, streamEventId: 'evt-1' };
 const deps = (store: ReportStore, triage: TriageAgent, publisher?: Publisher): WorkerDeps => ({
   store,
   triage,
   publisher: publisher ?? fakePublisher().publisher,
   log: () => {},
+  now: () => NOW,
 });
 
 describe('parseMessage', () => {
@@ -133,10 +136,13 @@ describe('processRecord', () => {
       streamEventId: 'evt-1',
       status: ReportStatus.AI_CLASSIFIED,
       classification: { category: Category.MEDICAL, urgency: Urgency.CRITICAL },
-      // MEDICAL + CRITICAL at age 0 ⇒ 5 + 3 + 1.5 = 9.5 ⇒ P0 (§5.4.2).
+      // Fresh/confident CRITICAL + MEDICAL + affected people ⇒ P0 (§5.4.2).
       priorityBand: 'P0',
+      scoreVersion: 2,
     });
-    expect(persisted[0].scoreBreakdown.urgencyWeight).toBe(5);
+    expect(persisted[0].scoreBreakdown.urgencyWeight).toBe(5.5);
+    expect(persisted[0].scoreBreakdown.affectedPeopleWeight).toBeGreaterThan(0);
+    expect(persisted[0].scoreBreakdown.uncertaintyPenalty).toBe(0);
     // Entities extracted by the Triage Agent are carried through to the store (CRIS-20).
     expect(persisted[0].classification.entities.peopleAffected).toBe(4);
     expect(flagged).toHaveLength(0);

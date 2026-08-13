@@ -60,6 +60,8 @@ export interface WorkerDeps {
    * behaviour — only in wiring, so production can never forget to enable it.
    */
   dedupe?: (input: DedupeInput) => Promise<DedupeResult>;
+  /** Event-time clock. Injected so age-based scoring and tests are deterministic. */
+  now?: () => Date;
 }
 
 /** Parses the SQS body into a validated message, or null if malformed (poison). */
@@ -148,6 +150,8 @@ export async function processRecord(
 ): Promise<void> {
   const log = deps.log ?? ((entry) => console.log(JSON.stringify(entry)));
   const { reportId, streamEventId } = message;
+  const scoredAt = (deps.now ?? (() => new Date()))();
+  const scoredAtIso = scoredAt.toISOString();
 
   const report = await deps.store.getReport(reportId);
   if (!report) {
@@ -205,7 +209,7 @@ export async function processRecord(
         status: ReportStatus.NEEDS_VERIFICATION,
         regionId: report.regionId,
         createdAt: report.createdAt,
-        updatedAt: new Date().toISOString(),
+        updatedAt: scoredAtIso,
       }),
       log,
     );
@@ -214,10 +218,18 @@ export async function processRecord(
 
   const { classification, location } = triage;
 
-  // Deterministic, explainable priority (§5.4.2, ADR-0010).
+  const submittedAtMs = report.createdAt ? Date.parse(report.createdAt) : Number.NaN;
+  const ageMinutes = (scoredAt.getTime() - submittedAtMs) / 60_000;
+
+  // Deterministic, explainable v2 priority (§5.4.2, CRIS-30). Evidence that
+  // does not exist yet starts at zero; duplicate links can trigger a rescore
+  // after the durable classification write below.
   const scoring = scoreReport({
     urgency: classification.urgency,
     category: classification.category,
+    confidence: classification.confidence,
+    ageMinutes,
+    peopleAffected: classification.entities.peopleAffected,
   });
   // Low-confidence / model-flagged reports still record the AI result but are
   // routed to human review rather than surfacing as AI_CLASSIFIED (§2.6).
@@ -236,7 +248,7 @@ export async function processRecord(
     scoreBreakdown: scoring.breakdown,
     // Location resolved by the Triage Agent's geocode tool (Amazon Location,
     // §5.5/CRIS-21), or {} when it stayed unresolved (no place matched, a weak
-    // match, geocoding disabled/unavailable). Dedupe deferred.
+    // match, geocoding disabled/unavailable).
     location: location ?? {},
     streamEventId,
   });
@@ -249,13 +261,13 @@ export async function processRecord(
       reportId,
       version: claimedVersion + 1,
       geohashPrefix: location?.geohashPrefix,
-      now: new Date().toISOString(),
+      now: scoredAtIso,
       streamEventId,
       subject: {
         category: classification.category,
         lat: location?.lat,
         lng: location?.lng,
-        createdAt: report.createdAt ?? new Date().toISOString(),
+        createdAt: report.createdAt ?? scoredAtIso,
         text: report.text,
         entities: classification.entities,
       },
@@ -282,7 +294,7 @@ export async function processRecord(
       geohashPrefix: location?.geohashPrefix,
       regionId: report.regionId,
       createdAt: report.createdAt,
-      updatedAt: new Date().toISOString(),
+      updatedAt: scoredAtIso,
     }),
     log,
   );
