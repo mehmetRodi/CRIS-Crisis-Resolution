@@ -111,7 +111,12 @@ describe('resolveDuplicates', () => {
     const result = await resolveDuplicates(deps, input());
 
     expect(links).toHaveLength(0);
-    expect(result).toEqual({ duplicateGroupId: null, linked: [], suggested: [] });
+    expect(result).toEqual({
+      duplicateGroupId: null,
+      linked: [],
+      suggested: [],
+      strongDuplicateReports: 0,
+    });
     expect(events(logs)).toContain('dedupe.none');
   });
 
@@ -121,6 +126,7 @@ describe('resolveDuplicates', () => {
     const result = await resolveDuplicates(deps, input());
 
     expect(result.duplicateGroupId).toBe('group-new');
+    expect(result.strongDuplicateReports).toBe(1);
     // One atomic write, not two independent ones.
     expect(links).toHaveLength(1);
     expect(links[0]?.duplicateGroupId).toBe('group-new');
@@ -151,6 +157,7 @@ describe('resolveDuplicates', () => {
     const result = await resolveDuplicates(deps, input());
 
     expect(result.duplicateGroupId).toBe('group-7');
+    expect(result.strongDuplicateReports).toBe(1);
     // Only the subject is written — the peer is already in the group.
     expect(links[0]?.members).toHaveLength(1);
     expect(links[0]?.members[0]).toMatchObject({ reportId: 'r-subject' });
@@ -169,6 +176,7 @@ describe('resolveDuplicates', () => {
     const result = await resolveDuplicates(deps, input());
 
     expect(result.duplicateGroupId).toBe('group-existing');
+    expect(result.strongDuplicateReports).toBe(2);
     expect(links[0]?.duplicateGroupId).toBe('group-existing');
     expect(links[0]?.members.map((m) => m.reportId).sort()).toEqual(['r-a', 'r-subject']);
     // r-b is already in the group — no redundant write.

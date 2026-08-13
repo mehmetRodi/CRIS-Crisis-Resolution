@@ -123,17 +123,23 @@ async function groupDuplicates(
   deps: WorkerDeps,
   input: DedupeInput,
   log: (entry: Record<string, unknown>) => void,
-): Promise<void> {
+): Promise<DedupeResult> {
   const dedupe =
     deps.dedupe ?? ((i: DedupeInput) => resolveDuplicates({ store: deps.store, log }, i));
   try {
-    await dedupe(input);
+    return await dedupe(input);
   } catch (err) {
     log({
       event: 'dedupe.failed',
       reportId: input.reportId,
       reason: err instanceof Error ? err.message : String(err),
     });
+    return {
+      duplicateGroupId: null,
+      linked: [],
+      suggested: [],
+      strongDuplicateReports: 0,
+    };
   }
 }
 
@@ -255,7 +261,7 @@ export async function processRecord(
 
   // Conservative duplicate grouping (§5.4.3, CRIS-31). After the durable write,
   // so a dedup failure can never cost a classification.
-  await groupDuplicates(
+  const dedupeResult = await groupDuplicates(
     deps,
     {
       reportId,
@@ -275,6 +281,51 @@ export async function processRecord(
     log,
   );
 
+  // A successful strong link is new deterministic evidence. Recompute the
+  // subject after the link transaction and persist the score + audit together.
+  // This remains best-effort: classification is already durable, and a race or
+  // rescore outage must not re-drive Bedrock work.
+  let effectiveScoring = scoring;
+  if (dedupeResult.duplicateGroupId && dedupeResult.strongDuplicateReports > 0) {
+    const rescoring = scoreReport({
+      urgency: classification.urgency,
+      category: classification.category,
+      confidence: classification.confidence,
+      ageMinutes,
+      peopleAffected: classification.entities.peopleAffected,
+      strongDuplicateReports: dedupeResult.strongDuplicateReports,
+    });
+    try {
+      const saved = await deps.store.persistPriorityScore({
+        reportId,
+        // persistClassification and linkDuplicateGroup each incremented once.
+        expectedVersion: claimedVersion + 2,
+        scoring: rescoring,
+        eventId: `${streamEventId}#score#duplicate`,
+        reason: 'DUPLICATE_LINKED',
+        now: scoredAtIso,
+      });
+      if (saved) {
+        effectiveScoring = rescoring;
+        log({
+          event: 'score.updated',
+          reportId,
+          reason: 'DUPLICATE_LINKED',
+          band: rescoring.priorityBand,
+        });
+      } else {
+        log({ event: 'score.updateConflict', reportId, reason: 'DUPLICATE_LINKED' });
+      }
+    } catch (err) {
+      log({
+        event: 'score.updateFailed',
+        reportId,
+        reason: 'DUPLICATE_LINKED',
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   // Fan the redacted result out to subscribers (§5.3, CRIS-19). The durable
   // write above already committed, so this is best-effort. The custom
   // subscriptions that consume `publishReportUpdate` are enabled in CRIS-28.
@@ -285,8 +336,8 @@ export async function processRecord(
       status,
       category: classification.category,
       urgency: classification.urgency,
-      priorityScore: scoring.priorityScore,
-      priorityBand: scoring.priorityBand,
+      priorityScore: effectiveScoring.priorityScore,
+      priorityBand: effectiveScoring.priorityBand,
       summary: classification.summary,
       lat: location?.lat,
       lng: location?.lng,
@@ -298,7 +349,7 @@ export async function processRecord(
     }),
     log,
   );
-  log({ event: 'classify.done', reportId, band: scoring.priorityBand, status });
+  log({ event: 'classify.done', reportId, band: effectiveScoring.priorityBand, status });
 }
 
 async function buildDeps(): Promise<WorkerDeps> {

@@ -13,6 +13,7 @@ import {
   ReportStatus,
   SYSTEM_ACTOR,
   type ClassificationResult,
+  type ScoringResult,
   type ScoreBreakdown,
   type TriageEntities,
 } from '@crisismap/shared';
@@ -79,6 +80,17 @@ export interface MarkNeedsVerificationInput {
   streamEventId: string;
 }
 
+/** Version-checked score snapshot written after evidence changes. */
+export interface PersistPriorityScoreInput {
+  reportId: string;
+  expectedVersion: number;
+  scoring: ScoringResult;
+  /** Stable audit id derived from the event that caused the rescore. */
+  eventId: string;
+  reason: 'DUPLICATE_LINKED' | 'VERIFICATION_RECORDED';
+  now: string;
+}
+
 /** A neighbouring report considered as a possible duplicate (§5.4.3, CRIS-31). */
 export interface DuplicateCandidateRecord {
   reportId: string;
@@ -131,6 +143,8 @@ export interface ReportStore {
   claimProcessing(reportId: string, expectedVersion: number): Promise<boolean>;
   persistClassification(input: PersistClassificationInput): Promise<void>;
   markNeedsVerification(input: MarkNeedsVerificationInput): Promise<void>;
+  /** Persists a new score + PRIORITY_SCORED audit atomically. False = lost version race. */
+  persistPriorityScore(input: PersistPriorityScoreInput): Promise<boolean>;
   /** Recent, nearby reports to score for duplication (§5.4.3, CRIS-31). */
   findDuplicateCandidates(input: FindDuplicateCandidatesInput): Promise<DuplicateCandidateRecord[]>;
   /**
@@ -348,6 +362,64 @@ export function createDynamoStore(
           },
         }),
       );
+    },
+
+    async persistPriorityScore(input) {
+      const nextVersion = input.expectedVersion + 1;
+      const { scoring } = input;
+      try {
+        await doc.send(
+          new TransactWriteCommand({
+            TransactItems: [
+              {
+                Update: {
+                  TableName: tables.report,
+                  Key: { id: input.reportId },
+                  UpdateExpression:
+                    'SET priorityScore = :score, priorityBand = :band, scoreVersion = :sv, scoreBreakdown = :breakdown, #updatedAt = :now, #v = :next',
+                  ConditionExpression: '#v = :expected',
+                  ExpressionAttributeNames: { '#v': 'version', '#updatedAt': 'updatedAt' },
+                  ExpressionAttributeValues: {
+                    ':score': scoring.priorityScore,
+                    ':band': scoring.priorityBand,
+                    ':sv': scoring.scoreVersion,
+                    ':breakdown': scoring.breakdown,
+                    ':now': input.now,
+                    ':expected': input.expectedVersion,
+                    ':next': nextVersion,
+                  },
+                },
+              },
+              {
+                Put: {
+                  TableName: tables.reportEvent,
+                  Item: {
+                    id: randomUUID(),
+                    reportId: input.reportId,
+                    type: ReportEventType.PRIORITY_SCORED,
+                    actorId: SYSTEM_ACTOR,
+                    version: nextVersion,
+                    eventId: input.eventId,
+                    detail: {
+                      reason: input.reason,
+                      priorityScore: scoring.priorityScore,
+                      priorityBand: scoring.priorityBand,
+                      scoreVersion: scoring.scoreVersion,
+                      scoreBreakdown: scoring.breakdown,
+                    },
+                    createdAt: input.now,
+                  },
+                  ConditionExpression: 'attribute_not_exists(id)',
+                },
+              },
+            ],
+          }),
+        );
+        return true;
+      } catch (err) {
+        if (isTransactionCancelled(err)) return false;
+        throw err;
+      }
     },
 
     async findDuplicateCandidates(input) {

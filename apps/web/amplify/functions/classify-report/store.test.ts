@@ -191,6 +191,68 @@ describe('linkDuplicateGroup', () => {
   });
 });
 
+describe('persistPriorityScore', () => {
+  const RESCORE = {
+    reportId: 'r-1',
+    expectedVersion: 6,
+    eventId: 'evt-9#score#duplicate',
+    reason: 'DUPLICATE_LINKED' as const,
+    now: '2026-08-14T10:00:00.000Z',
+    scoring: {
+      priorityScore: 9.25,
+      priorityBand: 'P0' as const,
+      scoreVersion: 2,
+      breakdown: {
+        urgencyWeight: 5.5,
+        categoryWeight: 2,
+        affectedPeopleWeight: 0.75,
+        verificationWeight: 0,
+        recencyWeight: 1,
+        duplicateWeight: 0.5,
+        uncertaintyPenalty: 0.5,
+        stalenessPenalty: 0,
+      },
+    },
+  };
+
+  it('atomically updates the score and appends a PRIORITY_SCORED audit event', async () => {
+    const { client, sent } = fakeClient();
+    const store = createDynamoStore(TABLES, client);
+
+    await expect(store.persistPriorityScore(RESCORE)).resolves.toBe(true);
+
+    const update = updatesOf(sent)[0]!;
+    expect(update.ConditionExpression).toBe('#v = :expected');
+    expect(update.ExpressionAttributeValues).toMatchObject({
+      ':score': 9.25,
+      ':band': 'P0',
+      ':sv': 2,
+      ':expected': 6,
+      ':next': 7,
+    });
+    expect(putsOf(sent)[0]?.Item).toMatchObject({
+      reportId: 'r-1',
+      type: ReportEventType.PRIORITY_SCORED,
+      eventId: 'evt-9#score#duplicate',
+      version: 7,
+      detail: {
+        reason: 'DUPLICATE_LINKED',
+        priorityScore: 9.25,
+        scoreVersion: 2,
+      },
+    });
+  });
+
+  it('returns false on a version race so the worker can keep the prior durable score', async () => {
+    const { client } = fakeClient(() => {
+      throw transactionCancelled();
+    });
+    const store = createDynamoStore(TABLES, client);
+
+    await expect(store.persistPriorityScore(RESCORE)).resolves.toBe(false);
+  });
+});
+
 describe('findDuplicateCandidates', () => {
   const QUERY = {
     geohashPrefix: 'u2edk',
