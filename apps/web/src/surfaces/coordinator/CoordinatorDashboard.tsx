@@ -30,10 +30,12 @@ import {
   type IncidentFeedState,
   type IncidentFilters,
   type IncidentTimelineState,
+  type ReportActivity,
   type TimelineEvent,
 } from './incidents';
 import type { TransitionRequest, TransitionUiState } from './useReportTransition';
 import { IncidentMap } from '../map/IncidentMap';
+import type { RealtimeConnectionState } from '../../lib/report-updates';
 
 /**
  * Coordinator dashboard (CRIS-12 shell + live read path).
@@ -59,10 +61,10 @@ import { IncidentMap } from '../map/IncidentMap';
  *   - Status transitions (verify/reject/resolve …) → CRIS-18 (wired here)
  *   - Guarded response actions (assign team, merge) → CRIS-32
  *   - Recent activity (audit timeline)             → CRIS-23 (wired)
- *   - Live-update push (subscriptions)             → CRIS-28
+ *   - Live-update push (subscriptions)             → CRIS-28 (wired)
  *
- * This is a one-shot read with a manual refresh, NOT a live subscription — the
- * "live updates" indicator stays disconnected until CRIS-28. The route is gated
+ * The route loads a durable snapshot, then reconciles redacted AppSync events
+ * and recovers missed updates after reconnect (CRIS-28, ADR-0046). It is gated
  * to `COORDINATOR`/`ADMIN` by `RequireRole` (CRIS-24, ADR-0041).
  */
 
@@ -72,6 +74,10 @@ interface CoordinatorDashboardProps {
   onExit: () => void;
   /** Incident feed. Defaults to `idle` (the pre-wired shell). */
   feed?: IncidentFeedState;
+  /** AppSync subscription lifecycle. Defaults to inactive for fixture shells. */
+  realtime?: RealtimeConnectionState;
+  /** Redacted report events received during the current browser session. */
+  activity?: readonly ReportActivity[];
   /** Re-run the read. Rendered as a header button when the feed is live. */
   onRefresh?: () => void;
   /**
@@ -905,9 +911,90 @@ function ReadStatus({ feed }: { feed: IncidentFeedState }) {
   );
 }
 
+/** Persistent live region for the AppSync WebSocket lifecycle (CRIS-28). */
+function RealtimeStatus({ state }: { state: RealtimeConnectionState }) {
+  const map: Record<RealtimeConnectionState, { dot: string; text: string; title: string }> = {
+    idle: {
+      dot: 'bg-slate-300',
+      text: 'Live updates inactive',
+      title: 'Live updates start after an authenticated incident snapshot loads.',
+    },
+    connecting: {
+      dot: 'bg-amber-400',
+      text: 'Connecting live updates…',
+      title: 'Opening the AppSync real-time connection.',
+    },
+    connected: {
+      dot: 'bg-emerald-500',
+      text: 'Live updates connected',
+      title: 'Incident updates are arriving through AppSync subscriptions.',
+    },
+    disconnected: {
+      dot: 'bg-amber-400',
+      text: 'Live updates reconnecting…',
+      title: 'The real-time connection was interrupted; a durable snapshot reloads on reconnect.',
+    },
+    error: {
+      dot: 'bg-red-400',
+      text: 'Live updates unavailable',
+      title: 'Use Refresh while the AppSync subscription is unavailable.',
+    },
+  };
+  const { dot, text, title } = map[state];
+  return (
+    <span
+      role="status"
+      title={title}
+      className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 px-2.5 py-1 text-xs text-slate-500"
+    >
+      <span aria-hidden="true" className={`inline-block h-2 w-2 rounded-full ${dot}`} />
+      {text}
+    </span>
+  );
+}
+
+/** Session-only redacted activity; the selected timeline remains the durable audit record. */
+function RecentActivity({
+  activity,
+  realtime,
+}: {
+  activity: readonly ReportActivity[];
+  realtime: RealtimeConnectionState;
+}) {
+  if (activity.length === 0) {
+    return (
+      <RegionMessage>
+        {realtime === 'connected'
+          ? 'Waiting for live report updates in this session.'
+          : 'Live activity appears after the subscription connects.'}
+      </RegionMessage>
+    );
+  }
+
+  return (
+    <ol className="space-y-2" aria-label="Live report activity">
+      {activity.map((item) => (
+        <li key={item.sequence} className="rounded-md border border-slate-100 bg-slate-50 p-2.5">
+          <div className="flex items-start justify-between gap-3">
+            <p className="text-xs font-medium text-slate-700">
+              <span className="font-mono">{shortId(item.reportId)}</span> changed to {item.status}
+            </p>
+            <time dateTime={item.occurredAt ?? undefined} className="text-[11px] text-slate-400">
+              {formatReported(item.occurredAt)}
+            </time>
+          </div>
+          {item.summary ? <p className="mt-1 text-xs text-slate-500">{item.summary}</p> : null}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 export function CoordinatorDashboard({
   onExit,
   feed = { status: 'idle' },
+  realtime = 'idle',
+  activity = [],
   onRefresh,
   onTransition,
   transition = { status: 'idle' },
@@ -951,16 +1038,9 @@ export function CoordinatorDashboard({
             </span>
           </div>
           <div className="flex items-center gap-3">
-            {/* Read connection (one-shot list + refresh). Shown once wired. */}
+            {/* Durable snapshot connection, separate from the live-update socket. */}
             {isLive ? <ReadStatus feed={feed} /> : null}
-            {/* Real-time PUSH indicator — wired by subscriptions (CRIS-28). */}
-            <span
-              className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 px-2.5 py-1 text-xs text-slate-500"
-              title="Live push updates arrive with CRIS-28 (AppSync subscriptions)"
-            >
-              <span aria-hidden="true" className="inline-block h-2 w-2 rounded-full bg-slate-300" />
-              Live updates: not connected
-            </span>
+            <RealtimeStatus state={realtime} />
             {onRefresh ? (
               <button
                 type="button"
@@ -1115,9 +1195,11 @@ export function CoordinatorDashboard({
             <Region
               title="Recent activity"
               ticket="CRIS-28"
-              hint="Live audit stream of status changes and classifications"
+              hint="Redacted report updates received during this browser session"
               className="min-h-[10rem]"
-            />
+            >
+              <RecentActivity activity={activity} realtime={realtime} />
+            </Region>
 
             <Region
               title="Category distribution"

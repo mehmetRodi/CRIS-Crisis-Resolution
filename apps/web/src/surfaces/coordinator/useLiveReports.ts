@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getCurrentUser } from 'aws-amplify/auth';
 import {
   parseEntities,
@@ -10,8 +10,14 @@ import {
 } from '@crisismap/shared';
 
 import { client } from '../../lib/amplify';
+import { useReportUpdates, type RealtimeConnectionState } from '../../lib/report-updates';
 import type { Schema } from '../../../amplify/data/resource';
-import type { CoordinatorIncident, IncidentFeedState } from './incidents';
+import {
+  reconcileIncident,
+  type CoordinatorIncident,
+  type IncidentFeedState,
+  type ReportActivity,
+} from './incidents';
 
 /**
  * Live incident feed for the coordinator dashboard (CRIS-12; read path from
@@ -27,13 +33,16 @@ import type { CoordinatorIncident, IncidentFeedState } from './incidents';
  * prompt instead of an error. The `/coordinator` route itself is further gated to
  * `COORDINATOR`/`ADMIN` only via `RequireRole` (`Router.tsx`).
  *
- * This is a one-shot read plus manual `refresh` — NOT a live subscription.
- * Real-time push (AppSync subscriptions) is owned by CRIS-28; the dashboard's
- * "live updates" indicator stays disconnected until then.
+ * CRIS-28 keeps the bounded list as the durable initial snapshot, then listens
+ * to the redacted `onReportUpdate` stream. Each signal is reconciled through a
+ * staff-authorized `Report.get` before entering the UI so the coordinator-only
+ * detail fields and optimistic-lock `version` stay current. After a WebSocket
+ * gap, the hook reloads the snapshot to recover any missed events (ADR-0046).
  */
 
 /** How many reports to pull for the queue. Bounded until pagination (CRIS-22). */
 const READ_LIMIT = 250;
+const ACTIVITY_LIMIT = 20;
 
 /**
  * Map a raw AppSync `Report` to the redacted projection the UI uses, plus the
@@ -60,6 +69,7 @@ function toRedactedIncident(report: Schema['Report']['type']): CoordinatorIncide
       geohashPrefix: report.geohashPrefix,
       regionId: report.regionId,
       createdAt: report.createdAt,
+      updatedAt: report.updatedAt,
     }),
     version: report.version ?? 0,
     // Coordinator-internal triage context for the incident-detail view (CRIS-23).
@@ -75,42 +85,103 @@ function toRedactedIncident(report: Schema['Report']['type']): CoordinatorIncide
 
 export interface LiveReportsFeed {
   state: IncidentFeedState;
+  /** AppSync WebSocket lifecycle for the dashboard's live-status indicator. */
+  realtime: RealtimeConnectionState;
+  /**
+   * Monotonic activity signal for sibling read models. `reportId: null` means a
+   * reconnect snapshot may contain updates for any selected incident.
+   */
+  lastUpdate: { sequence: number; reportId: string | null } | null;
+  /** Redacted subscription events received during this browser session. */
+  activity: ReportActivity[];
   /** Re-run the read (e.g. the header refresh button). */
   refresh: () => void;
 }
 
 export function useLiveReports(): LiveReportsFeed {
   const [state, setState] = useState<IncidentFeedState>({ status: 'loading' });
+  const [lastUpdate, setLastUpdate] = useState<LiveReportsFeed['lastUpdate']>(null);
+  const [activity, setActivity] = useState<ReportActivity[]>([]);
+  const loadSequence = useRef(0);
+  const updateSequence = useRef(0);
 
-  const load = useCallback(async () => {
-    setState({ status: 'loading' });
+  const load = useCallback(async (background = false) => {
+    const sequence = ++loadSequence.current;
+    if (!background) setState({ status: 'loading' });
 
     // Reads require a signed-in user. No session → graceful degrade, not an error.
     try {
       await getCurrentUser();
     } catch {
-      setState({ status: 'unauthenticated' });
+      if (sequence === loadSequence.current) setState({ status: 'unauthenticated' });
       return;
     }
 
     try {
       const { data, errors } = await client.models.Report.list({ limit: READ_LIMIT });
       if (errors && errors.length > 0) {
-        setState({ status: 'error', message: errors[0]?.message ?? 'Could not load incidents.' });
-        return;
+        throw new Error(errors[0]?.message ?? 'Could not load incidents.');
       }
-      setState({ status: 'ready', incidents: (data ?? []).map(toRedactedIncident) });
+      if (sequence === loadSequence.current) {
+        setState({ status: 'ready', incidents: (data ?? []).map(toRedactedIncident) });
+      }
     } catch (err) {
-      setState({
-        status: 'error',
-        message: err instanceof Error ? err.message : 'Could not load incidents.',
-      });
+      if (background) throw err;
+      if (sequence === loadSequence.current) {
+        setState({
+          status: 'error',
+          message: err instanceof Error ? err.message : 'Could not load incidents.',
+        });
+      }
     }
+  }, []);
+
+  const reconcile = useCallback(async (reportId: string) => {
+    const { data, errors } = await client.models.Report.get({ id: reportId });
+    if (errors && errors.length > 0) {
+      throw new Error(errors[0]?.message ?? 'Could not reconcile the live incident update.');
+    }
+    if (!data) throw new Error('The updated incident could not be found.');
+
+    const incoming = toRedactedIncident(data);
+    setState((current) =>
+      current.status === 'ready'
+        ? {
+            status: 'ready',
+            incidents: reconcileIncident(current.incidents, incoming, READ_LIMIT),
+          }
+        : current,
+    );
   }, []);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  return { state, refresh: () => void load() };
+  const realtime = useReportUpdates({
+    enabled: state.status === 'ready',
+    onUpdate: async (report) => {
+      await reconcile(report.reportId);
+      const sequence = ++updateSequence.current;
+      setLastUpdate({ sequence, reportId: report.reportId });
+      setActivity((current) =>
+        [
+          {
+            sequence,
+            reportId: report.reportId,
+            status: report.status,
+            summary: report.summary,
+            occurredAt: report.updatedAt,
+          },
+          ...current,
+        ].slice(0, ACTIVITY_LIMIT),
+      );
+    },
+    onReconnect: async () => {
+      await load(true);
+      setLastUpdate({ sequence: ++updateSequence.current, reportId: null });
+    },
+  });
+
+  return { state, realtime, lastUpdate, activity, refresh: () => void load() };
 }
