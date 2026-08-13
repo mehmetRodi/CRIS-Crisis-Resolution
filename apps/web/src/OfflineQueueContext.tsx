@@ -15,7 +15,7 @@ import { loadQueue, saveQueue } from './lib/offline-queue-storage';
 import { submitReport } from './lib/submit-report';
 
 /**
- * Offline report queue (CRIS-26, ADR-0040). Owns the single shared instance of
+ * Offline report queue (CRIS-26, ADR-0044). Owns the single shared instance of
  * the "reports waiting to send" queue — deliberately a context (mirroring
  * `AuthContext`/`useAuth`), not a bare hook called from multiple places, so the
  * banner and the report form share one flush loop and one persisted count

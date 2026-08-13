@@ -7,6 +7,7 @@ is CRIS-35; this is the deploy + alarm-triage subset.
 - **Deploy pipeline:** [ADR-0016](../adr/0016-continuous-deployment-ampx-pipeline-oidc.md)
 - **CI success gate:** [ADR-0018](../adr/0018-gate-deploy-on-ci-via-workflow-run.md)
 - **Observability:** [ADR-0015](../adr/0015-observability-xray-cloudwatch-alarms.md)
+- **Triage encryption:** [ADR-0043](../adr/0043-customer-managed-key-for-triage-data-plane.md)
 
 ---
 
@@ -27,7 +28,7 @@ in** — the job is skipped (green) unless `AWS_DEPLOY_ENABLED` is `true`.
    ```
    Attach a policy allowing the CloudFormation/CDK deploy (CDK bootstrap + the services the
    backend provisions: CloudFormation, S3, IAM, Lambda, AppSync, DynamoDB, Cognito, SQS, Pipes,
-   SNS, CloudWatch, X-Ray). Scope to least privilege for your account.
+   SNS, KMS, CloudWatch, X-Ray). Scope to least privilege for your account.
 4. **CDK bootstrap** the account/region once (`npx ampx pipeline-deploy` relies on the CDK
    bootstrap stack).
 
@@ -76,6 +77,35 @@ No automated rollback yet. Re-run an earlier good commit through the pipeline
 (`workflow_dispatch` from that ref, or revert-commit to `main`). Post-deploy smoke tests are a
 follow-up (CRIS-29/35).
 
+### Retained KMS keys after sandbox deletion
+
+The triage data-plane key uses `RemovalPolicy.RETAIN` (ADR-0043). This protects queued messages if
+an update replaces the key before they expire, but `ampx sandbox delete` removes the stack alias and
+can leave the underlying customer-managed key billable.
+
+Before deleting a sandbox, record the key ID while its alias still exists:
+
+```bash
+aws kms describe-key --key-id alias/<stack-name>-data
+```
+
+After deletion or key replacement:
+
+1. Confirm the old key ID is not referenced by any live SQS queue or SNS topic and that any messages
+   encrypted under it have expired, been consumed, or been deliberately migrated.
+2. In KMS, verify the key description contains `triage queues and operational alarms (CRIS-25)` and
+   confirm its stack/environment from its tags and CloudTrail history. Do not identify a key by a
+   partial description alone.
+3. Schedule deletion with a 30-day recovery window:
+   ```bash
+   aws kms schedule-key-deletion --key-id <verified-key-id> --pending-window-in-days 30
+   ```
+4. Monitor the key during the waiting period. If any legitimate use appears, cancel deletion with
+   `aws kms cancel-key-deletion --key-id <verified-key-id>` and restore the required alias/grants.
+
+Never schedule deletion for the active shared environment's key. Deleting a KMS key is permanent;
+CloudFormation cannot recover ciphertext after the waiting window closes.
+
 ---
 
 ## 2. Observability
@@ -85,7 +115,8 @@ follow-up (CRIS-29/35).
 - **Dashboard:** CloudWatch → Dashboards → `CrisisMap-<stackName>`. One screen for the §3.2
   service targets (submission p95 < 800 ms, classification p95 < 15 s, real-time p95 < 2 s,
   99.9%). The real-time widgets remain dormant until worker fan-out and subscriptions are wired.
-- **Alarms → SNS:** all alarms publish to the ops topic `OpsAlarmTopic`. **Subscribe an
+- **Alarms → SNS:** all alarms publish to the CMK-encrypted ops topic `OpsAlarmTopic`; its key and
+  topic policies authorize same-account CloudWatch alarms and SNS delivery (ADR-0043). **Subscribe an
   endpoint post-deploy** (it is environment-specific, so it is not in code):
   ```bash
   aws sns subscribe --topic-arn <OpsAlarmTopic ARN> --protocol email --notification-endpoint oncall@example.org

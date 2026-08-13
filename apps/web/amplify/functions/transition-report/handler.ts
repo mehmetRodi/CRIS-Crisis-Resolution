@@ -14,7 +14,7 @@ import type { AppSyncIdentityCognito, AppSyncResolverHandler } from 'aws-lambda'
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
 import { ulid } from 'ulid';
-import { UserRole, type ReportStatus, type TransitionActor } from '@crisismap/shared';
+import { highestRole, type ReportStatus, type TransitionActor } from '@crisismap/shared';
 import {
   buildTransitionPlan,
   IllegalTransitionError,
@@ -42,7 +42,7 @@ export const handler: AppSyncResolverHandler<
   Record<string, unknown>
 > = async (event) => {
   const identity = event.identity as AppSyncIdentityCognito | undefined;
-  const actorRole = highestRole(identity?.groups ?? undefined);
+  const actorRole: TransitionActor | null = highestRole(identity?.groups ?? undefined);
   if (!actorRole) {
     throw new Error('FORBIDDEN: caller has no role permitted to change report status.');
   }
@@ -125,28 +125,6 @@ export const handler: AppSyncResolverHandler<
     updatedAt: plan.update.updatedAt,
   };
 };
-
-/** Cognito groups → the highest-privilege role the caller holds. */
-const ROLE_RANK: TransitionActor[] = [
-  UserRole.CITIZEN,
-  UserRole.VOLUNTEER,
-  UserRole.RESPONDER,
-  UserRole.COORDINATOR,
-  UserRole.ADMIN,
-];
-
-function highestRole(groups?: string[]): TransitionActor | null {
-  let best: TransitionActor | null = null;
-  let bestRank = -1;
-  for (const group of groups ?? []) {
-    const rank = ROLE_RANK.indexOf(group as TransitionActor);
-    if (rank > bestRank) {
-      bestRank = rank;
-      best = group as TransitionActor;
-    }
-  }
-  return best;
-}
 
 function mapDomainError(err: unknown): Error {
   if (err instanceof VersionConflictError) {
