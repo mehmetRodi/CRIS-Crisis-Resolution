@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Category, Urgency, type PendingReport } from '@crisismap/shared';
 
 import { loadQueue, saveQueue } from './offline-queue-storage';
@@ -50,5 +50,20 @@ describe('loadQueue', () => {
     const queue = [pending()];
     saveQueue(queue);
     expect(loadQueue()).toEqual(queue);
+  });
+
+  it('strips contact information from persisted queue entries', () => {
+    const queue = [pending()];
+    queue[0]!.submission.contact = 'citizen@example.com';
+    saveQueue(queue);
+    expect(loadQueue()[0]!.submission.contact).toBeNull();
+  });
+
+  it('propagates storage failures to the caller', () => {
+    const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementationOnce(() => {
+      throw new DOMException('Quota exceeded', 'QuotaExceededError');
+    });
+    expect(() => saveQueue([pending()])).toThrow('Quota exceeded');
+    setItem.mockRestore();
   });
 });

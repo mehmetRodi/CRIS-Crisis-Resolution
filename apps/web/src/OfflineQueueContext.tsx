@@ -55,9 +55,11 @@ export function OfflineQueueProvider({ children }: { children: React.ReactNode }
   const flushAgainRequested = useRef(false);
 
   function persist(next: PendingReport[]) {
+    // Save before acknowledging the state change. A quota/private-mode failure
+    // must reach enqueue's caller instead of producing a false "saved" result.
+    saveQueue(next);
     queueRef.current = next;
     setQueue(next);
-    saveQueue(next);
   }
 
   async function flush() {
@@ -75,18 +77,29 @@ export function OfflineQueueProvider({ children }: { children: React.ReactNode }
         if (!isRetryDue(item, now)) continue;
         try {
           await submitReport(item.submission, item.clientRequestId);
-          persist(removePendingReport(queueRef.current, item.clientRequestId));
         } catch (err) {
           const retryable = err instanceof ReportSubmitError ? err.retryable : true;
-          if (!retryable) {
-            // A deterministic server-side rejection on a queued report can
-            // never succeed by repeating it — drop it rather than retry
-            // forever and let the banner keep lying about "waiting to send".
-            persist(removePendingReport(queueRef.current, item.clientRequestId));
-          } else {
-            const message = err instanceof Error ? err.message : 'Unknown error';
-            persist(recordAttemptFailure(queueRef.current, item.clientRequestId, message, now));
+          try {
+            if (!retryable) {
+              // A deterministic server-side rejection on a queued report can
+              // never succeed by repeating it — drop it rather than retry
+              // forever and let the banner keep lying about "waiting to send".
+              persist(removePendingReport(queueRef.current, item.clientRequestId));
+            } else {
+              const message = err instanceof Error ? err.message : 'Unknown error';
+              persist(recordAttemptFailure(queueRef.current, item.clientRequestId, message, now));
+            }
+          } catch {
+            return;
           }
+          continue;
+        }
+        try {
+          persist(removePendingReport(queueRef.current, item.clientRequestId));
+        } catch {
+          // The server accepted the idempotent report, but the local removal
+          // could not be saved. Keep it queued and safely retry later.
+          return;
         }
       }
     } finally {

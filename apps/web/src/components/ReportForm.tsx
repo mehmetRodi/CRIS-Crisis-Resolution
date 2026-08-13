@@ -82,6 +82,7 @@ export function ReportForm() {
   // Set on a submit that went out without the photo the user had picked, so the
   // confirmation can say so rather than claiming an unqualified success.
   const [photoDropped, setPhotoDropped] = useState(false);
+  const [contactDropped, setContactDropped] = useState(false);
   // 'submitted': the server confirmed it. 'queued': saved locally, offline or
   // after a retryable failure, will send automatically (CRIS-26). Both render
   // the same confirmation view with different copy — from the citizen's side,
@@ -212,8 +213,9 @@ export function ReportForm() {
    * are "done" from the citizen's side, so they share every reset step —
    * only the confirmation copy (driven by `outcome`) differs.
    */
-  function finishSubmission(outcome: 'submitted' | 'queued') {
+  function finishSubmission(outcome: 'submitted' | 'queued', omittedContact = false) {
     setOutcome(outcome);
+    setContactDropped(omittedContact);
     // Tell the user their photo didn't make it, rather than letting an
     // unqualified confirmation imply it did.
     setPhotoDropped(photoName !== null && mediaKey === null);
@@ -228,6 +230,15 @@ export function ReportForm() {
     setPhotoUploading(false);
     if (fileInputRef.current) fileInputRef.current.value = '';
     setClientRequestId(newClientRequestId());
+  }
+
+  async function queueSubmission(submission: ReturnType<typeof toReportSubmission>) {
+    try {
+      await enqueue(submission, clientRequestId);
+      finishSubmission('queued', submission.contact !== null);
+    } catch {
+      setError('This report could not be saved on this device. Please keep it open and try again.');
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -250,8 +261,7 @@ export function ReportForm() {
       // Known-offline: skip the network call entirely rather than waiting on
       // a call that can only time out (CRIS-26).
       if (!isOnline) {
-        await enqueue(submission, clientRequestId);
-        finishSubmission('queued');
+        await queueSubmission(submission);
         return;
       }
       await submitReport(submission, clientRequestId);
@@ -266,8 +276,7 @@ export function ReportForm() {
         // Either a transport failure (offline, DNS, timeout) or an unexpected
         // error of unknown shape — safe to assume retryable and queue it
         // rather than lose the report (CRIS-26 §5.4.4 idempotency).
-        await enqueue(submission, clientRequestId);
-        finishSubmission('queued');
+        await queueSubmission(submission);
       }
     } finally {
       setSubmitting(false);
@@ -298,7 +307,13 @@ export function ReportForm() {
           </p>
           {photoDropped && (
             <p className="text-sm font-medium text-green-900">
-              Your photo could not be uploaded, so the report was sent without it.
+              Your photo could not be uploaded, so the report was{' '}
+              {outcome === 'queued' ? 'saved' : 'sent'} without it.
+            </p>
+          )}
+          {contactDropped && (
+            <p className="text-sm font-medium text-green-900">
+              For privacy, your contact information was not stored with the offline report.
             </p>
           )}
           <button

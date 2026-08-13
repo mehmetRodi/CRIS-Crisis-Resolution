@@ -54,10 +54,10 @@ describe('submitReport', () => {
     });
   });
 
-  it('throws a non-retryable ReportSubmitError when the server responds with errors', async () => {
+  it('throws a non-retryable ReportSubmitError for an explicit validation error', async () => {
     submitReportMutation.mockResolvedValue({
       data: null,
-      errors: [{ message: 'Report text failed validation.' }],
+      errors: [{ message: 'VALIDATION: Report text failed validation.' }],
     });
 
     let caught: unknown;
@@ -72,11 +72,23 @@ describe('submitReport', () => {
     expect((caught as ReportSubmitError).message).toBe('Report text failed validation.');
   });
 
-  it('throws a non-retryable error when the server resolves with no data and no errors', async () => {
+  it('keeps operational GraphQL errors retryable', async () => {
+    submitReportMutation.mockResolvedValue({
+      data: null,
+      errors: [{ message: 'DynamoDB is temporarily unavailable.' }],
+    });
+
+    await expect(submitReport(submission(), 'req-1')).rejects.toMatchObject({
+      retryable: true,
+      message: 'DynamoDB is temporarily unavailable.',
+    });
+  });
+
+  it('treats a response with no data and no explicit validation error as retryable', async () => {
     submitReportMutation.mockResolvedValue({ data: null, errors: null });
 
     await expect(submitReport(submission(), 'req-1')).rejects.toMatchObject({
-      retryable: false,
+      retryable: true,
       message: 'The report could not be submitted.',
     });
   });

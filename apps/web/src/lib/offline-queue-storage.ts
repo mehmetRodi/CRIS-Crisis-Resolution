@@ -1,9 +1,9 @@
-import type { PendingReport } from '@crisismap/shared';
+import { withoutPendingReportContact, type PendingReport } from '@crisismap/shared';
 
 /**
  * `localStorage` persistence for the offline report queue (CRIS-26). The pure
- * queue logic lives in `@crisismap/shared`; this file is the thin, untested
- * (per repo convention — see `media-upload.ts`/`amplify.ts`) browser adapter.
+ * queue logic lives in `@crisismap/shared`; this file is the thin browser
+ * adapter.
  */
 
 const STORAGE_KEY = 'crisismap.offlineQueue.v1';
@@ -14,18 +14,15 @@ export function loadQueue(): PendingReport[] {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as PendingReport[]) : [];
+    return Array.isArray(parsed)
+      ? (parsed as PendingReport[]).map(withoutPendingReportContact)
+      : [];
   } catch {
     return [];
   }
 }
 
-/** Persists the queue. Never throws — a full/unavailable store (private browsing) just no-ops. */
+/** Persists the queue, throwing when the browser cannot make the save durable. */
 export function saveQueue(queue: readonly PendingReport[]): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(queue));
-  } catch {
-    // Quota exceeded or storage disabled — the queue still works for this
-    // session (in-memory React state), it just won't survive a reload.
-  }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(queue.map(withoutPendingReportContact)));
 }

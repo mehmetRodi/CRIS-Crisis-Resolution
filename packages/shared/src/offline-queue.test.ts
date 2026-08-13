@@ -8,6 +8,7 @@ import {
   ReportSubmitError,
   enqueuePendingReport,
   hasStalePendingReport,
+  isReportSubmitValidationError,
   isRetryDue,
   nextRetryDelayMs,
   recordAttemptFailure,
@@ -80,6 +81,16 @@ describe('enqueuePendingReport', () => {
       NOW,
     );
     expect(queue.map((p) => p.clientRequestId)).toEqual(['req-1', 'req-2']);
+  });
+
+  it('removes optional contact PII from the queued copy', () => {
+    const queue = enqueuePendingReport(
+      [],
+      submission({ contact: 'citizen@example.com' }),
+      'req-1',
+      NOW,
+    );
+    expect(queue[0]!.submission.contact).toBeNull();
   });
 });
 
@@ -181,5 +192,10 @@ describe('ReportSubmitError', () => {
 
   it('supports a non-retryable classification', () => {
     expect(new ReportSubmitError('rejected', false).retryable).toBe(false);
+  });
+
+  it('recognizes only explicitly prefixed validation failures', () => {
+    expect(isReportSubmitValidationError('VALIDATION: Report text is required.')).toBe(true);
+    expect(isReportSubmitValidationError('Internal server error')).toBe(false);
   });
 });

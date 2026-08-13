@@ -53,11 +53,27 @@ export function OfflineQueueProvider({ children }: { children: ReactNode }) {
   const appActiveRef = useRef(AppState.currentState === 'active');
   const flushInFlight = useRef(false);
   const flushAgainRequested = useRef(false);
+  const hydrationPromiseRef = useRef<Promise<void> | null>(null);
+  const resolveHydrationRef = useRef<(() => void) | null>(null);
+  const queueMutationChain = useRef(Promise.resolve());
 
-  async function persist(next: PendingReport[]) {
-    queueRef.current = next;
-    setQueue(next);
-    await saveQueue(next);
+  if (hydrationPromiseRef.current === null) {
+    hydrationPromiseRef.current = new Promise<void>((resolve) => {
+      resolveHydrationRef.current = resolve;
+    });
+  }
+
+  async function updateQueue(update: (current: readonly PendingReport[]) => PendingReport[]) {
+    const mutation = queueMutationChain.current.then(async () => {
+      const next = update(queueRef.current);
+      // Persist before exposing the new state so callers never receive a false
+      // durable-save acknowledgement.
+      await saveQueue(next);
+      queueRef.current = next;
+      setQueue(next);
+    });
+    queueMutationChain.current = mutation.catch(() => undefined);
+    await mutation;
   }
 
   async function flush() {
@@ -73,19 +89,30 @@ export function OfflineQueueProvider({ children }: { children: ReactNode }) {
         if (!isRetryDue(item, now)) continue;
         try {
           await submitReport(item.submission, item.clientRequestId);
-          await persist(removePendingReport(queueRef.current, item.clientRequestId));
         } catch (err) {
           const retryable = err instanceof ReportSubmitError ? err.retryable : true;
-          if (!retryable) {
-            // A deterministic server-side rejection can never succeed by
-            // repeating it — drop rather than retry forever.
-            await persist(removePendingReport(queueRef.current, item.clientRequestId));
-          } else {
-            const message = err instanceof Error ? err.message : 'Unknown error';
-            await persist(
-              recordAttemptFailure(queueRef.current, item.clientRequestId, message, now),
-            );
+          try {
+            if (!retryable) {
+              // A deterministic server-side rejection can never succeed by
+              // repeating it — drop rather than retry forever.
+              await updateQueue((current) => removePendingReport(current, item.clientRequestId));
+            } else {
+              const message = err instanceof Error ? err.message : 'Unknown error';
+              await updateQueue((current) =>
+                recordAttemptFailure(current, item.clientRequestId, message, now),
+              );
+            }
+          } catch {
+            return;
           }
+          continue;
+        }
+        try {
+          await updateQueue((current) => removePendingReport(current, item.clientRequestId));
+        } catch {
+          // The server accepted the idempotent report, but the local removal
+          // could not be saved. Keep it queued and safely retry later.
+          return;
         }
       }
     } finally {
@@ -104,6 +131,7 @@ export function OfflineQueueProvider({ children }: { children: ReactNode }) {
       const loaded = await loadQueue();
       queueRef.current = loaded;
       setQueue(loaded);
+      resolveHydrationRef.current?.();
       void flush();
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -143,8 +171,9 @@ export function OfflineQueueProvider({ children }: { children: ReactNode }) {
     // moments after the citizen taps submit, an un-awaited write might not
     // have landed. The caller shows its "saved" confirmation only after this
     // resolves.
-    await persist(
-      enqueuePendingReport(queueRef.current, submission, clientRequestId, new Date().toISOString()),
+    await hydrationPromiseRef.current;
+    await updateQueue((current) =>
+      enqueuePendingReport(current, submission, clientRequestId, new Date().toISOString()),
     );
     // Best-effort immediate attempt in case connectivity was misdetected —
     // NOT awaited, since only the durable save above needs to finish first.
