@@ -183,7 +183,7 @@ aws sns subscribe \
 ## Teardown / rollback
 
 - **Rollback:** re-run an earlier good commit through the pipeline (revert to `main`, or
-  `workflow_dispatch` from that ref). No automated rollback yet (CRIS-29/35).
+  `workflow_dispatch` from that ref). No automated rollback yet (CRIS-35).
 - **Teardown a sandbox:** `npx ampx sandbox delete`.
 - **Decommission an environment:** delete its CloudFormation stack(s) via the Amplify console /
   CloudFormation; confirm DynamoDB tables and the S3 media bucket are handled per your data-
