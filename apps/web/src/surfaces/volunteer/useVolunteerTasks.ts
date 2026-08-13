@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getCurrentUser } from 'aws-amplify/auth';
 
 import { client } from '../../lib/amplify';
-import type { VolunteerTask, VolunteerTaskFeedState } from './tasks';
+import { useReportUpdates, type RealtimeConnectionState } from '../../lib/report-updates';
+import { reconcileVolunteerReport, type VolunteerTask, type VolunteerTaskFeedState } from './tasks';
 
 export interface LiveVolunteerTasks {
   state: VolunteerTaskFeedState;
+  realtime: RealtimeConnectionState;
   refresh: () => void;
 }
 
@@ -15,13 +17,15 @@ export interface LiveVolunteerTasks {
  */
 export function useVolunteerTasks(): LiveVolunteerTasks {
   const [state, setState] = useState<VolunteerTaskFeedState>({ status: 'loading' });
+  const loadSequence = useRef(0);
 
-  const load = useCallback(async () => {
-    setState({ status: 'loading' });
+  const load = useCallback(async (background = false) => {
+    const sequence = ++loadSequence.current;
+    if (!background) setState({ status: 'loading' });
     try {
       await getCurrentUser();
     } catch {
-      setState({ status: 'unauthenticated' });
+      if (sequence === loadSequence.current) setState({ status: 'unauthenticated' });
       return;
     }
 
@@ -29,19 +33,23 @@ export function useVolunteerTasks(): LiveVolunteerTasks {
       const result = await client.queries.listVolunteerTasks();
       const firstError = result.errors?.[0];
       if (firstError) {
-        setState({ status: 'error', message: firstError.message ?? 'Could not load tasks.' });
-        return;
+        throw new Error(firstError.message ?? 'Could not load tasks.');
       }
 
-      setState({
-        status: 'ready',
-        tasks: (result.data ?? []) as VolunteerTask[],
-      });
+      if (sequence === loadSequence.current) {
+        setState({
+          status: 'ready',
+          tasks: (result.data ?? []) as VolunteerTask[],
+        });
+      }
     } catch (error) {
-      setState({
-        status: 'error',
-        message: error instanceof Error ? error.message : 'Could not load tasks.',
-      });
+      if (background) throw error;
+      if (sequence === loadSequence.current) {
+        setState({
+          status: 'error',
+          message: error instanceof Error ? error.message : 'Could not load tasks.',
+        });
+      }
     }
   }, []);
 
@@ -49,5 +57,17 @@ export function useVolunteerTasks(): LiveVolunteerTasks {
     void load();
   }, [load]);
 
-  return { state, refresh: () => void load() };
+  const realtime = useReportUpdates({
+    enabled: state.status === 'ready',
+    onUpdate: (report) => {
+      setState((current) =>
+        current.status === 'ready'
+          ? { status: 'ready', tasks: reconcileVolunteerReport(current.tasks, report) }
+          : current,
+      );
+    },
+    onReconnect: () => load(true),
+  });
+
+  return { state, realtime, refresh: () => void load() };
 }

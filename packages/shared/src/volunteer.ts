@@ -75,7 +75,8 @@ const URGENCIES = new Set<string>(Object.values(Urgency));
 const PRIORITY_BANDS = new Set<string>(Object.values(PriorityBand));
 const ASSIGNMENT_STATUSES = new Set<string>(Object.values(AssignmentStatus));
 
-function assignmentColumn(
+/** Resolve a report/assignment pair to its read-only volunteer workflow lane. */
+export function volunteerBoardColumnFor(
   reportStatus: ReportStatus,
   assignmentStatus: AssignmentStatus | null,
 ): VolunteerBoardColumn | null {
@@ -142,7 +143,7 @@ export function buildVolunteerTasks(
       assignment?.status && ASSIGNMENT_STATUSES.has(assignment.status)
         ? (assignment.status as AssignmentStatus)
         : null;
-    const column = assignmentColumn(status, assignmentStatus);
+    const column = volunteerBoardColumnFor(status, assignmentStatus);
     if (!column) continue;
 
     const teamId = assignment?.teamId ?? report.assignedTeamId ?? null;

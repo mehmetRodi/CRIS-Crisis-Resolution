@@ -5,6 +5,7 @@ import {
   VolunteerBoardColumn,
   buildVolunteerTasks,
   filterVolunteerTasks,
+  reconcileVolunteerReport,
   tasksByColumn,
   type VolunteerAssignmentRecord,
   type VolunteerReportRecord,
@@ -121,5 +122,38 @@ describe('volunteer task projection', () => {
 
     expect(tasks.map((task) => task.reportId)).toEqual(['high', 'low']);
     expect(reports.map((item) => item.id)).toEqual(['low', 'high']);
+  });
+
+  it('preserves assignment labels while applying a redacted live report update', () => {
+    const tasks = buildVolunteerTasks(
+      [report('one')],
+      [assignment('assignment-1', 'one', AssignmentStatus.ASSIGNED)],
+      [{ id: 'team-a', name: 'North volunteers', regionId: 'north' }],
+    );
+
+    const updated = reconcileVolunteerReport(tasks, {
+      reportId: 'one',
+      status: ReportStatus.NEEDS_VERIFICATION,
+      category: Category.MEDICAL,
+      urgency: Urgency.CRITICAL,
+      priorityScore: 9,
+      priorityBand: null,
+      summary: 'Verify medical need',
+      lat: null,
+      lng: null,
+      geohash: null,
+      geohashPrefix: null,
+      regionId: null,
+      createdAt: null,
+      updatedAt: null,
+    });
+
+    expect(updated[0]).toMatchObject({
+      reportId: 'one',
+      column: VolunteerBoardColumn.VERIFICATION_NEEDED,
+      priorityBand: 'P0',
+      teamName: 'North volunteers',
+      regionId: 'north',
+    });
   });
 });

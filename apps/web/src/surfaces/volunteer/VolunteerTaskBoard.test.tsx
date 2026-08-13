@@ -43,13 +43,16 @@ const feed: VolunteerTaskFeedState = {
 
 describe('VolunteerTaskBoard', () => {
   it('renders all five workflow columns and their task cards', () => {
-    render(<VolunteerTaskBoard onExit={() => {}} feed={feed} />);
+    render(<VolunteerTaskBoard onExit={() => {}} feed={feed} realtime="connected" />);
 
     for (const heading of ['New', 'Assigned', 'In progress', 'Verification needed', 'Completed']) {
       expect(screen.getByRole('heading', { name: heading })).toBeInTheDocument();
     }
     expect(screen.getByText('Deliver medical supplies')).toBeInTheDocument();
     expect(screen.getByText('Check warehouse fire perimeter')).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: /live update connection/i })).toHaveTextContent(
+      /live updates connected/i,
+    );
   });
 
   it('filters the board by region, category, and urgency', () => {
@@ -91,7 +94,9 @@ describe('VolunteerTaskBoard', () => {
     const { rerender } = render(
       <VolunteerTaskBoard onExit={() => {}} feed={{ status: 'unauthenticated' }} />,
     );
-    expect(screen.getByRole('status')).toHaveTextContent(/sign in as a volunteer/i);
+    expect(screen.getByRole('status', { name: /volunteer task status/i })).toHaveTextContent(
+      /sign in as a volunteer/i,
+    );
 
     rerender(
       <VolunteerTaskBoard

@@ -13,10 +13,12 @@ import {
   type VolunteerTaskFeedState,
   type VolunteerTaskFilters,
 } from './tasks';
+import type { RealtimeConnectionState } from '../../lib/report-updates';
 
 export interface VolunteerTaskBoardProps {
   onExit: () => void;
   feed?: VolunteerTaskFeedState;
+  realtime?: RealtimeConnectionState;
   onRefresh?: () => void;
 }
 
@@ -212,7 +214,12 @@ function Board({ tasks }: { tasks: readonly VolunteerTask[] }) {
 }
 
 /** Read-only volunteer workflow board; task mutations remain behind a future guarded API. */
-export function VolunteerTaskBoard({ onExit, feed, onRefresh }: VolunteerTaskBoardProps) {
+export function VolunteerTaskBoard({
+  onExit,
+  feed,
+  realtime = 'idle',
+  onRefresh,
+}: VolunteerTaskBoardProps) {
   const resolvedFeed = feed ?? { status: 'loading' };
   const [filters, setFilters] = useState<VolunteerTaskFilters>(EMPTY_VOLUNTEER_TASK_FILTERS);
   const allTasks = resolvedFeed.status === 'ready' ? resolvedFeed.tasks : [];
@@ -249,6 +256,33 @@ export function VolunteerTaskBoard({ onExit, feed, onRefresh }: VolunteerTaskBoa
             </p>
           </div>
           <div className="flex items-center gap-3">
+            <span
+              role="status"
+              aria-label="Live update connection"
+              className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-600"
+            >
+              <span
+                aria-hidden="true"
+                className={`inline-block h-2 w-2 rounded-full ${
+                  realtime === 'connected'
+                    ? 'bg-emerald-500'
+                    : realtime === 'connecting'
+                      ? 'bg-amber-400'
+                      : realtime === 'error'
+                        ? 'bg-red-400'
+                        : 'bg-slate-300'
+                }`}
+              />
+              {realtime === 'connected'
+                ? 'Live updates connected'
+                : realtime === 'connecting'
+                  ? 'Connecting live updates…'
+                  : realtime === 'disconnected'
+                    ? 'Live updates reconnecting…'
+                    : realtime === 'error'
+                      ? 'Live updates unavailable'
+                      : 'Live updates inactive'}
+            </span>
             <span className="rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-800">
               {UserRole.VOLUNTEER}
             </span>
@@ -265,6 +299,7 @@ export function VolunteerTaskBoard({ onExit, feed, onRefresh }: VolunteerTaskBoa
 
         <div
           role={resolvedFeed.status === 'error' ? 'alert' : 'status'}
+          aria-label="Volunteer task status"
           className={statusMessage ? 'mb-4 rounded-md bg-white p-3 text-sm shadow-sm' : 'sr-only'}
         >
           {statusMessage}
