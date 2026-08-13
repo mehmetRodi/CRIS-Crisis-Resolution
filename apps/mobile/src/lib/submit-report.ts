@@ -1,5 +1,11 @@
 import * as Crypto from 'expo-crypto';
-import { toSubmissionText, type ReportSubmission } from '@crisismap/shared';
+import {
+  REPORT_SUBMIT_VALIDATION_PREFIX,
+  ReportSubmitError,
+  isReportSubmitValidationError,
+  toSubmissionText,
+  type ReportSubmission,
+} from '@crisismap/shared';
 
 import { client } from './amplify';
 
@@ -9,6 +15,10 @@ import { client } from './amplify';
  * uploaded S3 keys from the presigned-upload path (CRIS-17,
  * `lib/media-upload.ts`) — never raw file bytes. Never log the submission: it
  * can carry contact PII (design doc §5.4.1, §5.6).
+ *
+ * Throws `ReportSubmitError` (CRIS-26), not a bare `Error` — see the web twin
+ * (`apps/web/src/lib/submit-report.ts`) for why the transport-failure vs.
+ * server-rejection distinction matters to the offline queue.
  */
 
 /**
@@ -30,18 +40,32 @@ export async function submitReport(
   submission: ReportSubmission,
   clientRequestId: string,
 ): Promise<SubmitReportResult> {
-  const { data, errors } = await client.mutations.submitReport({
-    text: toSubmissionText(submission),
-    clientRequestId,
-    isAnonymous: submission.anonymous,
-    reporterContact: submission.contact,
-    mediaKeys: submission.mediaKeys,
-    lat: submission.lat,
-    lng: submission.lng,
-  });
+  let result: Awaited<ReturnType<typeof client.mutations.submitReport>>;
+  try {
+    result = await client.mutations.submitReport({
+      text: toSubmissionText(submission),
+      clientRequestId,
+      isAnonymous: submission.anonymous,
+      reporterContact: submission.contact,
+      mediaKeys: submission.mediaKeys,
+      lat: submission.lat,
+      lng: submission.lng,
+    });
+  } catch (err) {
+    throw new ReportSubmitError(
+      err instanceof Error && err.message ? err.message : 'The report could not be submitted.',
+      true,
+    );
+  }
 
+  const { data, errors } = result;
   if ((errors && errors.length > 0) || !data) {
-    throw new Error(errors?.[0]?.message ?? 'The report could not be submitted.');
+    const message = errors?.[0]?.message ?? 'The report could not be submitted.';
+    const isValidation = isReportSubmitValidationError(message);
+    const displayMessage = isValidation
+      ? message.slice(REPORT_SUBMIT_VALIDATION_PREFIX.length).trim()
+      : message;
+    throw new ReportSubmitError(displayMessage, !isValidation);
   }
   return { reportId: data.id, status: data.status ?? 'NEW' };
 }
