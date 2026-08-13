@@ -15,10 +15,12 @@ dependencies are degraded.
 
 Serverless AWS. The Expo mobile app and React SPA use an AppSync GraphQL API backed by
 DynamoDB. Expensive AI work runs asynchronously through DynamoDB Streams → EventBridge Pipes
-→ SQS → Lambda → Bedrock, keeping it off the report-submission path. Real-time subscriptions,
-Amazon Location integration, deduplication, media upload, and citizen alerts are not fully
-wired yet. See **[docs/architecture.md](docs/architecture.md)** for the distinction between the
-current implementation and target architecture.
+→ SQS → Lambda → Bedrock, keeping it off the report-submission path. Amazon Location Places
+geocoding, conservative duplicate grouping, and presigned media uploads are wired. Custom
+subscriptions, Amazon Location map tiles, richer incident-map overlays, media quarantine/signed
+delivery, and citizen proximity alerts remain deferred. See
+**[docs/architecture.md](docs/architecture.md)** for the distinction between the current
+implementation and target architecture.
 
 ## Tech stack
 
@@ -32,7 +34,7 @@ current implementation and target architecture.
 | AI             | Amazon Bedrock (Claude)                                                                                                                              |
 | Async          | SQS + DynamoDB Streams; Lambda workers                                                                                                               |
 | Alerts         | Amazon SNS for operations alarms; citizen proximity alerts are deferred                                                                              |
-| Map            | MapLibre with a configurable style URL; Amazon Location integration is deferred                                                                      |
+| Map            | MapLibre with a configurable style URL; Amazon Location Places geocoding is wired, while Location map tiles are deferred                             |
 | Monorepo       | npm workspaces — [ADR-0001](docs/adr/0001-monorepo-npm-workspaces.md)                                                                                |
 
 ## Repository layout

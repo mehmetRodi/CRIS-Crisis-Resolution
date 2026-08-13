@@ -19,8 +19,8 @@ import type { CoordinatorIncident, IncidentFeedState } from './incidents';
  * redacts each record to a `PublicReport` before it leaves this hook, so the UI
  * layer never holds reporter PII or the untrusted raw body (design doc §5.6).
  *
- * Reads are gated to the `COORDINATOR`/`ADMIN`/`RESPONDER`/`VOLUNTEER` Cognito
- * groups (`Report` model authorization, CRIS-24/ADR-0041 — no blanket
+ * Reads are gated to the `COORDINATOR`/`ADMIN`/`RESPONDER` Cognito groups
+ * (`Report` model authorization, CRIS-24/ADR-0041/0042 — no blanket
  * `allow.authenticated()` remains, since `Report` carries reporter PII). If there
  * is no session this hook degrades gracefully by resolving to `unauthenticated`
  * rather than throwing, and the dashboard shows a "sign in as a coordinator"

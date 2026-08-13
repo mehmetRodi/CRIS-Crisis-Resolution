@@ -13,9 +13,9 @@ import { resolveMapStyle } from './mapStyle';
  * doc §3.2). Default-exported because `React.lazy` requires a default export.
  *
  * Base map only: it renders no incident data. Markers, clustering, and
- * viewport-driven fetching are owned by later tickets (CRIS-22, design doc §5.2).
+ * viewport-driven fetching are deferred (design doc §5.2).
  * Tile source is resolved once in {@link resolveMapStyle} — a free public demo
- * style today, Amazon Location once `VITE_MAP_STYLE_URL` is wired (CRIS-24).
+ * style today, Amazon Location once `VITE_MAP_STYLE_URL` is wired.
  *
  * Resilience (design doc §1: stay usable when a dependency degrades): a style
  * fetch/render failure surfaces a quiet inline notice instead of a blank canvas
@@ -23,8 +23,8 @@ import { resolveMapStyle } from './mapStyle';
  */
 export interface IncidentMapProps {
   /**
-   * Initial viewport center `[lng, lat]`. Initial-only — later tickets drive the
-   * viewport imperatively as incidents load (CRIS-22). Defaults to a neutral wide
+   * Initial viewport center `[lng, lat]`. Initial-only — a future incident-overlay
+   * path can drive the viewport imperatively as incidents load. Defaults to a neutral wide
    * view; there is no incident data to frame yet.
    */
   center?: [number, number];
@@ -34,7 +34,7 @@ export interface IncidentMapProps {
   className?: string;
 }
 
-/** Neutral wide default — nothing to frame until incidents load (CRIS-22). */
+/** Neutral wide default — nothing to frame until incident overlays load. */
 const DEFAULT_CENTER: [number, number] = [10, 47];
 const DEFAULT_ZOOM = 3;
 

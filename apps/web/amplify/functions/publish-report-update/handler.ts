@@ -3,10 +3,11 @@
  *
  * The "notify subscribers" mutation. AppSync subscriptions fire on AppSync
  * *mutations*, not on raw DynamoDB writes, so the triage worker writes durably
- * and then calls this to fan the update out. As of CRIS-19 it is authorized
- * ONLY to the worker's IAM role (`allow.resource` in data/resource.ts) — no
- * client can invoke it. The subscriptions that consume it are enabled in
- * CRIS-28; until then this simply echoes the projection back to its caller.
+ * and then calls this to fan the update out. The worker uses its schema-level
+ * IAM resource grant; Amplify also requires a per-operation rule, whose narrow
+ * client-facing gate is `ADMIN` (ADR-0030). The subscriptions that consume it
+ * are enabled in CRIS-28; until then this simply echoes the projection back to
+ * its caller.
  * Keeping the durable worker write independent of AppSync availability remains
  * the design requirement.
  *
