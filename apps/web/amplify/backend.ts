@@ -429,6 +429,10 @@ backend.classifyReport.addEnvironment('REPORT_EVENT_TABLE_NAME', tables['ReportE
 // "dedup silently links nothing" (logged as `dedupe.failed`), so it is derived
 // from the transformer source rather than guessed — see docs/adr/0038.
 backend.classifyReport.addEnvironment('REPORT_GEO_INDEX_NAME', 'reportsByGeohashPrefixAndGeohash');
+backend.classifyReport.addEnvironment(
+  'REPORT_DUPLICATE_GROUP_INDEX_NAME',
+  'reportsByDuplicateGroupIdAndCreatedAt',
+);
 
 /* -------------------------------------------------------------------------- */
 /* Observability (CRIS-15, ADR-0015) — X-Ray tracing + CloudWatch alarms       */

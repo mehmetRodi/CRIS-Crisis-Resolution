@@ -1,16 +1,20 @@
 import { useState, type ReactNode } from 'react';
 import {
+  AFFECTED_PEOPLE_MAX_POINTS,
   canActorTransition,
   Category,
   CATEGORY_MAX_POINTS,
-  CORROBORATION_MAX_POINTS,
+  DUPLICATE_MAX_POINTS,
   PriorityBand,
   RECENCY_MAX_POINTS,
   ReportEventType,
   ReportStatus,
   STATUS_TRANSITIONS,
+  STALENESS_MAX_PENALTY,
+  UNCERTAINTY_MAX_PENALTY,
   URGENCY_MAX_POINTS,
   UserRole,
+  VERIFICATION_MAX_POINTS,
   type PublicReport,
   type ScoreBreakdown,
   type TriageEntities,
@@ -520,17 +524,23 @@ function ClassificationMeta({ incident }: { incident: CoordinatorIncident }) {
 const SCORE_FACTORS: readonly { key: keyof ScoreBreakdown; label: string; max: number }[] = [
   { key: 'urgencyWeight', label: 'Urgency', max: URGENCY_MAX_POINTS },
   { key: 'categoryWeight', label: 'Category', max: CATEGORY_MAX_POINTS },
+  { key: 'affectedPeopleWeight', label: 'Affected people', max: AFFECTED_PEOPLE_MAX_POINTS },
+  { key: 'verificationWeight', label: 'Human verification', max: VERIFICATION_MAX_POINTS },
   { key: 'recencyWeight', label: 'Recency', max: RECENCY_MAX_POINTS },
-  { key: 'corroborationWeight', label: 'Corroboration', max: CORROBORATION_MAX_POINTS },
+  { key: 'duplicateWeight', label: 'Duplicate corroboration', max: DUPLICATE_MAX_POINTS },
+];
+
+/** Penalties are positive magnitudes in storage but subtract from the score. */
+const SCORE_PENALTIES: readonly { key: keyof ScoreBreakdown; label: string; max: number }[] = [
+  { key: 'uncertaintyPenalty', label: 'Uncertainty', max: UNCERTAINTY_MAX_PENALTY },
+  { key: 'stalenessPenalty', label: 'Staleness', max: STALENESS_MAX_PENALTY },
 ];
 
 /**
  * The "why this ranks here" panel (design guarantee: priority is deterministic
  * and *explainable*, §5.4.2). Renders each additive factor as a proportional bar
- * against the points it can contribute, so a coordinator can see whether a rank
- * is driven by urgency, category, recency, or corroboration. A non-zero manual
- * adjustment (a coordinator override) is shown separately since it may be
- * negative and is not bounded to [0, max] the same way.
+ * against the points it can contribute. Penalties are shown separately with a
+ * minus sign so the stored explanation reads exactly like the v2 equation.
  */
 function ScoreBreakdownView({ breakdown }: { breakdown: ScoreBreakdown }) {
   return (
@@ -555,17 +565,25 @@ function ScoreBreakdownView({ breakdown }: { breakdown: ScoreBreakdown }) {
             </li>
           );
         })}
-        {breakdown.manualAdjustment !== 0 ? (
-          <li className="flex items-center justify-between text-xs text-slate-600">
-            <span>Manual adjustment</span>
-            <span className="tabular-nums text-slate-500">
-              {breakdown.manualAdjustment > 0 ? '+' : ''}
-              {breakdown.manualAdjustment.toFixed(2)}
-            </span>
-          </li>
-        ) : null}
+        {SCORE_PENALTIES.map((factor) => {
+          const value = breakdown[factor.key] as number;
+          const pct = clampPercent((value / factor.max) * 100);
+          return (
+            <li key={factor.key}>
+              <div className="flex items-center justify-between text-xs text-slate-600">
+                <span>{factor.label}</span>
+                <span className="tabular-nums text-slate-500">−{value.toFixed(2)}</span>
+              </div>
+              <div
+                className="mt-0.5 h-1.5 overflow-hidden rounded bg-slate-100"
+                role="presentation"
+              >
+                <div className="h-full rounded bg-amber-400" style={{ width: `${pct}%` }} />
+              </div>
+            </li>
+          );
+        })}
       </ul>
-      {breakdown.notes ? <p className="mt-1.5 text-xs text-slate-400">{breakdown.notes}</p> : null}
     </div>
   );
 }

@@ -62,3 +62,4 @@ behind the code — essential when refactoring or extending the system.
 | [0044](0044-offline-save-retry-and-recovery.md)                      | Offline save, retry, and recovery (CRIS-26)                         | Accepted                         |
 | [0045](0045-offline-queue-omits-contact-pii.md)                      | Offline queue omits optional contact PII                            | Accepted                         |
 | [0046](0046-api-integration-test-strategy.md)                        | API integration tests: mocked adapter + live sandbox (CRIS-29)      | Accepted                         |
+| [0047](0047-deterministic-priority-scoring-v2.md)                    | Deterministic priority scoring v2 (CRIS-30)                         | Accepted                         |

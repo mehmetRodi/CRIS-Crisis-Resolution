@@ -202,9 +202,8 @@ export const MAX_PRIORITY_SCORE = 10;
 /**
  * Maps a [0, 10] priority score to a band.
  *
- * TENTATIVE thresholds — the authoritative scoring formula and band cutoffs are
- * owned by the deterministic scoring work (design doc §5.4.2 / CRIS-11). Kept
- * here so the UI has something to render against during scaffolding.
+ * Authoritative v2 cutoffs for deterministic scoring (design doc §5.4.2 /
+ * CRIS-30). A cutoff change requires a score-version bump and ADR.
  */
 export function priorityBandForScore(score: number): PriorityBand {
   if (score >= 8) return PriorityBand.P0;

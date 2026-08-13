@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Category, PriorityBand, Urgency } from './domain';
 import {
+  AFFECTED_PEOPLE_MAX_POINTS,
   CATEGORY_MAX_POINTS,
   CLASSIFICATION_CONFIDENCE_THRESHOLD,
   CLASSIFICATION_CONTRACT_VERSION,
@@ -9,7 +10,7 @@ import {
   CLASSIFICATION_MAX_ENTITY_ITEMS,
   CLASSIFICATION_MAX_SUMMARY_CHARS,
   ClassificationContractError,
-  MANUAL_ADJUSTMENT_LIMIT,
+  DUPLICATE_MAX_POINTS,
   parseClassification,
   parseEntities,
   parseScoreBreakdown,
@@ -17,9 +18,13 @@ import {
   RECENCY_MAX_POINTS,
   scoreReport,
   SCORE_VERSION,
+  STALENESS_GRACE_MINUTES,
+  STALENESS_MAX_PENALTY,
   shouldEscalateToVerification,
   TRIAGE_TOOL_INPUT_SCHEMA,
+  UNCERTAINTY_MAX_PENALTY,
   URGENCY_MAX_POINTS,
+  VERIFICATION_MAX_POINTS,
   type ClassificationResult,
 } from './classification';
 
@@ -170,78 +175,164 @@ describe('human-review escalation (§2.6)', () => {
 
 describe('deterministic priority scoring (§5.4.2)', () => {
   it('is pure — identical inputs yield identical output', () => {
-    const input = { urgency: Urgency.HIGH, category: Category.FIRE, ageMinutes: 10 };
+    const input = {
+      urgency: Urgency.HIGH,
+      category: Category.FIRE,
+      confidence: 0.9,
+      ageMinutes: 10,
+    };
     expect(scoreReport(input)).toEqual(scoreReport(input));
   });
 
-  it('scores a fresh critical medical report near the top and bands it P0', () => {
+  it('scores a fresh, confident critical medical report as P0', () => {
     const { priorityScore, priorityBand, breakdown, scoreVersion } = scoreReport({
       urgency: Urgency.CRITICAL,
       category: Category.MEDICAL,
+      confidence: 0.9,
       ageMinutes: 0,
     });
-    // 5 (urgency) + 3 (category 1.0×3) + 1.5 (fresh) + 0 (no corroboration)
-    expect(breakdown.urgencyWeight).toBe(5);
-    expect(breakdown.categoryWeight).toBe(3);
+    expect(breakdown.urgencyWeight).toBe(5.5);
+    expect(breakdown.categoryWeight).toBe(2);
     expect(breakdown.recencyWeight).toBe(RECENCY_MAX_POINTS);
-    expect(breakdown.corroborationWeight).toBe(0);
-    expect(priorityScore).toBe(9.5);
+    expect(breakdown.affectedPeopleWeight).toBe(0);
+    expect(breakdown.verificationWeight).toBe(0);
+    expect(breakdown.duplicateWeight).toBe(0);
+    expect(breakdown.uncertaintyPenalty).toBe(0);
+    expect(breakdown.stalenessPenalty).toBe(0);
+    expect(priorityScore).toBe(8.5);
     expect(priorityBand).toBe(PriorityBand.P0);
     expect(scoreVersion).toBe(SCORE_VERSION);
   });
 
-  it('breakdown terms sum to the (pre-clamp) score', () => {
+  it('pins the agreed no-evidence baseline bands', () => {
+    const baseline = (urgency: Urgency, category: Category) =>
+      scoreReport({ urgency, category, confidence: 0.9, ageMinutes: 0 }).priorityBand;
+
+    expect(baseline(Urgency.CRITICAL, Category.MEDICAL)).toBe(PriorityBand.P0);
+    expect(baseline(Urgency.HIGH, Category.FIRE)).toBe(PriorityBand.P1);
+    expect(baseline(Urgency.MEDIUM, Category.FLOOD)).toBe(PriorityBand.P2);
+    expect(baseline(Urgency.LOW, Category.OTHER)).toBe(PriorityBand.P3);
+  });
+
+  it('adds evidence and subtracts penalties in the explainable breakdown', () => {
     const { priorityScore, breakdown } = scoreReport({
       urgency: Urgency.MEDIUM,
       category: Category.UTILITY,
-      ageMinutes: 20,
-      corroboratingReports: 1,
+      confidence: 0.7,
+      ageMinutes: STALENESS_GRACE_MINUTES + 60,
+      peopleAffected: 5,
+      confirmedHumanVerifications: 1,
+      strongDuplicateReports: 2,
     });
-    const sum =
+    const explained =
       breakdown.urgencyWeight +
       breakdown.categoryWeight +
+      breakdown.affectedPeopleWeight +
+      breakdown.verificationWeight +
       breakdown.recencyWeight +
-      breakdown.corroborationWeight +
-      breakdown.manualAdjustment;
-    expect(priorityScore).toBeCloseTo(sum, 2);
+      breakdown.duplicateWeight -
+      breakdown.uncertaintyPenalty -
+      breakdown.stalenessPenalty;
+    expect(priorityScore).toBeCloseTo(explained, 2);
   });
 
   it('decays recency by half after one half-life', () => {
-    const fresh = scoreReport({ urgency: Urgency.LOW, category: Category.OTHER, ageMinutes: 0 });
+    const fresh = scoreReport({
+      urgency: Urgency.LOW,
+      category: Category.OTHER,
+      confidence: 0.9,
+      ageMinutes: 0,
+    });
     const aged = scoreReport({
       urgency: Urgency.LOW,
       category: Category.OTHER,
+      confidence: 0.9,
       ageMinutes: RECENCY_HALF_LIFE_MINUTES,
     });
     expect(aged.breakdown.recencyWeight).toBeCloseTo(fresh.breakdown.recencyWeight / 2, 2);
   });
 
-  it('corroboration saturates and never exceeds its cap', () => {
-    const none = scoreReport({ urgency: Urgency.LOW, category: Category.OTHER });
-    const some = scoreReport({
+  it('uses independent saturating curves for affected people, verification and duplicates', () => {
+    const scored = scoreReport({
       urgency: Urgency.LOW,
       category: Category.OTHER,
-      corroboratingReports: 2,
+      confidence: 0.9,
+      ageMinutes: 0,
+      peopleAffected: 5,
+      confirmedHumanVerifications: 1,
+      strongDuplicateReports: 2,
     });
-    const many = scoreReport({
+    expect(scored.breakdown.affectedPeopleWeight).toBe(AFFECTED_PEOPLE_MAX_POINTS / 2);
+    expect(scored.breakdown.verificationWeight).toBe(VERIFICATION_MAX_POINTS / 2);
+    expect(scored.breakdown.duplicateWeight).toBe(DUPLICATE_MAX_POINTS / 2);
+  });
+
+  it('treats absent or malformed evidence as zero rather than a priority boost', () => {
+    const scored = scoreReport({
       urgency: Urgency.LOW,
       category: Category.OTHER,
-      corroboratingReports: 50,
-      confirmedVerifications: 50,
+      confidence: 0.9,
+      ageMinutes: 0,
+      peopleAffected: Number.NaN,
+      confirmedHumanVerifications: -3,
+      strongDuplicateReports: Number.POSITIVE_INFINITY,
     });
-    expect(none.breakdown.corroborationWeight).toBe(0);
-    expect(some.breakdown.corroborationWeight).toBeGreaterThan(0);
-    expect(many.breakdown.corroborationWeight).toBeLessThan(2);
-    expect(many.breakdown.corroborationWeight).toBeGreaterThan(some.breakdown.corroborationWeight);
+    expect(scored.breakdown.affectedPeopleWeight).toBe(0);
+    expect(scored.breakdown.verificationWeight).toBe(0);
+    expect(scored.breakdown.duplicateWeight).toBe(0);
+  });
+
+  it('penalizes confidence below 0.8 and clamps malformed confidence conservatively', () => {
+    const certain = scoreReport({
+      urgency: Urgency.HIGH,
+      category: Category.FIRE,
+      confidence: 0.8,
+      ageMinutes: 0,
+    });
+    const uncertain = scoreReport({
+      urgency: Urgency.HIGH,
+      category: Category.FIRE,
+      confidence: 0.4,
+      ageMinutes: 0,
+    });
+    const malformed = scoreReport({
+      urgency: Urgency.HIGH,
+      category: Category.FIRE,
+      confidence: Number.NaN,
+      ageMinutes: 0,
+    });
+    expect(certain.breakdown.uncertaintyPenalty).toBe(0);
+    expect(uncertain.breakdown.uncertaintyPenalty).toBe(1);
+    expect(malformed.breakdown.uncertaintyPenalty).toBe(UNCERTAINTY_MAX_PENALTY);
+  });
+
+  it('applies no staleness penalty during the grace period and then saturates', () => {
+    const grace = scoreReport({
+      urgency: Urgency.MEDIUM,
+      category: Category.FLOOD,
+      confidence: 0.9,
+      ageMinutes: STALENESS_GRACE_MINUTES,
+    });
+    const stale = scoreReport({
+      urgency: Urgency.MEDIUM,
+      category: Category.FLOOD,
+      confidence: 0.9,
+      ageMinutes: 100_000,
+    });
+    expect(grace.breakdown.stalenessPenalty).toBe(0);
+    expect(stale.breakdown.stalenessPenalty).toBeLessThanOrEqual(STALENESS_MAX_PENALTY);
+    expect(stale.breakdown.stalenessPenalty).toBeGreaterThan(1.4);
   });
 
   it('clamps the final score to [0, 10]', () => {
     const maxed = scoreReport({
       urgency: Urgency.CRITICAL,
       category: Category.MEDICAL,
+      confidence: 1,
       ageMinutes: 0,
-      corroboratingReports: 100,
-      manualAdjustment: 3,
+      peopleAffected: 10_000,
+      confirmedHumanVerifications: 100,
+      strongDuplicateReports: 100,
     });
     expect(maxed.priorityScore).toBe(10);
     expect(maxed.priorityBand).toBe(PriorityBand.P0);
@@ -249,46 +340,40 @@ describe('deterministic priority scoring (§5.4.2)', () => {
     const floored = scoreReport({
       urgency: Urgency.LOW,
       category: Category.OTHER,
-      ageMinutes: 100_000,
-      manualAdjustment: -3,
+      confidence: 0,
+      ageMinutes: Number.NaN,
     });
     expect(floored.priorityScore).toBe(0);
     expect(floored.priorityBand).toBe(PriorityBand.P3);
   });
 
-  it('clamps a manual adjustment to ±MANUAL_ADJUSTMENT_LIMIT', () => {
-    expect(
-      scoreReport({ urgency: Urgency.LOW, category: Category.OTHER, manualAdjustment: 99 })
-        .breakdown.manualAdjustment,
-    ).toBe(MANUAL_ADJUSTMENT_LIMIT);
-    expect(
-      scoreReport({ urgency: Urgency.LOW, category: Category.OTHER, manualAdjustment: -99 })
-        .breakdown.manualAdjustment,
-    ).toBe(-MANUAL_ADJUSTMENT_LIMIT);
-  });
-
-  it('carries an optional note into the breakdown only when provided', () => {
-    expect(
-      scoreReport({ urgency: Urgency.LOW, category: Category.OTHER }).breakdown.notes,
-    ).toBeUndefined();
-    expect(
-      scoreReport({ urgency: Urgency.LOW, category: Category.OTHER, notes: 'coordinator bump' })
-        .breakdown.notes,
-    ).toBe('coordinator bump');
-  });
-
   it('ranks urgency as the dominant term across categories', () => {
-    const critical = scoreReport({ urgency: Urgency.CRITICAL, category: Category.OTHER });
-    const low = scoreReport({ urgency: Urgency.LOW, category: Category.MEDICAL });
+    const critical = scoreReport({
+      urgency: Urgency.CRITICAL,
+      category: Category.OTHER,
+      confidence: 0.9,
+      ageMinutes: 0,
+    });
+    const low = scoreReport({
+      urgency: Urgency.LOW,
+      category: Category.MEDICAL,
+      confidence: 0.9,
+      ageMinutes: 0,
+    });
     expect(critical.priorityScore).toBeGreaterThan(low.priorityScore);
   });
 
   it('keeps per-term caps consistent with the exported constants', () => {
-    expect(URGENCY_MAX_POINTS).toBe(5);
-    expect(CATEGORY_MAX_POINTS).toBe(3);
+    expect(URGENCY_MAX_POINTS).toBe(5.5);
+    expect(CATEGORY_MAX_POINTS).toBe(2);
     // Every category weight stays within [0, CATEGORY_MAX_POINTS].
     for (const category of Object.values(Category)) {
-      const { categoryWeight } = scoreReport({ urgency: Urgency.LOW, category }).breakdown;
+      const { categoryWeight } = scoreReport({
+        urgency: Urgency.LOW,
+        category,
+        confidence: 0.9,
+        ageMinutes: 0,
+      }).breakdown;
       expect(categoryWeight).toBeGreaterThanOrEqual(0);
       expect(categoryWeight).toBeLessThanOrEqual(CATEGORY_MAX_POINTS);
     }
@@ -297,40 +382,45 @@ describe('deterministic priority scoring (§5.4.2)', () => {
 
 /**
  * Drift guard (mirrors the enum sync guard in domain.test.ts): the
- * `ScoreBreakdown` factor names are duplicated in the Amplify `ScoreBreakdown`
- * custom type in `apps/web/amplify/data/resource.ts`. If you add/rename a
- * factor, update BOTH and this expectation.
+ * `ScoreBreakdown` factor names are persisted as JSON and consumed by the
+ * coordinator UI. If you add/rename a factor, update both and this expectation.
  */
 describe('parseScoreBreakdown', () => {
   it('round-trips a breakdown produced by scoreReport', () => {
     const { breakdown } = scoreReport({
       urgency: Urgency.HIGH,
       category: Category.FIRE,
-      corroboratingReports: 2,
+      confidence: 0.9,
+      ageMinutes: 0,
+      strongDuplicateReports: 2,
     });
     expect(parseScoreBreakdown(breakdown)).toEqual(breakdown);
   });
 
-  it('keeps an optional notes string', () => {
-    const parsed = parseScoreBreakdown({
-      urgencyWeight: 3.5,
-      categoryWeight: 3,
+  it('parses the complete v2 breakdown', () => {
+    const raw = {
+      urgencyWeight: 4,
+      categoryWeight: 1.9,
+      affectedPeopleWeight: 0.75,
+      verificationWeight: 0.5,
       recencyWeight: 1,
-      corroborationWeight: 0.5,
-      manualAdjustment: -1,
-      notes: 'coordinator override',
-    });
-    expect(parsed?.notes).toBe('coordinator override');
-    expect(parsed?.manualAdjustment).toBe(-1);
+      duplicateWeight: 0.75,
+      uncertaintyPenalty: 0.25,
+      stalenessPenalty: 0,
+    };
+    expect(parseScoreBreakdown(raw)).toEqual(raw);
   });
 
   it('returns null when a numeric factor is missing or not a finite number', () => {
     const base = {
       urgencyWeight: 3.5,
-      categoryWeight: 3,
+      categoryWeight: 2,
+      affectedPeopleWeight: 0.75,
+      verificationWeight: 0.5,
       recencyWeight: 1,
-      corroborationWeight: 0.5,
-      manualAdjustment: 0,
+      duplicateWeight: 0.75,
+      uncertaintyPenalty: 0,
+      stalenessPenalty: 0,
     };
     expect(parseScoreBreakdown({ ...base, recencyWeight: undefined })).toBeNull();
     expect(parseScoreBreakdown({ ...base, categoryWeight: 'x' })).toBeNull();
@@ -349,16 +439,19 @@ describe('score breakdown sync guard', () => {
     const { breakdown } = scoreReport({
       urgency: Urgency.HIGH,
       category: Category.FIRE,
-      notes: 'x',
+      confidence: 0.9,
+      ageMinutes: 0,
     });
     expect(Object.keys(breakdown).sort()).toEqual(
       [
+        'affectedPeopleWeight',
         'categoryWeight',
-        'corroborationWeight',
-        'manualAdjustment',
-        'notes',
+        'duplicateWeight',
         'recencyWeight',
+        'stalenessPenalty',
+        'uncertaintyPenalty',
         'urgencyWeight',
+        'verificationWeight',
       ].sort(),
     );
   });

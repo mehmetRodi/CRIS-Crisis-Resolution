@@ -12,6 +12,7 @@ import { parseMessage, processRecord, type WorkerDeps } from './handler';
 import type {
   LocationResult,
   MarkNeedsVerificationInput,
+  PersistPriorityScoreInput,
   PersistClassificationInput,
   ReportRecord,
   ReportStore,
@@ -42,6 +43,7 @@ const LOCATION: LocationResult = {
 function fakeStore(report: ReportRecord | null, claim = true) {
   const persisted: PersistClassificationInput[] = [];
   const flagged: MarkNeedsVerificationInput[] = [];
+  const rescored: PersistPriorityScoreInput[] = [];
   const store: ReportStore = {
     getReport: vi.fn(async () => report),
     claimProcessing: vi.fn(async () => claim),
@@ -51,12 +53,17 @@ function fakeStore(report: ReportRecord | null, claim = true) {
     markNeedsVerification: vi.fn(async (input) => {
       flagged.push(input);
     }),
+    persistPriorityScore: vi.fn(async (input) => {
+      rescored.push(input);
+      return true;
+    }),
     // Dedup (CRIS-31) is exercised in dedupe.test.ts; here it finds nothing, so
     // these tests assert the classification path unchanged.
     findDuplicateCandidates: vi.fn(async () => []),
+    countDuplicateGroupPeers: vi.fn(async () => 0),
     linkDuplicateGroup: vi.fn(async () => true),
   };
-  return { store, persisted, flagged };
+  return { store, persisted, flagged, rescored };
 }
 
 function fakeAgent(impl?: TriageAgent['triage']): TriageAgent {
@@ -90,12 +97,15 @@ const NEW_REPORT: ReportRecord = {
   regionId: 'region-1',
 };
 
+const NOW = new Date('2026-07-22T00:00:00.000Z');
+
 const message = { reportId: 'r1', version: 3, streamEventId: 'evt-1' };
 const deps = (store: ReportStore, triage: TriageAgent, publisher?: Publisher): WorkerDeps => ({
   store,
   triage,
   publisher: publisher ?? fakePublisher().publisher,
   log: () => {},
+  now: () => NOW,
 });
 
 describe('parseMessage', () => {
@@ -133,10 +143,13 @@ describe('processRecord', () => {
       streamEventId: 'evt-1',
       status: ReportStatus.AI_CLASSIFIED,
       classification: { category: Category.MEDICAL, urgency: Urgency.CRITICAL },
-      // MEDICAL + CRITICAL at age 0 ⇒ 5 + 3 + 1.5 = 9.5 ⇒ P0 (§5.4.2).
+      // Fresh/confident CRITICAL + MEDICAL + affected people ⇒ P0 (§5.4.2).
       priorityBand: 'P0',
+      scoreVersion: 2,
     });
-    expect(persisted[0].scoreBreakdown.urgencyWeight).toBe(5);
+    expect(persisted[0].scoreBreakdown.urgencyWeight).toBe(5.5);
+    expect(persisted[0].scoreBreakdown.affectedPeopleWeight).toBeGreaterThan(0);
+    expect(persisted[0].scoreBreakdown.uncertaintyPenalty).toBe(0);
     // Entities extracted by the Triage Agent are carried through to the store (CRIS-20).
     expect(persisted[0].classification.entities.peopleAffected).toBe(4);
     expect(flagged).toHaveLength(0);
@@ -150,6 +163,47 @@ describe('processRecord', () => {
 
     expect(persisted).toHaveLength(1);
     expect(persisted[0].location).toEqual(LOCATION);
+  });
+
+  it('rescores after strong duplicate links and publishes the durable updated score', async () => {
+    const { store, persisted, rescored } = fakeStore(NEW_REPORT);
+    const { publisher, published } = fakePublisher();
+    const dedupe: NonNullable<WorkerDeps['dedupe']> = vi.fn(async () => ({
+      duplicateGroupId: 'group-1',
+      linked: [],
+      suggested: [],
+      strongDuplicateReports: 2,
+    }));
+
+    await processRecord({ ...deps(store, fakeAgent(), publisher), dedupe }, message);
+
+    expect(rescored).toHaveLength(1);
+    expect(rescored[0]).toMatchObject({
+      reportId: 'r1',
+      expectedVersion: 6,
+      eventId: 'evt-1#score#duplicate',
+      reason: 'DUPLICATE_LINKED',
+      scoring: { scoreVersion: 2 },
+    });
+    expect(rescored[0].scoring.breakdown.duplicateWeight).toBe(0.75);
+    expect(rescored[0].scoring.priorityScore).toBeGreaterThan(persisted[0].priorityScore);
+    expect(published[0].priorityScore).toBe(rescored[0].scoring.priorityScore);
+  });
+
+  it('keeps publishing the initial durable score when duplicate rescoring loses a race', async () => {
+    const { store, persisted } = fakeStore(NEW_REPORT);
+    vi.mocked(store.persistPriorityScore).mockResolvedValue(false);
+    const { publisher, published } = fakePublisher();
+    const dedupe: NonNullable<WorkerDeps['dedupe']> = vi.fn(async () => ({
+      duplicateGroupId: 'group-1',
+      linked: [],
+      suggested: [],
+      strongDuplicateReports: 1,
+    }));
+
+    await processRecord({ ...deps(store, fakeAgent(), publisher), dedupe }, message);
+
+    expect(published[0].priorityScore).toBe(persisted[0].priorityScore);
   });
 
   it('escalates a model-flagged classification to NEEDS_VERIFICATION but still records it (§2.6)', async () => {
