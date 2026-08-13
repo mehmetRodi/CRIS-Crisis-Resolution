@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 30 — Deploy the GitHub OIDC provider + branch-scoped deploy role via
+# 30 — Deploy the GitHub OIDC provider + repo/environment-scoped deploy role via
 # CloudFormation (infra/bootstrap/github-oidc-deploy-role.yaml). Idempotent:
 # `deploy` updates the stack in place. Detects a pre-existing OIDC provider and
 # reuses it (only one per account is allowed).

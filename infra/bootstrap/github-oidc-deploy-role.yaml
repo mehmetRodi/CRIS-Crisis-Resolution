@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
-  CrisisMap AI — GitHub Actions OIDC identity provider + branch-scoped CDK deploy
-  role for `ampx pipeline-deploy` (CRIS-14, ADR-0016, ADR-0017). No long-lived
+  CrisisMap AI — GitHub Actions OIDC identity provider + repo/environment-scoped
+  CDK deploy role for `ampx pipeline-deploy` (CRIS-14, ADR-0016, ADR-0017). No long-lived
   AWS keys: GitHub mints a short-lived OIDC token that assumes DeployRole, which
   in turn assumes the CDK bootstrap roles that hold the real provisioning power.
   Deploy this ONCE per AWS account with `scripts/aws/30-deploy-role.sh`.
@@ -24,8 +24,9 @@ Parameters:
     Type: String
     Default: main
     Description: >
-      The ONLY branch allowed to assume the deploy role. Never use a wildcard
-      here — a wildcard would let any branch/PR from the repo deploy.
+      The exact branch subject trusted for jobs that do not use an Environment.
+      Environment-gated jobs use GitHubEnvironment instead, so that Environment
+      must separately restrict its deployment branches to this branch.
 
   GitHubEnvironment:
     Type: String
@@ -82,16 +83,17 @@ Resources:
         - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
 
   # -------------------------------------------------------------------------
-  # Deploy role — assumed by GitHub Actions on `main` only, via OIDC.
+  # Deploy role — exact repo ref/environment subjects only, via OIDC. The GitHub
+  # Environment must restrict deployment branches to main.
   # -------------------------------------------------------------------------
   DeployRole:
     Type: AWS::IAM::Role
     Properties:
       RoleName: crisismap-github-deploy
       Description: >
-        Assumed by GitHub Actions (mehmetRodi/CRIS-Crisis-Resolution @ main) to
-        run `ampx pipeline-deploy`. Holds no direct provisioning power - it only
-        assumes the CDK bootstrap roles.
+        Assumed by GitHub Actions for the configured CrisisMap repo ref or
+        production Environment to run `ampx pipeline-deploy`. Holds no direct
+        provisioning power - it only assumes the CDK bootstrap roles.
       MaxSessionDuration: 3600
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -108,6 +110,8 @@ Resources:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
               # Scoped to this exact repo: either the deploy branch (ref) or the
               # gated Environment. No wildcards — both subjects are fully pinned.
+              # The environment subject carries no branch, so GitHub Environment
+              # deployment-branch protection must restrict it to GitHubBranch.
               StringLike:
                 token.actions.githubusercontent.com:sub:
                   - !Sub 'repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/${GitHubBranch}'

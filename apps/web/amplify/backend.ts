@@ -33,7 +33,7 @@ import { addObservability } from './observability';
  * rather than in each function's `resource.ts`, because the DynamoDB tables
  * don't exist until the data schema is synthesized. The worker classifies
  * (Bedrock), scores, writes results back durably (direct-to-DynamoDB, §5.3),
- * and then fans the redacted update out via the internal `publishReportUpdate`
+ * and then fans the redacted update out via the worker-facing `publishReportUpdate`
  * mutation (CRIS-19). That last grant is NOT wired here: the schema's
  * `allow.resource(classifyReport)` (data/resource.ts) attaches the
  * `appsync:GraphQL` policy and injects the endpoint/introspection env vars onto

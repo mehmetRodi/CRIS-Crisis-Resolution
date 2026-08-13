@@ -28,9 +28,9 @@ Shared conventions for CrisisMap AI. Keep this current; it is the reference for 
 - Treat user-submitted report text as **untrusted** in prompts (prompt-injection defense).
 - Contact data must be encrypted at rest and excluded from prompts and public projections.
   Public-facing APIs must return the separate `PublicReport` shape rather than relying on UI
-  redaction. The current authenticated dashboard still reads `Report` under coarse model
-  authorization and redacts locally; treat that as an internal MVP path pending authorization
-  hardening, not as the public security boundary.
+  redaction. The coordinator dashboard's `Report.list` read is staff-group-gated, but it still
+  receives full `Report` records before projecting them locally; treat that projection as data
+  minimization for an internal MVP surface, not as a public security boundary.
 - Mutations use **optimistic concurrency**: require `expectedVersion` + conditional write;
   a conflict returns a machine-readable `CONFLICT` error.
 
@@ -39,8 +39,11 @@ Shared conventions for CrisisMap AI. Keep this current; it is the reference for 
 - Emit **structured JSON logs** (one object per line) with a correlation/trace id, the
   `reportId`, and the event type. No free-form string logs for domain events. (See the
   `classify-report` handler for the pattern.)
-- **AWS X-Ray** active tracing is enabled on AppSync + all four Lambdas (`backend.ts`). New
-  Lambdas get tracing + the `xray:Put*` grant the same way — don't add an untraced function.
+- **AWS X-Ray** active tracing is enabled on AppSync and five Lambdas in `backend.ts`: submit,
+  transition, publish, classification, and media-upload URL creation. The volunteer-task resolver
+  and Cognito role-assignment trigger are known tracing gaps. New request/worker Lambdas get
+  tracing + the `xray:Put*` grant the same way, and existing gaps should be closed when those
+  paths receive observability work.
 - **Alarms/metrics/dashboard** live in `apps/web/amplify/observability.ts` (`addObservability`).
   Thresholds trace back to the §3.2 SLAs; alarms notify the ops SNS topic. When you add a
   worker/queue/failure mode, add the matching alarm + a dashboard widget there, and record the
@@ -87,7 +90,7 @@ rationale in ADR-0011):
 ## Accessibility (ADR-0036)
 
 Users reach these surfaces under duress — one-handed, on a phone, sometimes with a screen
-reader. Every interactive surface ships with five guarantees, asserted in a co-located
+reader. Every web interactive surface ships with five guarantees, asserted in a co-located
 `*.a11y.test.tsx`:
 
 - **Label every control programmatically** — `htmlFor`/`id`, or `aria-label` when there is no
