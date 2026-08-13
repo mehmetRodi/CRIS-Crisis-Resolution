@@ -212,7 +212,7 @@ export function addObservability(props: ObservabilityProps): Topic {
   register(
     lambdaErrorAlarm(scope, 'PublishReportUpdateErrors', functions.publishReportUpdate, {
       description:
-        'publishReportUpdate resolver errors; the worker call is wired, but subscribers are not yet connected.',
+        'publishReportUpdate resolver errors; classification/transition fan-out to live subscribers is degraded.',
     }),
   );
 

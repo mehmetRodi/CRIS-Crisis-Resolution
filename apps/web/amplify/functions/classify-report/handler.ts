@@ -12,7 +12,7 @@ import { createBedrockTriageAgent, createTriageAgent, type TriageAgent } from '.
 import { createAmazonLocationGeocoder, createNullGeocoder, type Geocoder } from './geocode';
 import { createDynamoStore, type ReportStore } from './store';
 import { resolveDuplicates, type DedupeInput, type DedupeResult } from './dedupe';
-import type { Publisher } from './publish';
+import type { Publisher } from '../publish-report-update/client';
 
 /**
  * classify-report worker (design doc §3, §5.4; CRIS-10).
@@ -363,7 +363,7 @@ async function buildDeps(): Promise<WorkerDeps> {
   // Dynamically imported so the AppSync/Amplify client (and its transitive deps)
   // stays out of the unit-test import graph — processRecord is tested with an
   // injected fake Publisher and never calls buildDeps().
-  const { createAppSyncPublisher } = await import('./publish');
+  const { createAppSyncPublisher } = await import('../publish-report-update/client');
   // The agent's geocode_location tool is wired regardless; the flag chooses what
   // backs it (CRIS-21, ADR-0027). When off, every lookup returns "unavailable"
   // and reports stay unlocated — the tool-use path still runs.

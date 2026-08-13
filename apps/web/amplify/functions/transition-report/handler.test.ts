@@ -3,9 +3,10 @@ import { ReportStatus, UserRole } from '@crisismap/shared';
 import { appSyncEvent, cognitoIdentity, invokeHandler } from '../testing/appsync';
 import { fakeDocumentClient, fakeDynamo, namedError } from '../testing/fake-dynamo';
 
-vi.hoisted(() => {
+const mocks = vi.hoisted(() => {
   process.env.REPORT_TABLE_NAME = 'Report-test';
   process.env.REPORT_EVENT_TABLE_NAME = 'ReportEvent-test';
+  return { publishTransitionUpdate: vi.fn() };
 });
 
 vi.mock('@aws-sdk/lib-dynamodb', async (importOriginal) => {
@@ -15,6 +16,10 @@ vi.mock('@aws-sdk/lib-dynamodb', async (importOriginal) => {
     DynamoDBDocumentClient: { from: () => fakeDocumentClient },
   };
 });
+
+vi.mock('./publish', () => ({
+  publishTransitionUpdate: mocks.publishTransitionUpdate,
+}));
 
 import { handler } from './handler';
 
@@ -43,7 +48,10 @@ function transitionEvent(
 }
 
 describe('updateReportStatus handler integration', () => {
-  beforeEach(() => fakeDynamo.reset());
+  beforeEach(() => {
+    fakeDynamo.reset();
+    mocks.publishTransitionUpdate.mockReset();
+  });
 
   it('resolves the highest caller role and atomically updates the report with an audit event', async () => {
     fakeDynamo.queue('GetCommand', { Item: report });
@@ -89,6 +97,13 @@ describe('updateReportStatus handler integration', () => {
         detail: { note: 'confirmed by field team' },
       },
     });
+    expect(mocks.publishTransitionUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'report-1',
+        status: ReportStatus.VERIFIED,
+        version: 5,
+      }),
+    );
   });
 
   it('rejects callers without a transition role before reading DynamoDB', async () => {

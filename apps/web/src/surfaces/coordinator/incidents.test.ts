@@ -16,12 +16,14 @@ import {
   EMPTY_FILTERS,
   filtersActive,
   matchesFilters,
+  reconcileIncident,
   regionOptions,
   sortByPriority,
   sortTimeline,
   toggleValue,
   toTimelineEvent,
   type IncidentFilters,
+  type CoordinatorIncident,
   type TimelineEvent,
 } from './incidents';
 
@@ -120,6 +122,42 @@ describe('sortByPriority', () => {
     const snapshot = [...input];
     sortByPriority(input);
     expect(input).toEqual(snapshot);
+  });
+});
+
+describe('reconcileIncident', () => {
+  const coordinatorIncident = (
+    overrides: Partial<CoordinatorIncident> = {},
+  ): CoordinatorIncident => ({
+    ...incident(),
+    version: 1,
+    confidence: null,
+    scoreVersion: null,
+    scoreBreakdown: null,
+    entities: null,
+    ...overrides,
+  });
+
+  it('upserts, bounds, and refuses to regress a newer optimistic-lock version', () => {
+    const current = [
+      coordinatorIncident({ reportId: 'existing', version: 3, priorityScore: 2 }),
+      coordinatorIncident({ reportId: 'lower', priorityScore: 1 }),
+    ];
+
+    expect(
+      reconcileIncident(
+        current,
+        coordinatorIncident({ reportId: 'existing', version: 2, priorityScore: 9 }),
+        2,
+      ),
+    ).toEqual(current);
+
+    const inserted = reconcileIncident(
+      current,
+      coordinatorIncident({ reportId: 'new', priorityScore: 10 }),
+      2,
+    );
+    expect(inserted.map((item) => item.reportId)).toEqual(['new', 'existing']);
   });
 });
 

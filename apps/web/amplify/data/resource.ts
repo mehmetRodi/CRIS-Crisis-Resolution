@@ -29,8 +29,9 @@ import { listVolunteerTasks as listVolunteerTasksFn } from '../functions/list-vo
  *   - `publishReportUpdate` is the internal fan-out mutation the triage worker
  *     calls over IAM after its durable write; it also carries an `ADMIN` group
  *     gate so it satisfies Amplify's per-operation auth requirement (CRIS-19,
- *     ADR-0009/0029/0030). Custom subscriptions that consume it remain deferred
- *     to CRIS-28.
+ *     ADR-0009/0029/0030). CRIS-28's authenticated custom subscriptions consume
+ *     this mutation; both the triage worker and transition resolver publish
+ *     after their durable writes (ADR-0048).
  *
  * ENUM SYNC: `a.enum()` requires literal arrays, so the members below are
  * duplicated from `@crisismap/shared` (the source of truth). When you change an
@@ -595,63 +596,63 @@ const schema = a
       .handler(a.handler.function(publishReportUpdateFn))
       .authorization((allow) => [allow.groups(['ADMIN'])]),
 
-    /*
-     * TODO(CRIS-28): Real-time subscriptions are temporarily disabled. Amplify
-     * backend deploy. Amplify Gen 2 requires every custom subscription to declare a
-     * `.handler()` (an AppSync JS resolver that sets the subscription filter via
-     * `util.transform.toSubscriptionFilter`) in addition to its auth rule — these
-     * had auth rules but no handler, so synthesis failed with InvalidSchemaError.
+    /**
+     * CRIS-28 real-time read paths (ADR-0048). Every event is the redacted
+     * `PublicReport` returned by `publishReportUpdate`; raw report text and
+     * reporter data have no representation on this channel. The custom AppSync
+     * JS handlers are required by Amplify Gen 2. Region/status variants install
+     * enhanced subscription filters at registration time.
      *
-     * Re-enable as part of CRIS-28 by adding `.handler(a.handler.custom({ entry }))`
-     * to each, implementing the filter resolvers, and adding `@aws-appsync/utils`
-     * for resolver types. The `publishReportUpdate` mutation + `PublicReport` type
-     * above remain valid and stay enabled.
-     *
-     *   // Live map: every redacted update. TODO(CRIS-28/CRIS-24): define guest policy.
-     *   onReportUpdate: a
-     *     .subscription()
-     *     .for(a.ref('publishReportUpdate'))
-     *     .handler(a.handler.custom({ entry: './subscriptions/on-report-update.js' }))
-     *     .authorization((allow) => [allow.authenticated()]),
-     *
-     *   // Region dashboard: updates filtered to one region.
-     *   onReportUpdateByRegion: a
-     *     .subscription()
-     *     .for(a.ref('publishReportUpdate'))
-     *     .arguments({ regionId: a.id().required() })
-     *     .handler(a.handler.custom({ entry: './subscriptions/by-region.js' }))
-     *     .authorization((allow) => [allow.authenticated()]),
-     *
-     *   // Status work-queues: updates filtered to one lifecycle state.
-     *   onReportUpdateByStatus: a
-     *     .subscription()
-     *     .for(a.ref('publishReportUpdate'))
-     *     .arguments({ status: a.string().required() })
-     *     .handler(a.handler.custom({ entry: './subscriptions/by-status.js' }))
-     *     .authorization((allow) => [allow.authenticated()]),
+     * These subscriptions deliberately use Cognito User Pool authentication.
+     * Identity Pool guest auth is unsupported for `a.handler.custom`, and the
+     * public `/map` still has neither a baseline public query nor incident
+     * markers. Public subscription auth is deferred until that complete read
+     * path can be introduced and operated together.
      */
+    onReportUpdate: a
+      .subscription()
+      .for(a.ref('publishReportUpdate'))
+      .handler(a.handler.custom({ entry: './subscriptions/on-report-update.js' }))
+      .authorization((allow) => [allow.authenticated()]),
+
+    onReportUpdateByRegion: a
+      .subscription()
+      .for(a.ref('publishReportUpdate'))
+      .arguments({ regionId: a.id().required() })
+      .handler(a.handler.custom({ entry: './subscriptions/by-region.js' }))
+      .authorization((allow) => [allow.authenticated()]),
+
+    onReportUpdateByStatus: a
+      .subscription()
+      .for(a.ref('publishReportUpdate'))
+      .arguments({ status: a.string().required() })
+      .handler(a.handler.custom({ entry: './subscriptions/by-status.js' }))
+      .authorization((allow) => [allow.authenticated()]),
   })
   /**
    * Schema-level function access (CRIS-19, ADR-0029). `allow.resource` can ONLY
    * be declared here, not on an individual model or operation — Amplify grants a
    * function access to the API surface, then scopes it by operation *type*. We
-   * grant the `classify-report` worker `mutate` so it can call the internal
-   * `publishReportUpdate` after its durable write.
+   * grant both direct DynamoDB writers `mutate` so they can call the internal
+   * `publishReportUpdate` after their durable writes: the classify worker and
+   * the human transition resolver (CRIS-28, ADR-0048).
    *
-   * Consequence to accept: this is an API-wide `mutate` grant, so the worker's
-   * role could also technically call `submitReport`/`updateReportStatus` over
-   * IAM — Amplify offers no field-scoped function grant. The blast radius is
-   * bounded (the worker is trusted internal code and only ever calls
-   * `publishReportUpdate`), and every model mutation still enforces its own
-   * optimistic-lock/role guards. Revisit if a tighter per-field grant appears.
+   * Consequence to accept: these are API-wide `mutate` grants, so either trusted
+   * function role could technically call other mutations over IAM — Amplify
+   * offers no field-scoped function grant. Production code calls only
+   * `publishReportUpdate`, and guarded model mutations retain their own checks.
+   * Revisit if a tighter per-field grant appears.
    *
    * All models and custom operations — including `publishReportUpdate`, which
    * declares its own `allow.groups(['ADMIN'])` rule (ADR-0030) — carry their own
    * per-op rules, so this schema-level rule is NOT a client-facing default. It
-   * only attaches the worker's IAM `mutate` access to the API surface; the
-   * worker calls `publishReportUpdate` with `authMode: 'iam'` on that grant.
+   * only attaches function IAM `mutate` access to the API surface; both direct
+   * writers call `publishReportUpdate` with `authMode: 'iam'` on that grant.
    */
-  .authorization((allow) => [allow.resource(classifyReportFn).to(['mutate'])]);
+  .authorization((allow) => [
+    allow.resource(classifyReportFn).to(['mutate']),
+    allow.resource(transitionReportFn).to(['mutate']),
+  ]);
 
 export type Schema = ClientSchema<typeof schema>;
 
