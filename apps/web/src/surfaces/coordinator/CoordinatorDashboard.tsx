@@ -62,12 +62,12 @@ import { IncidentMap } from '../map/IncidentMap';
  *   - Incident detail (summary / score / timeline) → CRIS-23
  *   - Status transitions (verify/reject/resolve …) → CRIS-18 (wired here)
  *   - Guarded response actions (assign team, merge) → CRIS-32
- *   - Recent activity (audit timeline)             → CRIS-28
+ *   - Recent activity (audit timeline)             → CRIS-23 (wired)
  *   - Live-update push (subscriptions)             → CRIS-28
  *
  * This is a one-shot read with a manual refresh, NOT a live subscription — the
- * "live updates" indicator stays disconnected until CRIS-28. Authentication
- * exists, but coordinator-group enforcement at the route boundary is deferred.
+ * "live updates" indicator stays disconnected until CRIS-28. The route is gated
+ * to `COORDINATOR`/`ADMIN` by `RequireRole` (CRIS-24, ADR-0041).
  */
 
 interface CoordinatorDashboardProps {
@@ -893,9 +893,7 @@ function feedBody(
       return <RegionMessage>Loading incidents…</RegionMessage>;
     case 'unauthenticated':
       return (
-        <RegionMessage>
-          Sign in as a coordinator to view incidents. Route-level role enforcement is not wired yet.
-        </RegionMessage>
+        <RegionMessage>Sign in as a coordinator or administrator to view incidents.</RegionMessage>
       );
     case 'error':
       return <RegionMessage>Couldn’t load incidents: {feed.message}</RegionMessage>;

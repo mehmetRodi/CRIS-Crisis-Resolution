@@ -11,6 +11,7 @@
  * asynchronously, off the DynamoDB stream (§5.4.1).
  */
 import {
+  REPORT_SUBMIT_VALIDATION_PREFIX,
   ReportEventType,
   ReportStatus,
   UserRole,
@@ -110,7 +111,7 @@ export interface SubmitPlan {
 
 export class SubmitValidationError extends Error {
   constructor(message: string) {
-    super(message);
+    super(`${REPORT_SUBMIT_VALIDATION_PREFIX} ${message}`);
     this.name = 'SubmitValidationError';
   }
 }

@@ -3,6 +3,7 @@ import { Category, DUPLICATE_WINDOW_MINUTES } from '@crisismap/shared';
 import { resolveDuplicates, type DedupeDeps, type DedupeInput } from './dedupe';
 import { DUPLICATE_GROUP_MAX_MEMBERS } from './store';
 import type {
+  CountDuplicateGroupPeersInput,
   DuplicateCandidateRecord,
   FindDuplicateCandidatesInput,
   LinkDuplicateGroupInput,
@@ -53,8 +54,13 @@ function input(overrides: Partial<DedupeInput> = {}): DedupeInput {
   };
 }
 
-function fakeDeps(candidates: DuplicateCandidateRecord[], linkResults: boolean[] = []) {
+function fakeDeps(
+  candidates: DuplicateCandidateRecord[],
+  linkResults: boolean[] = [],
+  persistedPeerCount?: number,
+) {
   const queries: FindDuplicateCandidatesInput[] = [];
+  const groupCountQueries: CountDuplicateGroupPeersInput[] = [];
   const links: LinkDuplicateGroupInput[] = [];
   const logs: Record<string, unknown>[] = [];
   let linkCall = 0;
@@ -65,6 +71,13 @@ function fakeDeps(candidates: DuplicateCandidateRecord[], linkResults: boolean[]
         queries.push(q);
         return candidates;
       }),
+      countDuplicateGroupPeers: vi.fn(async (q: CountDuplicateGroupPeersInput) => {
+        groupCountQueries.push(q);
+        return (
+          persistedPeerCount ??
+          candidates.filter((candidate) => candidate.duplicateGroupId === q.duplicateGroupId).length
+        );
+      }),
       linkDuplicateGroup: vi.fn(async (l: LinkDuplicateGroupInput) => {
         links.push(l);
         return linkResults[linkCall++] ?? true;
@@ -73,7 +86,7 @@ function fakeDeps(candidates: DuplicateCandidateRecord[], linkResults: boolean[]
     log: (entry) => logs.push(entry),
     newGroupId: () => 'group-new',
   };
-  return { deps, queries, links, logs };
+  return { deps, queries, groupCountQueries, links, logs };
 }
 
 const events = (logs: Record<string, unknown>[]) => logs.map((l) => l.event);
@@ -162,6 +175,21 @@ describe('resolveDuplicates', () => {
     expect(links[0]?.members).toHaveLength(1);
     expect(links[0]?.members[0]).toMatchObject({ reportId: 'r-subject' });
     expect(links[0]?.members[0]?.detail).toMatchObject({ joinedExistingGroup: true });
+  });
+
+  it('uses complete persisted group membership rather than the bounded candidate subset', async () => {
+    const { deps, groupCountQueries } = fakeDeps(
+      [candidate({ duplicateGroupId: 'group-7' })],
+      [],
+      8,
+    );
+
+    const result = await resolveDuplicates(deps, input());
+
+    expect(groupCountQueries).toEqual([
+      { duplicateGroupId: 'group-7', excludeReportId: 'r-subject' },
+    ]);
+    expect(result.strongDuplicateReports).toBe(8);
   });
 
   it('converges several reports of one incident onto a single group', async () => {

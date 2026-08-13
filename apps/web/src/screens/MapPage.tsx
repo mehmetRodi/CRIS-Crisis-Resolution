@@ -7,8 +7,9 @@ import { IncidentMap } from '../surfaces/map/IncidentMap';
  *
  * The same {@link IncidentMap} base map that fills the coordinator dashboard's
  * "Live map" region, given its own deep-linkable route (the App landing "Live
- * map" card opens it). Base map only — incident markers/clustering are CRIS-22.
- * This route is currently public; role-based route gating remains deferred.
+ * map" card opens it). Base map only — incident markers/clustering remain
+ * deferred. This route is intentionally public and must consume only
+ * `PublicReport`-shaped data once incident overlays land (ADR-0041).
  */
 export function MapPage() {
   return (

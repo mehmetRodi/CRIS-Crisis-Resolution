@@ -26,7 +26,10 @@ import { DUPLICATE_GROUP_MAX_MEMBERS, type DuplicateGroupMember, type ReportStor
  */
 
 export interface DedupeDeps {
-  store: Pick<ReportStore, 'findDuplicateCandidates' | 'linkDuplicateGroup'>;
+  store: Pick<
+    ReportStore,
+    'findDuplicateCandidates' | 'countDuplicateGroupPeers' | 'linkDuplicateGroup'
+  >;
   log: (entry: Record<string, unknown>) => void;
   /** Group-id factory. Injected so tests are deterministic. */
   newGroupId?: () => string;
@@ -196,6 +199,28 @@ export async function resolveDuplicates(
   );
   for (const member of members.slice(1)) groupPeers.add(member.reportId);
 
+  // Candidate discovery is intentionally bounded by geohash, age, and read
+  // limit, so it is not a complete membership query for an existing group.
+  // Read the group's dedicated GSI after the link and use the larger of that
+  // count and the peers known to this transaction. The latter is a conservative
+  // fallback while the eventually consistent GSI catches up to the new writes.
+  let strongDuplicateReports = groupPeers.size;
+  try {
+    const persistedPeers = await deps.store.countDuplicateGroupPeers({
+      duplicateGroupId: groupId,
+      excludeReportId: reportId,
+    });
+    strongDuplicateReports = Math.max(strongDuplicateReports, persistedPeers);
+  } catch (err) {
+    deps.log({
+      event: 'dedupe.groupCountFailed',
+      reportId,
+      duplicateGroupId: groupId,
+      knownPeers: strongDuplicateReports,
+      reason: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   deps.log({
     event: 'dedupe.linked',
     reportId,
@@ -209,6 +234,6 @@ export async function resolveDuplicates(
     duplicateGroupId: groupId,
     linked,
     suggested,
-    strongDuplicateReports: groupPeers.size,
+    strongDuplicateReports,
   };
 }

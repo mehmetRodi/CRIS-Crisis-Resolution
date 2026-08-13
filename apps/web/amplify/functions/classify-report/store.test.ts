@@ -18,6 +18,7 @@ const TABLES = {
   report: 'Report-test',
   reportEvent: 'ReportEvent-test',
   geoIndex: 'reportsByGeohashPrefixAndGeohash',
+  duplicateGroupIndex: 'reportsByDuplicateGroupIdAndCreatedAt',
 };
 
 /** A doc-client stand-in that records every command it is handed. */
@@ -231,6 +232,7 @@ describe('persistPriorityScore', () => {
       ':next': 7,
     });
     expect(putsOf(sent)[0]?.Item).toMatchObject({
+      id: 'evt-9#score#duplicate',
       reportId: 'r-1',
       type: ReportEventType.PRIORITY_SCORED,
       eventId: 'evt-9#score#duplicate',
@@ -241,6 +243,10 @@ describe('persistPriorityScore', () => {
         scoreVersion: 2,
       },
     });
+    const transaction = sent.find(
+      (command): command is TransactWriteCommand => command instanceof TransactWriteCommand,
+    )!;
+    expect(transaction.input.ClientRequestToken).toMatch(/^[a-f0-9]{36}$/);
   });
 
   it('returns false on a version race so the worker can keep the prior durable score', async () => {
@@ -316,5 +322,40 @@ describe('findDuplicateCandidates', () => {
     const store = createDynamoStore(TABLES, client);
 
     await expect(store.findDuplicateCandidates(QUERY)).resolves.toEqual([]);
+  });
+});
+
+describe('countDuplicateGroupPeers', () => {
+  it('queries every page of the injected duplicate-group index and excludes the subject', async () => {
+    let page = 0;
+    const { client, sent } = fakeClient((command) => {
+      if (!(command instanceof QueryCommand)) return {};
+      page += 1;
+      return page === 1
+        ? { Count: 2, LastEvaluatedKey: { duplicateGroupId: 'g-1', createdAt: 'cursor' } }
+        : { Count: 3 };
+    });
+    const store = createDynamoStore(TABLES, client);
+
+    await expect(
+      store.countDuplicateGroupPeers({ duplicateGroupId: 'g-1', excludeReportId: 'r-self' }),
+    ).resolves.toBe(5);
+
+    const queries = sent.filter(
+      (command): command is QueryCommand => command instanceof QueryCommand,
+    );
+    expect(queries).toHaveLength(2);
+    expect(queries[0]?.input).toMatchObject({
+      TableName: 'Report-test',
+      IndexName: 'reportsByDuplicateGroupIdAndCreatedAt',
+      KeyConditionExpression: '#group = :group',
+      FilterExpression: '#id <> :self',
+      Select: 'COUNT',
+      ExpressionAttributeValues: { ':group': 'g-1', ':self': 'r-self' },
+    });
+    expect(queries[1]?.input.ExclusiveStartKey).toEqual({
+      duplicateGroupId: 'g-1',
+      createdAt: 'cursor',
+    });
   });
 });

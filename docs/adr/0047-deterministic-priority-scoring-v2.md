@@ -1,4 +1,4 @@
-# ADR-0045: Deterministic priority scoring v2 (CRIS-30)
+# ADR-0047: Deterministic priority scoring v2 (CRIS-30)
 
 - **Status:** Accepted
 - **Date:** 2026-08-14
@@ -7,8 +7,8 @@
 - **Refines:** ADR-0013 (async pipeline), ADR-0033 (score explanation UI), ADR-0038
   (duplicate detection)
 
-> **Numbering note.** ADR-0044 is already used on the concurrent CRIS-29 branch, so this branch
-> takes 0045 to avoid a merge-time collision.
+> **Numbering note.** ADRs 0044–0046 landed on `main` after this branch started, so this decision
+> takes the next available number, 0047.
 
 ## Context
 

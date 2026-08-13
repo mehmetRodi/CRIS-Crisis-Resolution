@@ -60,6 +60,7 @@ function fakeStore(report: ReportRecord | null, claim = true) {
     // Dedup (CRIS-31) is exercised in dedupe.test.ts; here it finds nothing, so
     // these tests assert the classification path unchanged.
     findDuplicateCandidates: vi.fn(async () => []),
+    countDuplicateGroupPeers: vi.fn(async () => 0),
     linkDuplicateGroup: vi.fn(async () => true),
   };
   return { store, persisted, flagged, rescored };

@@ -34,8 +34,8 @@ import type { Publisher } from './publish';
  * NEEDS_VERIFICATION (§2.6) while still recording the AI result.
  *
  * After the durable write, the worker fans the redacted `PublicReport` out via
- * the internal IAM-only `publishReportUpdate` mutation (§5.3, CRIS-19,
- * ADR-0009/0029) so subscribers update in near real time — a best-effort call
+ * `publishReportUpdate` over the worker's IAM grant (§5.3, CRIS-19,
+ * ADR-0009/0029/0030) so subscribers update in near real time — a best-effort call
  * (an injected {@link Publisher}) that never rolls back the durable write. The
  * subscriptions that consume it are enabled in CRIS-28.
  */
@@ -254,7 +254,8 @@ export async function processRecord(
     scoreBreakdown: scoring.breakdown,
     // Location resolved by the Triage Agent's geocode tool (Amazon Location,
     // §5.5/CRIS-21), or {} when it stayed unresolved (no place matched, a weak
-    // match, geocoding disabled/unavailable).
+    // match, geocoding disabled/unavailable). Duplicate grouping runs after this
+    // durable classification write.
     location: location ?? {},
     streamEventId,
   });
@@ -377,6 +378,9 @@ async function buildDeps(): Promise<WorkerDeps> {
       // Physical name of the geohashPrefix/geohash GSI, injected by backend.ts
       // rather than guessed — see DynamoStoreTables.geoIndex (CRIS-31).
       geoIndex: env('REPORT_GEO_INDEX_NAME'),
+      // Complete duplicate-group membership for CRIS-30 rescoring. This is
+      // separate from the bounded geospatial candidate lookup above.
+      duplicateGroupIndex: env('REPORT_DUPLICATE_GROUP_INDEX_NAME'),
     }),
     // Tool-using Triage Agent (§5.5, CRIS-20), degrading to the MVP single-call
     // classifier (CRIS-10) when agent orchestration is unavailable.
@@ -384,7 +388,7 @@ async function buildDeps(): Promise<WorkerDeps> {
       primary: createBedrockTriageAgent({ modelId, geocoder }),
       fallback: createBedrockClassifier({ modelId }),
     }),
-    // IAM-only fan-out to `publishReportUpdate` (CRIS-19, ADR-0009/0029).
+    // Worker IAM fan-out to `publishReportUpdate` (CRIS-19, ADR-0009/0029/0030).
     publisher: createAppSyncPublisher(),
   };
 }

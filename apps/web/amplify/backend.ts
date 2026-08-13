@@ -33,7 +33,7 @@ import { addObservability } from './observability';
  * rather than in each function's `resource.ts`, because the DynamoDB tables
  * don't exist until the data schema is synthesized. The worker classifies
  * (Bedrock), scores, writes results back durably (direct-to-DynamoDB, §5.3),
- * and then fans the redacted update out via the internal `publishReportUpdate`
+ * and then fans the redacted update out via the worker-facing `publishReportUpdate`
  * mutation (CRIS-19). That last grant is NOT wired here: the schema's
  * `allow.resource(classifyReport)` (data/resource.ts) attaches the
  * `appsync:GraphQL` policy and injects the endpoint/introspection env vars onto
@@ -429,6 +429,10 @@ backend.classifyReport.addEnvironment('REPORT_EVENT_TABLE_NAME', tables['ReportE
 // "dedup silently links nothing" (logged as `dedupe.failed`), so it is derived
 // from the transformer source rather than guessed — see docs/adr/0038.
 backend.classifyReport.addEnvironment('REPORT_GEO_INDEX_NAME', 'reportsByGeohashPrefixAndGeohash');
+backend.classifyReport.addEnvironment(
+  'REPORT_DUPLICATE_GROUP_INDEX_NAME',
+  'reportsByDuplicateGroupIdAndCreatedAt',
+);
 
 /* -------------------------------------------------------------------------- */
 /* Observability (CRIS-15, ADR-0015) — X-Ray tracing + CloudWatch alarms       */

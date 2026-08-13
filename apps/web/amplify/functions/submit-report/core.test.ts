@@ -30,7 +30,9 @@ describe('validateSubmitInput', () => {
   });
 
   it('requires non-empty text and a client request id', () => {
-    expect(() => validateSubmitInput({ ...base, text: '   ' })).toThrow(SubmitValidationError);
+    expect(() => validateSubmitInput({ ...base, text: '   ' })).toThrow(
+      /^VALIDATION: Report text is required\.$/,
+    );
     expect(() => validateSubmitInput({ ...base, clientRequestId: '' })).toThrow(
       SubmitValidationError,
     );

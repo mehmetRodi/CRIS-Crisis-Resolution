@@ -22,6 +22,9 @@ export const colors = {
   successBorder: '#bbf7d0', // green-200
   successAccent: '#16a34a', // green-600
   successText: '#166534', // green-800
+  warningBg: '#fffbeb', // amber-50
+  warningBorder: '#fde68a', // amber-200
+  warningText: '#92400e', // amber-800
 } as const;
 
 export const radii = {

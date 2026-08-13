@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import {
   DynamoDBDocumentClient,
@@ -7,6 +7,7 @@ import {
   QueryCommand,
   TransactWriteCommand,
   UpdateCommand,
+  type QueryCommandInput,
 } from '@aws-sdk/lib-dynamodb';
 import {
   ReportEventType,
@@ -113,6 +114,13 @@ export interface FindDuplicateCandidatesInput {
   since: string;
 }
 
+export interface CountDuplicateGroupPeersInput {
+  /** The chosen duplicate group whose complete persisted membership is counted. */
+  duplicateGroupId: string;
+  /** The newly classified subject is not evidence for itself. */
+  excludeReportId: string;
+}
+
 /** One report being pointed at a duplicate group. */
 export interface DuplicateGroupMember {
   reportId: string;
@@ -147,6 +155,8 @@ export interface ReportStore {
   persistPriorityScore(input: PersistPriorityScoreInput): Promise<boolean>;
   /** Recent, nearby reports to score for duplication (§5.4.3, CRIS-31). */
   findDuplicateCandidates(input: FindDuplicateCandidatesInput): Promise<DuplicateCandidateRecord[]>;
+  /** Counts every OTHER report persisted in a chosen duplicate group, across all GSI pages. */
+  countDuplicateGroupPeers(input: CountDuplicateGroupPeersInput): Promise<number>;
   /**
    * Points every member at a duplicate group and appends their DUPLICATE_LINKED
    * audit events — atomically. Each member is version-checked; `false` means at
@@ -166,6 +176,8 @@ export interface DynamoStoreTables {
    * tests (ADR-0011) — it only fails in a deployed environment.
    */
   geoIndex: string;
+  /** Physical name of the duplicateGroupId/createdAt GSI used for complete group counts. */
+  duplicateGroupIndex: string;
 }
 
 /**
@@ -195,6 +207,11 @@ function isConditionalCheckFailed(err: unknown): boolean {
  */
 function isTransactionCancelled(err: unknown): boolean {
   return (err as { name?: string })?.name === 'TransactionCanceledException';
+}
+
+/** DynamoDB transaction tokens are limited to 36 characters; hash a stable event id to fit. */
+function transactionToken(eventId: string): string {
+  return createHash('sha256').update(eventId).digest('hex').slice(0, 36);
 }
 
 /**
@@ -370,6 +387,7 @@ export function createDynamoStore(
       try {
         await doc.send(
           new TransactWriteCommand({
+            ClientRequestToken: transactionToken(input.eventId),
             TransactItems: [
               {
                 Update: {
@@ -394,7 +412,9 @@ export function createDynamoStore(
                 Put: {
                   TableName: tables.reportEvent,
                   Item: {
-                    id: randomUUID(),
+                    // The stable event id is also the primary key, making the
+                    // audit append itself idempotent across caller-level retries.
+                    id: input.eventId,
                     reportId: input.reportId,
                     type: ReportEventType.PRIORITY_SCORED,
                     actorId: SYSTEM_ACTOR,
@@ -452,6 +472,39 @@ export function createDynamoStore(
         duplicateGroupId: (item.duplicateGroupId as string | undefined) ?? null,
         version: (item.version as number | undefined) ?? 0,
       }));
+    },
+
+    async countDuplicateGroupPeers(input) {
+      let count = 0;
+      let exclusiveStartKey: QueryCommandInput['ExclusiveStartKey'];
+
+      // Query every page. The candidate lookup is deliberately bounded, but it
+      // cannot stand in for group membership once an existing group grows or
+      // ages past that lookup's spatial/time window.
+      do {
+        const page = await doc.send(
+          new QueryCommand({
+            TableName: tables.report,
+            IndexName: tables.duplicateGroupIndex,
+            KeyConditionExpression: '#group = :group',
+            FilterExpression: '#id <> :self',
+            ExpressionAttributeNames: {
+              '#group': 'duplicateGroupId',
+              '#id': 'id',
+            },
+            ExpressionAttributeValues: {
+              ':group': input.duplicateGroupId,
+              ':self': input.excludeReportId,
+            },
+            Select: 'COUNT',
+            ExclusiveStartKey: exclusiveStartKey,
+          }),
+        );
+        count += page.Count ?? 0;
+        exclusiveStartKey = page.LastEvaluatedKey;
+      } while (exclusiveStartKey);
+
+      return count;
     },
 
     async linkDuplicateGroup(input) {

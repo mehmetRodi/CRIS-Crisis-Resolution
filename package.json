@@ -22,7 +22,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "format:check:ci": "git ls-files -z --cached --others --exclude-standard | xargs -0 prettier --check --ignore-unknown",
-    "test": "npm run test --workspaces --if-present"
+    "test": "npm run test --workspaces --if-present",
+    "test:integration": "npm run test:integration --workspace @crisismap/web"
   },
   "dependencies": {
     "react": "19.1.0",
