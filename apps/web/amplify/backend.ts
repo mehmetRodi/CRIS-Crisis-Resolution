@@ -41,8 +41,9 @@ import { addObservability } from './observability';
  * the Report-stream pipe below is a `function → data` edge — opposing edges that
  * form a nested-stack cycle unless the worker lives in the data stack. So
  * `classify-report` is pinned to the `data` group (`resourceGroupName: 'data'`,
- * ADR-0031); every edge here is then intra-`data`-stack. Custom subscriptions
- * (CRIS-28) and SNS proximity alerts remain deferred seams.
+ * ADR-0031); every edge here is then intra-`data`-stack. CRIS-28's custom
+ * subscriptions and both publisher grants live in the data schema; SNS
+ * proximity alerts remain a deferred seam.
  *
  * Run `npx ampx sandbox` from `apps/web` (with AWS credentials + Bedrock model
  * access) to stand up a personal dev environment. Source control does not

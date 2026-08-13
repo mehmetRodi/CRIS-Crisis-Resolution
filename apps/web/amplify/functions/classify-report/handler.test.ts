@@ -18,7 +18,7 @@ import type {
 } from './store';
 import { ClassificationError } from './bedrock';
 import type { TriageAgent, TriageResult } from './agent';
-import type { Publisher } from './publish';
+import type { Publisher } from '../publish-report-update/client';
 
 const CLASSIFICATION: ClassificationResult = {
   contractVersion: CLASSIFICATION_CONTRACT_VERSION,

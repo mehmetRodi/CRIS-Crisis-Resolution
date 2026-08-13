@@ -22,6 +22,7 @@ import {
   VersionConflictError,
   type CurrentReport,
 } from './core';
+import { publishTransitionUpdate } from './publish';
 
 const REPORT_TABLE = requireEnv('REPORT_TABLE_NAME');
 const REPORT_EVENT_TABLE = requireEnv('REPORT_EVENT_TABLE_NAME');
@@ -118,12 +119,23 @@ export const handler: AppSyncResolverHandler<
     throw err;
   }
 
-  return {
+  const updated = {
     ...existing.Item,
     status: plan.update.toStatus,
     version: plan.update.nextVersion,
     updatedAt: plan.update.updatedAt,
   };
+
+  // The report + audit event are already durable. Fan the redacted projection
+  // out best-effort so other operational clients converge without making their
+  // availability part of the transition transaction (CRIS-28, ADR-0046).
+  await publishTransitionUpdate({
+    ...updated,
+    id: current.id,
+    status: plan.update.toStatus,
+  });
+
+  return updated;
 };
 
 function mapDomainError(err: unknown): Error {
