@@ -34,7 +34,7 @@ import { addObservability } from './observability';
  * rather than in each function's `resource.ts`, because the DynamoDB tables
  * don't exist until the data schema is synthesized. The worker classifies
  * (Bedrock), scores, writes results back durably (direct-to-DynamoDB, §5.3),
- * and then fans the redacted update out via the internal `publishReportUpdate`
+ * and then fans the redacted update out via the worker-facing `publishReportUpdate`
  * mutation (CRIS-19). That last grant is NOT wired here: the schema's
  * `allow.resource(classifyReport)` (data/resource.ts) attaches the
  * `appsync:GraphQL` policy and injects the endpoint/introspection env vars onto
@@ -42,8 +42,9 @@ import { addObservability } from './observability';
  * the Report-stream pipe below is a `function → data` edge — opposing edges that
  * form a nested-stack cycle unless the worker lives in the data stack. So
  * `classify-report` is pinned to the `data` group (`resourceGroupName: 'data'`,
- * ADR-0031); every edge here is then intra-`data`-stack. Custom subscriptions
- * (CRIS-28) and SNS proximity alerts remain deferred seams.
+ * ADR-0031); every edge here is then intra-`data`-stack. CRIS-28's custom
+ * subscriptions and both publisher grants live in the data schema; SNS
+ * proximity alerts remain a deferred seam.
  *
  * Run `npx ampx sandbox` from `apps/web` (with AWS credentials + Bedrock model
  * access) to stand up a personal dev environment. Source control does not
@@ -449,6 +450,10 @@ backend.classifyReport.addEnvironment('REPORT_EVENT_TABLE_NAME', tables['ReportE
 // "dedup silently links nothing" (logged as `dedupe.failed`), so it is derived
 // from the transformer source rather than guessed — see docs/adr/0038.
 backend.classifyReport.addEnvironment('REPORT_GEO_INDEX_NAME', 'reportsByGeohashPrefixAndGeohash');
+backend.classifyReport.addEnvironment(
+  'REPORT_DUPLICATE_GROUP_INDEX_NAME',
+  'reportsByDuplicateGroupIdAndCreatedAt',
+);
 
 /* -------------------------------------------------------------------------- */
 /* Observability (CRIS-15, ADR-0015) — X-Ray tracing + CloudWatch alarms       */

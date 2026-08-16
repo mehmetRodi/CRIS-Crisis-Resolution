@@ -48,6 +48,14 @@ export class ReportSubmitError extends Error {
   }
 }
 
+/** Stable prefix used by the resolver for deterministic input rejections. */
+export const REPORT_SUBMIT_VALIDATION_PREFIX = 'VALIDATION:';
+
+/** Only explicit validation failures are safe to classify as non-retryable. */
+export function isReportSubmitValidationError(message: string): boolean {
+  return message.startsWith(REPORT_SUBMIT_VALIDATION_PREFIX);
+}
+
 /* -------------------------------------------------------------------------- */
 /* Queue shape                                                                 */
 /* -------------------------------------------------------------------------- */
@@ -66,6 +74,12 @@ export interface PendingReport {
   lastAttemptAt: string | null;
 }
 
+/** Removes optional contact PII before a report enters durable offline storage. */
+export function withoutPendingReportContact(pending: PendingReport): PendingReport {
+  if (pending.submission.contact === null) return pending;
+  return { ...pending, submission: { ...pending.submission, contact: null } };
+}
+
 /**
  * Adds `submission` to the queue under `clientRequestId`. De-dupes by
  * replacing any existing entry with the same key — defensive only; a caller
@@ -79,14 +93,14 @@ export function enqueuePendingReport(
   now: string,
 ): PendingReport[] {
   const withoutExisting = queue.filter((p) => p.clientRequestId !== clientRequestId);
-  const entry: PendingReport = {
+  const entry = withoutPendingReportContact({
     clientRequestId,
     submission,
     queuedAt: now,
     attempts: 0,
     lastError: null,
     lastAttemptAt: null,
-  };
+  });
   return [...withoutExisting, entry];
 }
 

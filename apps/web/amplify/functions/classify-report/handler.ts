@@ -12,7 +12,7 @@ import { createBedrockTriageAgent, createTriageAgent, type TriageAgent } from '.
 import { createAmazonLocationGeocoder, createNullGeocoder, type Geocoder } from './geocode';
 import { createDynamoStore, type ReportStore } from './store';
 import { resolveDuplicates, type DedupeInput, type DedupeResult } from './dedupe';
-import type { Publisher } from './publish';
+import type { Publisher } from '../publish-report-update/client';
 
 /**
  * classify-report worker (design doc §3, §5.4; CRIS-10).
@@ -34,8 +34,8 @@ import type { Publisher } from './publish';
  * NEEDS_VERIFICATION (§2.6) while still recording the AI result.
  *
  * After the durable write, the worker fans the redacted `PublicReport` out via
- * the internal IAM-only `publishReportUpdate` mutation (§5.3, CRIS-19,
- * ADR-0009/0029) so subscribers update in near real time — a best-effort call
+ * `publishReportUpdate` over the worker's IAM grant (§5.3, CRIS-19,
+ * ADR-0009/0029/0030) so subscribers update in near real time — a best-effort call
  * (an injected {@link Publisher}) that never rolls back the durable write. The
  * subscriptions that consume it are enabled in CRIS-28.
  */
@@ -60,6 +60,8 @@ export interface WorkerDeps {
    * behaviour — only in wiring, so production can never forget to enable it.
    */
   dedupe?: (input: DedupeInput) => Promise<DedupeResult>;
+  /** Event-time clock. Injected so age-based scoring and tests are deterministic. */
+  now?: () => Date;
 }
 
 /** Parses the SQS body into a validated message, or null if malformed (poison). */
@@ -121,17 +123,23 @@ async function groupDuplicates(
   deps: WorkerDeps,
   input: DedupeInput,
   log: (entry: Record<string, unknown>) => void,
-): Promise<void> {
+): Promise<DedupeResult> {
   const dedupe =
     deps.dedupe ?? ((i: DedupeInput) => resolveDuplicates({ store: deps.store, log }, i));
   try {
-    await dedupe(input);
+    return await dedupe(input);
   } catch (err) {
     log({
       event: 'dedupe.failed',
       reportId: input.reportId,
       reason: err instanceof Error ? err.message : String(err),
     });
+    return {
+      duplicateGroupId: null,
+      linked: [],
+      suggested: [],
+      strongDuplicateReports: 0,
+    };
   }
 }
 
@@ -148,6 +156,8 @@ export async function processRecord(
 ): Promise<void> {
   const log = deps.log ?? ((entry) => console.log(JSON.stringify(entry)));
   const { reportId, streamEventId } = message;
+  const scoredAt = (deps.now ?? (() => new Date()))();
+  const scoredAtIso = scoredAt.toISOString();
 
   const report = await deps.store.getReport(reportId);
   if (!report) {
@@ -205,7 +215,7 @@ export async function processRecord(
         status: ReportStatus.NEEDS_VERIFICATION,
         regionId: report.regionId,
         createdAt: report.createdAt,
-        updatedAt: new Date().toISOString(),
+        updatedAt: scoredAtIso,
       }),
       log,
     );
@@ -214,10 +224,18 @@ export async function processRecord(
 
   const { classification, location } = triage;
 
-  // Deterministic, explainable priority (§5.4.2, ADR-0010).
+  const submittedAtMs = report.createdAt ? Date.parse(report.createdAt) : Number.NaN;
+  const ageMinutes = (scoredAt.getTime() - submittedAtMs) / 60_000;
+
+  // Deterministic, explainable v2 priority (§5.4.2, CRIS-30). Evidence that
+  // does not exist yet starts at zero; duplicate links can trigger a rescore
+  // after the durable classification write below.
   const scoring = scoreReport({
     urgency: classification.urgency,
     category: classification.category,
+    confidence: classification.confidence,
+    ageMinutes,
+    peopleAffected: classification.entities.peopleAffected,
   });
   // Low-confidence / model-flagged reports still record the AI result but are
   // routed to human review rather than surfacing as AI_CLASSIFIED (§2.6).
@@ -236,32 +254,78 @@ export async function processRecord(
     scoreBreakdown: scoring.breakdown,
     // Location resolved by the Triage Agent's geocode tool (Amazon Location,
     // §5.5/CRIS-21), or {} when it stayed unresolved (no place matched, a weak
-    // match, geocoding disabled/unavailable). Dedupe deferred.
+    // match, geocoding disabled/unavailable). Duplicate grouping runs after this
+    // durable classification write.
     location: location ?? {},
     streamEventId,
   });
 
   // Conservative duplicate grouping (§5.4.3, CRIS-31). After the durable write,
   // so a dedup failure can never cost a classification.
-  await groupDuplicates(
+  const dedupeResult = await groupDuplicates(
     deps,
     {
       reportId,
       version: claimedVersion + 1,
       geohashPrefix: location?.geohashPrefix,
-      now: new Date().toISOString(),
+      now: scoredAtIso,
       streamEventId,
       subject: {
         category: classification.category,
         lat: location?.lat,
         lng: location?.lng,
-        createdAt: report.createdAt ?? new Date().toISOString(),
+        createdAt: report.createdAt ?? scoredAtIso,
         text: report.text,
         entities: classification.entities,
       },
     },
     log,
   );
+
+  // A successful strong link is new deterministic evidence. Recompute the
+  // subject after the link transaction and persist the score + audit together.
+  // This remains best-effort: classification is already durable, and a race or
+  // rescore outage must not re-drive Bedrock work.
+  let effectiveScoring = scoring;
+  if (dedupeResult.duplicateGroupId && dedupeResult.strongDuplicateReports > 0) {
+    const rescoring = scoreReport({
+      urgency: classification.urgency,
+      category: classification.category,
+      confidence: classification.confidence,
+      ageMinutes,
+      peopleAffected: classification.entities.peopleAffected,
+      strongDuplicateReports: dedupeResult.strongDuplicateReports,
+    });
+    try {
+      const saved = await deps.store.persistPriorityScore({
+        reportId,
+        // persistClassification and linkDuplicateGroup each incremented once.
+        expectedVersion: claimedVersion + 2,
+        scoring: rescoring,
+        eventId: `${streamEventId}#score#duplicate`,
+        reason: 'DUPLICATE_LINKED',
+        now: scoredAtIso,
+      });
+      if (saved) {
+        effectiveScoring = rescoring;
+        log({
+          event: 'score.updated',
+          reportId,
+          reason: 'DUPLICATE_LINKED',
+          band: rescoring.priorityBand,
+        });
+      } else {
+        log({ event: 'score.updateConflict', reportId, reason: 'DUPLICATE_LINKED' });
+      }
+    } catch (err) {
+      log({
+        event: 'score.updateFailed',
+        reportId,
+        reason: 'DUPLICATE_LINKED',
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 
   // Fan the redacted result out to subscribers (§5.3, CRIS-19). The durable
   // write above already committed, so this is best-effort. The custom
@@ -273,8 +337,8 @@ export async function processRecord(
       status,
       category: classification.category,
       urgency: classification.urgency,
-      priorityScore: scoring.priorityScore,
-      priorityBand: scoring.priorityBand,
+      priorityScore: effectiveScoring.priorityScore,
+      priorityBand: effectiveScoring.priorityBand,
       summary: classification.summary,
       lat: location?.lat,
       lng: location?.lng,
@@ -282,11 +346,11 @@ export async function processRecord(
       geohashPrefix: location?.geohashPrefix,
       regionId: report.regionId,
       createdAt: report.createdAt,
-      updatedAt: new Date().toISOString(),
+      updatedAt: scoredAtIso,
     }),
     log,
   );
-  log({ event: 'classify.done', reportId, band: scoring.priorityBand, status });
+  log({ event: 'classify.done', reportId, band: effectiveScoring.priorityBand, status });
 }
 
 async function buildDeps(): Promise<WorkerDeps> {
@@ -299,7 +363,7 @@ async function buildDeps(): Promise<WorkerDeps> {
   // Dynamically imported so the AppSync/Amplify client (and its transitive deps)
   // stays out of the unit-test import graph — processRecord is tested with an
   // injected fake Publisher and never calls buildDeps().
-  const { createAppSyncPublisher } = await import('./publish');
+  const { createAppSyncPublisher } = await import('../publish-report-update/client');
   // The agent's geocode_location tool is wired regardless; the flag chooses what
   // backs it (CRIS-21, ADR-0027). When off, every lookup returns "unavailable"
   // and reports stay unlocated — the tool-use path still runs.
@@ -314,6 +378,9 @@ async function buildDeps(): Promise<WorkerDeps> {
       // Physical name of the geohashPrefix/geohash GSI, injected by backend.ts
       // rather than guessed — see DynamoStoreTables.geoIndex (CRIS-31).
       geoIndex: env('REPORT_GEO_INDEX_NAME'),
+      // Complete duplicate-group membership for CRIS-30 rescoring. This is
+      // separate from the bounded geospatial candidate lookup above.
+      duplicateGroupIndex: env('REPORT_DUPLICATE_GROUP_INDEX_NAME'),
     }),
     // Tool-using Triage Agent (§5.5, CRIS-20), degrading to the MVP single-call
     // classifier (CRIS-10) when agent orchestration is unavailable.
@@ -321,7 +388,7 @@ async function buildDeps(): Promise<WorkerDeps> {
       primary: createBedrockTriageAgent({ modelId, geocoder }),
       fallback: createBedrockClassifier({ modelId }),
     }),
-    // IAM-only fan-out to `publishReportUpdate` (CRIS-19, ADR-0009/0029).
+    // Worker IAM fan-out to `publishReportUpdate` (CRIS-19, ADR-0009/0029/0030).
     publisher: createAppSyncPublisher(),
   };
 }

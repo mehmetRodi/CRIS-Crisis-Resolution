@@ -22,25 +22,31 @@ in** — the job is skipped (green) unless `AWS_DEPLOY_ENABLED` is `true`.
 1. **Create an Amplify Gen 2 app** in the target account and note its **App ID**.
 2. **Create a GitHub OIDC identity provider** in IAM (`token.actions.githubusercontent.com`) if
    the account doesn't already have one.
-3. **Create a deploy IAM role** trusting this repo via OIDC. Trust policy condition:
+3. **Create the deploy IAM role** from
+   [`infra/bootstrap/github-oidc-deploy-role.yaml`](../../infra/bootstrap/github-oidc-deploy-role.yaml).
+   It trusts two exact OIDC subjects:
    ```
-   "token.actions.githubusercontent.com:sub": "repo:mehmetRodi/CRIS-Crisis-Resolution:ref:refs/heads/main"
+   repo:mehmetRodi/CRIS-Crisis-Resolution:ref:refs/heads/main
+   repo:mehmetRodi/CRIS-Crisis-Resolution:environment:production
    ```
-   Attach a policy allowing the CloudFormation/CDK deploy (CDK bootstrap + the services the
-   backend provisions: CloudFormation, S3, IAM, Lambda, AppSync, DynamoDB, Cognito, SQS, Pipes,
-   SNS, KMS, CloudWatch, X-Ray). Scope to least privilege for your account.
+   The role assumes the CDK bootstrap roles that hold provisioning power; its only direct access is
+   the narrow read-only CloudFormation, SSM, and Amplify-codegen S3 access `ampx` needs.
 4. **CDK bootstrap** the account/region once (`npx ampx pipeline-deploy` relies on the CDK
    bootstrap stack).
 
 ### Configure GitHub (repo → Settings)
 
-| Kind        | Name                  | Value                                           |
-| ----------- | --------------------- | ----------------------------------------------- |
-| Variable    | `AWS_DEPLOY_ENABLED`  | `true` to activate the workflow                 |
-| Variable    | `AWS_REGION`          | `eu-central-1` (must have Bedrock model access) |
-| Secret      | `AWS_DEPLOY_ROLE_ARN` | ARN of the deploy role from step 3              |
-| Secret      | `AMPLIFY_APP_ID`      | App ID from step 1                              |
-| Environment | `production`          | (optional) add required reviewers for a gate    |
+| Kind        | Name                  | Value                                                             |
+| ----------- | --------------------- | ----------------------------------------------------------------- |
+| Variable    | `AWS_DEPLOY_ENABLED`  | `true` to activate the workflow                                   |
+| Variable    | `AWS_REGION`          | `eu-central-1` (must have Bedrock model access)                   |
+| Secret      | `AWS_DEPLOY_ROLE_ARN` | ARN of the deploy role from step 3                                |
+| Secret      | `AMPLIFY_APP_ID`      | App ID from step 1                                                |
+| Environment | `production`          | Required by `deploy.yml`; restrict to `main` (reviewers optional) |
+
+The workflow's environment-gated OIDC token contains the `production` Environment subject, not a
+branch-ref subject. Configure the Environment's **deployment branches and tags** rule for `main`
+only; the IAM trust alone cannot recover the branch name from that subject.
 
 Also confirm Bedrock model access is enabled for `BEDROCK_MODEL_ID`
 (`eu.anthropic.claude-haiku-4-5-20251001-v1:0` by default, via the EU inference profile) in
@@ -75,7 +81,7 @@ to `pipeRole`. Recovery is just re-running the deploy — the stack rolls back c
 
 No automated rollback yet. Re-run an earlier good commit through the pipeline
 (`workflow_dispatch` from that ref, or revert-commit to `main`). Post-deploy smoke tests are a
-follow-up (CRIS-29/35).
+follow-up owned by CRIS-35; CRIS-29 provides the reusable personal-sandbox integration suite.
 
 ### Retained KMS keys after sandbox deletion
 
@@ -110,11 +116,14 @@ CloudFormation cannot recover ciphertext after the waiting window closes.
 
 ## 2. Observability
 
-- **Traces:** X-Ray is active on AppSync + all four Lambdas. Use the X-Ray service map to
-  locate latency across AppSync → Lambda → DynamoDB/Bedrock.
+- **Traces:** X-Ray is active on AppSync and five Lambdas: submit, transition, publish,
+  classification, and media-upload URL creation. The volunteer-task resolver and Cognito
+  role-assignment trigger are known tracing gaps.
 - **Dashboard:** CloudWatch → Dashboards → `CrisisMap-<stackName>`. One screen for the §3.2
   service targets (submission p95 < 800 ms, classification p95 < 15 s, real-time p95 < 2 s,
-  99.9%). The real-time widgets remain dormant until worker fan-out and subscriptions are wired.
+  99.9%). Publish invocation/error metrics cover classification and transition fan-out. CRIS-28
+  connects subscribers, but end-to-end browser delivery latency still requires the deployed
+  integration/system measurement owned by CRIS-29/35.
 - **Alarms → SNS:** all alarms publish to the CMK-encrypted ops topic `OpsAlarmTopic`; its key and
   topic policies authorize same-account CloudWatch alarms and SNS delivery (ADR-0043). **Subscribe an
   endpoint post-deploy** (it is environment-specific, so it is not in code):
@@ -125,16 +134,54 @@ CloudFormation cannot recover ciphertext after the waiting window closes.
 
 ### Alarm first-response
 
-| Alarm                         | Means                                                                             | First actions                                                                                                                                                                                                                                                       |
-| ----------------------------- | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ClassificationDlqNotEmpty`   | A report exhausted retries (poison message) — "never-lost" at risk                | Inspect the DLQ message (IDs only, no PII). Fix root cause, then redrive DLQ → classification queue.                                                                                                                                                                |
-| `ReportStreamPipeDlqNotEmpty` | Stream records never reached the queue; the pipe parked them to unblock the shard | **Do not redrive into `ClassificationQueue`** — the payloads are stream records, not worker messages, and the worker will treat them as poison. Read the parked records for their report ids, then re-drive those reports by re-running classification (see below). |
-| `ClassificationBacklogAge`    | Oldest queued report > 30 s for 3 min — classification lagging                    | Check Bedrock throttling/quota in-region and `classify-report` logs/duration. Watch worker throttles.                                                                                                                                                               |
-| `ClassifyWorkerErrors`        | Worker raised _unhandled_ errors (not Bedrock/parse — those are handled)          | Read structured logs (`classify.record.error`). Repeated errors feed the DLQ.                                                                                                                                                                                       |
-| `ClassifyWorkerThrottles`     | Worker hitting the concurrency ceiling under load                                 | Review reserved concurrency vs the 1,000 writes/min target (§3.2); raise account concurrency if needed.                                                                                                                                                             |
-| `SubmitReportErrors`          | Citizens may be unable to file reports (availability, §3.2)                       | Check `submit-report` logs, DynamoDB throttling/conditional-check failures, AppSync health.                                                                                                                                                                         |
-| `TransitionReportErrors`      | Coordinator status transitions failing                                            | Check `transition-report` logs — often a version conflict (`CONFLICT`) or an invalid transition.                                                                                                                                                                    |
-| `PublishReportUpdateErrors`   | Publish resolver failures; full fan-out is not wired yet                          | Check `publish-report-update` logs. Once subscriptions land, also check AppSync subscription health.                                                                                                                                                                |
+| Alarm                         | Means                                                                             | First actions                                                                                                                                               |
+| ----------------------------- | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ClassificationDlqNotEmpty`   | A report exhausted retries (poison message) — "never-lost" at risk                | Inspect the DLQ message (IDs only, no PII). Fix root cause, then redrive DLQ → classification queue.                                                        |
+| `ReportStreamPipeDlqNotEmpty` | Stream records never reached the queue; the pipe parked them to unblock the shard | Treat these raw stream records as PII-bearing. **Do not redrive them into `ClassificationQueue`**; recover them with the canonical-message procedure below. |
+| `ClassificationBacklogAge`    | Oldest queued report > 30 s for 3 min — classification lagging                    | Check Bedrock throttling/quota in-region and `classify-report` logs/duration. Watch worker throttles.                                                       |
+| `ClassifyWorkerErrors`        | Worker raised _unhandled_ errors (not Bedrock/parse — those are handled)          | Read structured logs (`classify.record.error`). Repeated errors feed the DLQ.                                                                               |
+| `ClassifyWorkerThrottles`     | Worker hitting the concurrency ceiling under load                                 | Review reserved concurrency vs the 1,000 writes/min target (§3.2); raise account concurrency if needed.                                                     |
+| `SubmitReportErrors`          | Citizens may be unable to file reports (availability, §3.2)                       | Check `submit-report` logs, DynamoDB throttling/conditional-check failures, AppSync health.                                                                 |
+| `TransitionReportErrors`      | Coordinator status transitions failing                                            | Check `transition-report` logs — often a version conflict (`CONFLICT`) or an invalid transition.                                                            |
+| `PublishReportUpdateErrors`   | The internal publish resolver is failing; live clients may be stale               | Check `publish-report-update`, `publish.failed`, and `transition.publish.failed` logs, then AppSync real-time connection health.                            |
+
+### CRIS-28 post-deploy smoke test
+
+1. Sign in to two browser sessions with operational roles and open `/coordinator` in both. Confirm
+   each header reaches **Live updates connected**; an unauthenticated browser must not be able to
+   register the subscription.
+2. Submit a report and wait for classification. Confirm both coordinator queues update without
+   pressing Refresh and that neither client receives raw report text, reporter identity/contact,
+   media keys, or internal notes in the subscription payload.
+3. Change the report status in one coordinator session. Confirm the second session updates its
+   queue and selected timeline, proving `transition-report` publishes after its durable write.
+4. Open `/volunteer` with an allowed role and confirm the redacted task moves lanes after a report
+   status update while its existing assignment/team label remains intact.
+5. Interrupt one browser's network connection, perform another update elsewhere, and restore the
+   connection. Confirm the indicator reconnects and the durable snapshot reload catches the missed
+   state. If any step fails, manual Refresh must still recover the current DynamoDB-backed state.
+
+The public `/map` is intentionally not part of this smoke test: anonymous subscription auth, the
+baseline public query, and incident markers are deferred together by ADR-0048.
+
+### Recover records from the pipe DLQ
+
+The pipe DLQ contains failed DynamoDB stream records, while `ClassificationQueue` accepts only
+`{ reportId, version, streamEventId }`. For each parked record:
+
+1. Extract the report ID without copying the raw record into tickets or chat; the record may contain
+   report text, contact details, and precise location.
+2. Read the current report. If it is no longer `NEW`, the idempotent worker has nothing to do; record
+   the outcome and remove the parked message after review.
+3. If it is still `NEW`, send a newly constructed message to `ClassificationQueue` with the current
+   report version and a unique recovery event ID:
+   ```bash
+   aws sqs send-message \
+     --queue-url <ClassificationQueue URL> \
+     --message-body '{"reportId":"<report-id>","version":<current-version>,"streamEventId":"recovery-<unique-id>"}'
+   ```
+4. Confirm the report leaves `NEW` and the classification/audit write succeeds before deleting the
+   original pipe-DLQ message.
 
 All alarms use `treatMissingData: NOT_BREACHING`, so an idle environment does not page. Both
 ALARM and OK transitions notify the topic, so recovery is visible too.

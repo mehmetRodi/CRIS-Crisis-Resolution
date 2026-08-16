@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
 import { UserRole } from '@crisismap/shared';
 import { AuthProvider, useAuth } from './AuthContext';
@@ -38,12 +38,20 @@ import { useVolunteerTasks } from './surfaces/volunteer/useVolunteerTasks';
 function CoordinatorRoute() {
   const navigate = useNavigate();
   const { highestRole } = useAuth();
-  const { state, refresh } = useLiveReports();
+  const { state, realtime, lastUpdate, activity, refresh } = useLiveReports();
   // CRIS-23: per-incident audit timeline. The dashboard owns row selection but
   // reports it here so this wrapper can drive the timeline read; nothing is
   // fetched until a row is selected (`selectedId === null` → idle).
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const { state: timeline, refresh: refreshTimeline } = useIncidentTimeline(selectedId);
+  // CRIS-28: a report update also invalidates the selected incident's audit
+  // timeline. A null report id denotes reconnect recovery, where any events may
+  // have been missed while the WebSocket was disrupted.
+  useEffect(() => {
+    if (selectedId && lastUpdate && (!lastUpdate.reportId || lastUpdate.reportId === selectedId)) {
+      refreshTimeline();
+    }
+  }, [lastUpdate, refreshTimeline, selectedId]);
   // CRIS-18: guarded status transitions. Re-read the feed AND the timeline after
   // any successful transition so the queue reflects the new status and a fresh
   // optimistic-lock version (§5.3), and the newly-appended audit event appears.
@@ -69,6 +77,8 @@ function CoordinatorRoute() {
     <CoordinatorDashboard
       onExit={() => navigate('/')}
       feed={state}
+      realtime={realtime}
+      activity={activity}
       onRefresh={refresh}
       onTransition={(request) => void applyTransition(request)}
       transition={transition}
@@ -86,8 +96,15 @@ function CoordinatorRoute() {
 
 function VolunteerRoute() {
   const navigate = useNavigate();
-  const { state, refresh } = useVolunteerTasks();
-  return <VolunteerTaskBoard onExit={() => navigate('/')} feed={state} onRefresh={refresh} />;
+  const { state, realtime, refresh } = useVolunteerTasks();
+  return (
+    <VolunteerTaskBoard
+      onExit={() => navigate('/')}
+      feed={state}
+      realtime={realtime}
+      onRefresh={refresh}
+    />
+  );
 }
 
 export function Router() {

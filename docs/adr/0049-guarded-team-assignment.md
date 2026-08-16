@@ -1,4 +1,4 @@
-# ADR-0045: Guarded team assignment (CRIS-32)
+# ADR-0049: Guarded team assignment (CRIS-32)
 
 - **Status:** Accepted
 - **Date:** 2026-08-13

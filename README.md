@@ -15,10 +15,12 @@ dependencies are degraded.
 
 Serverless AWS. The Expo mobile app and React SPA use an AppSync GraphQL API backed by
 DynamoDB. Expensive AI work runs asynchronously through DynamoDB Streams → EventBridge Pipes
-→ SQS → Lambda → Bedrock, keeping it off the report-submission path. Real-time subscriptions,
-Amazon Location integration, deduplication, media upload, and citizen alerts are not fully
-wired yet. See **[docs/architecture.md](docs/architecture.md)** for the distinction between the
-current implementation and target architecture.
+→ SQS → Lambda → Bedrock, keeping it off the report-submission path. Amazon Location Places
+geocoding, conservative duplicate grouping, and presigned media uploads are wired. Custom
+subscriptions, Amazon Location map tiles, richer incident-map overlays, media quarantine/signed
+delivery, and citizen proximity alerts remain deferred. See
+**[docs/architecture.md](docs/architecture.md)** for the distinction between the current
+implementation and target architecture.
 
 ## Tech stack
 
@@ -26,13 +28,13 @@ current implementation and target architecture.
 | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Clients        | Expo + React Native mobile app; Vite + React SPA (TypeScript, Tailwind) — [ADR-0020](docs/adr/0020-react-native-mobile-app-for-citizen-reporting.md) |
 | Backend / IaC  | AWS Amplify Gen 2 + CDK escape hatches — [ADR-0003](docs/adr/0003-backend-amplify-gen2-with-cdk-escape-hatch.md)                                     |
-| API            | AppSync GraphQL; custom subscriptions are a deferred integration                                                                                     |
+| API            | [AppSync GraphQL](docs/api.md); custom subscriptions are a deferred integration                                                                      |
 | Data / storage | DynamoDB (on-demand), S3                                                                                                                             |
 | Auth           | Amazon Cognito (groups + anonymous)                                                                                                                  |
 | AI             | Amazon Bedrock (Claude)                                                                                                                              |
 | Async          | SQS + DynamoDB Streams; Lambda workers                                                                                                               |
 | Alerts         | Amazon SNS for operations alarms; citizen proximity alerts are deferred                                                                              |
-| Map            | MapLibre with a configurable style URL; Amazon Location integration is deferred                                                                      |
+| Map            | MapLibre with a configurable style URL; Amazon Location Places geocoding is wired, while Location map tiles are deferred                             |
 | Monorepo       | npm workspaces — [ADR-0001](docs/adr/0001-monorepo-npm-workspaces.md)                                                                                |
 
 ## Repository layout
@@ -63,13 +65,14 @@ npm run dev:mobile   # start the Expo development server
 
 Common commands (run from the repo root):
 
-| Command                           | Description                                 |
-| --------------------------------- | ------------------------------------------- |
-| `npm run build`                   | Build workspaces that expose a build script |
-| `npm run typecheck`               | Type-check all workspaces                   |
-| `npm run lint` / `lint:fix`       | ESLint                                      |
-| `npm run format` / `format:check` | Prettier                                    |
-| `npm test`                        | Test workspaces that expose a test script   |
+| Command                           | Description                                     |
+| --------------------------------- | ----------------------------------------------- |
+| `npm run build`                   | Build workspaces that expose a build script     |
+| `npm run typecheck`               | Type-check all workspaces                       |
+| `npm run lint` / `lint:fix`       | ESLint                                          |
+| `npm run format` / `format:check` | Prettier                                        |
+| `npm test`                        | Test workspaces that expose a test script       |
+| `npm run test:integration`        | Live API suite (personal sandbox flag required) |
 
 ## Personal backend sandbox
 

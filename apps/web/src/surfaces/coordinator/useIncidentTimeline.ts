@@ -17,11 +17,10 @@ import { sortTimeline, toTimelineEvent, type IncidentTimelineState } from './inc
  * session degrades to an `error` state rather than throwing.
  *
  * `reportId === null` (nothing selected) resolves to `idle` and issues no read.
- * `refresh` re-runs the read — the route wrapper calls it after a successful
- * status transition (CRIS-18) so the newly-appended audit event shows up.
- *
- * Like the feed, this is a one-shot read, NOT a live subscription; real-time
- * push is CRIS-28.
+ * `refresh` re-runs the read. The route wrapper calls it after a successful
+ * local transition and when CRIS-28 reports an update for the selected incident
+ * (or reconnect recovery), so newly-appended audit events converge without
+ * putting internal event detail on the public subscription channel.
  */
 
 /** How many audit events to pull for one incident. Bounded until pagination. */
@@ -102,5 +101,6 @@ export function useIncidentTimeline(reportId: string | null): LiveIncidentTimeli
     void load();
   }, [load]);
 
-  return { state, refresh: () => void load() };
+  const refresh = useCallback(() => void load(), [load]);
+  return { state, refresh };
 }

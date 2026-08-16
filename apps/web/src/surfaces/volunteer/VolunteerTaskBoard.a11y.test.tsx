@@ -24,10 +24,14 @@ describe('VolunteerTaskBoard accessibility', () => {
     const { rerender } = render(
       <VolunteerTaskBoard onExit={() => {}} feed={{ status: 'loading' }} />,
     );
-    expect(screen.getByRole('status')).toHaveTextContent(/loading volunteer tasks/i);
+    expect(screen.getByRole('status', { name: /volunteer task status/i })).toHaveTextContent(
+      /loading volunteer tasks/i,
+    );
 
     rerender(<VolunteerTaskBoard onExit={() => {}} feed={{ status: 'unauthenticated' }} />);
-    expect(screen.getByRole('status')).toHaveTextContent(/sign in as a volunteer/i);
+    expect(screen.getByRole('status', { name: /volunteer task status/i })).toHaveTextContent(
+      /sign in as a volunteer/i,
+    );
 
     rerender(
       <VolunteerTaskBoard onExit={() => {}} feed={{ status: 'error', message: 'Read failed' }} />,

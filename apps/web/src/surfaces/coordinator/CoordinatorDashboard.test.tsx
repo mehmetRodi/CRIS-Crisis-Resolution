@@ -62,9 +62,9 @@ describe('CoordinatorDashboard shell', () => {
     }
   });
 
-  it('marks the shell as pre-wired: live updates disconnected and actions disabled', () => {
+  it('marks the shell as pre-wired: live updates inactive and actions disabled', () => {
     render(<CoordinatorDashboard onExit={() => {}} />);
-    expect(screen.getByText(/live updates: not connected/i)).toBeInTheDocument();
+    expect(screen.getByText(/live updates inactive/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Verify' })).toBeDisabled();
   });
 
@@ -106,6 +106,42 @@ describe('CoordinatorDashboard live feed', () => {
     const p0Tile = within(metrics).getByText('P0').closest('div')?.parentElement as HTMLElement;
     expect(within(p0Tile).getByText('2')).toBeInTheDocument();
     expect(screen.getByText(/3 incidents loaded/i)).toBeInTheDocument();
+  });
+
+  it('shows the real-time connection independently from snapshot health', () => {
+    render(
+      <CoordinatorDashboard
+        onExit={() => {}}
+        feed={{ status: 'ready', incidents: [] }}
+        realtime="connected"
+      />,
+    );
+    expect(screen.getByRole('status')).toHaveTextContent(/live updates connected/i);
+  });
+
+  it('renders the bounded redacted activity received during this session', () => {
+    render(
+      <CoordinatorDashboard
+        onExit={() => {}}
+        feed={{ status: 'ready', incidents: [] }}
+        realtime="connected"
+        activity={[
+          {
+            sequence: 1,
+            reportId: 'report-activity',
+            status: 'VERIFIED',
+            summary: 'Field team confirmed the incident',
+            occurredAt: '2026-08-14T10:00:00.000Z',
+          },
+        ]}
+      />,
+    );
+
+    const activity = screen.getByRole('list', { name: /live report activity/i });
+    expect(within(activity).getByText('report-a…').closest('p')).toHaveTextContent(
+      /report-a… changed to VERIFIED/i,
+    );
+    expect(within(activity).getByText('Field team confirmed the incident')).toBeInTheDocument();
   });
 
   it('renders queue rows ordered by priority, highest first', () => {
@@ -371,33 +407,40 @@ describe('CoordinatorDashboard incident detail (CRIS-23)', () => {
   it('renders the explainable score breakdown factors', () => {
     renderSelected({
       scoreBreakdown: {
-        urgencyWeight: 3.5,
-        categoryWeight: 3,
-        recencyWeight: 1.2,
-        corroborationWeight: 0.5,
-        manualAdjustment: 0,
+        urgencyWeight: 4,
+        categoryWeight: 1.9,
+        affectedPeopleWeight: 0.75,
+        verificationWeight: 0.5,
+        recencyWeight: 0.8,
+        duplicateWeight: 0.75,
+        uncertaintyPenalty: 0.25,
+        stalenessPenalty: 0,
       },
     });
     expect(within(detail()).getByText(/why this priority/i)).toBeInTheDocument();
-    // "Corroboration" / "Recency" only appear in the score breakdown ("Urgency"
-    // and "Category" also label the classification snapshot above).
-    expect(within(detail()).getByText('Corroboration')).toBeInTheDocument();
+    expect(within(detail()).getByText('Duplicate corroboration')).toBeInTheDocument();
+    expect(within(detail()).getByText('Affected people')).toBeInTheDocument();
     expect(within(detail()).getByText('Recency')).toBeInTheDocument();
-    expect(within(detail()).getByText('+3.50')).toBeInTheDocument();
+    expect(within(detail()).getByText('+4.00')).toBeInTheDocument();
+    expect(within(detail()).getByText('−0.25')).toBeInTheDocument();
   });
 
-  it('surfaces a non-zero manual adjustment separately', () => {
+  it('surfaces uncertainty and staleness as subtractive penalties', () => {
     renderSelected({
       scoreBreakdown: {
         urgencyWeight: 2,
         categoryWeight: 1,
+        affectedPeopleWeight: 0,
+        verificationWeight: 0,
         recencyWeight: 0,
-        corroborationWeight: 0,
-        manualAdjustment: -1.5,
+        duplicateWeight: 0,
+        uncertaintyPenalty: 1,
+        stalenessPenalty: 1.5,
       },
     });
-    expect(within(detail()).getByText(/manual adjustment/i)).toBeInTheDocument();
-    expect(within(detail()).getByText('-1.50')).toBeInTheDocument();
+    expect(within(detail()).getByText('Uncertainty')).toBeInTheDocument();
+    expect(within(detail()).getByText('Staleness')).toBeInTheDocument();
+    expect(within(detail()).getByText('−1.50')).toBeInTheDocument();
   });
 
   it('renders extracted entities (people affected, infrastructure, hazards)', () => {

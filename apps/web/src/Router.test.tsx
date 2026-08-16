@@ -11,7 +11,23 @@ const mocks = vi.hoisted(() => ({
   },
   useVolunteerTasks: vi.fn(() => ({
     state: { status: 'ready' as const, tasks: [] },
+    realtime: 'connected' as const,
     refresh: vi.fn(),
+  })),
+  useLiveReports: vi.fn(() => ({
+    state: { status: 'ready' as const, incidents: [] },
+    realtime: 'connected' as const,
+    lastUpdate: null,
+    refresh: vi.fn(),
+  })),
+  useIncidentTimeline: vi.fn(() => ({
+    state: { status: 'idle' as const },
+    refresh: vi.fn(),
+  })),
+  useReportTransition: vi.fn(() => ({
+    state: { status: 'idle' as const },
+    transition: vi.fn(),
+    reset: vi.fn(),
   })),
 }));
 
@@ -19,9 +35,19 @@ vi.mock('./AuthContext', () => ({
   AuthProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   useAuth: () => mocks.auth,
 }));
+vi.mock('./lib/amplify', () => ({ client: {} }));
 
 vi.mock('./surfaces/volunteer/useVolunteerTasks', () => ({
   useVolunteerTasks: mocks.useVolunteerTasks,
+}));
+vi.mock('./surfaces/coordinator/useLiveReports', () => ({
+  useLiveReports: mocks.useLiveReports,
+}));
+vi.mock('./surfaces/coordinator/useIncidentTimeline', () => ({
+  useIncidentTimeline: mocks.useIncidentTimeline,
+}));
+vi.mock('./surfaces/coordinator/useReportTransition', () => ({
+  useReportTransition: mocks.useReportTransition,
 }));
 
 describe('Router volunteer authorization', () => {

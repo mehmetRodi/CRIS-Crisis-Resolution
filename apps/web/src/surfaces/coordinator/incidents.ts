@@ -60,6 +60,34 @@ export interface CoordinatorIncident extends PublicReport {
   assignedTeamId: string | null;
 }
 
+/** One PII-free activity item received during the current browser session. */
+export interface ReportActivity {
+  sequence: number;
+  reportId: string;
+  status: ReportStatus;
+  summary: string | null;
+  occurredAt: string | null;
+}
+
+/**
+ * Reconcile one authoritative staff read after a redacted subscription signal.
+ * Never let a slower response regress the optimistic-lock version, and keep the
+ * bounded queue priority-ordered when a newly classified incident enters it.
+ */
+export function reconcileIncident(
+  incidents: readonly CoordinatorIncident[],
+  incoming: CoordinatorIncident,
+  limit: number,
+): CoordinatorIncident[] {
+  const index = incidents.findIndex((incident) => incident.reportId === incoming.reportId);
+  if (index >= 0 && incidents[index]!.version > incoming.version) return [...incidents];
+
+  const reconciled = [...incidents];
+  if (index >= 0) reconciled[index] = incoming;
+  else reconciled.push(incoming);
+  return sortByPriority(reconciled).slice(0, limit);
+}
+
 /**
  * The dashboard's incident feed as a state machine. The presentational
  * component renders one branch per state; `idle` is the default (pre-wired

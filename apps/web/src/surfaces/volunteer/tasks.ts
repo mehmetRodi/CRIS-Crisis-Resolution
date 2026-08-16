@@ -1,4 +1,14 @@
-import { Category, Urgency, VolunteerBoardColumn, type VolunteerTask } from '@crisismap/shared';
+import {
+  Category,
+  priorityBandForScore,
+  ReportStatus,
+  sortVolunteerTasks,
+  Urgency,
+  VolunteerBoardColumn,
+  volunteerBoardColumnFor,
+  type PublicReport,
+  type VolunteerTask,
+} from '@crisismap/shared';
 
 export {
   VolunteerBoardColumn,
@@ -43,6 +53,44 @@ export const EMPTY_VOLUNTEER_TASK_FILTERS: VolunteerTaskFilters = {
   category: '',
   urgency: '',
 };
+
+/**
+ * Apply one PII-free report subscription event to the task projection. The
+ * event owns report fields; assignment/team labels remain from the last
+ * server-enforced snapshot until a reconnect/manual refresh replaces them.
+ */
+export function reconcileVolunteerReport(
+  tasks: readonly VolunteerTask[],
+  report: PublicReport,
+): VolunteerTask[] {
+  const remaining = tasks.filter((task) => task.reportId !== report.reportId);
+  if (report.status === ReportStatus.REJECTED) return remaining;
+
+  const current = tasks.find((task) => task.reportId === report.reportId);
+  const column = volunteerBoardColumnFor(report.status, current?.assignmentStatus ?? null);
+  if (!column) return remaining;
+
+  const task: VolunteerTask = {
+    reportId: report.reportId,
+    status: report.status,
+    category: report.category,
+    urgency: report.urgency,
+    priorityScore: report.priorityScore,
+    priorityBand:
+      report.priorityBand ??
+      (report.priorityScore != null ? priorityBandForScore(report.priorityScore) : null),
+    summary: report.summary,
+    regionId: report.regionId ?? current?.regionId ?? null,
+    createdAt: report.createdAt ?? current?.createdAt ?? null,
+    assignmentId: current?.assignmentId ?? null,
+    assignmentStatus: current?.assignmentStatus ?? null,
+    teamId: current?.teamId ?? null,
+    teamName: current?.teamName ?? null,
+    column,
+  };
+
+  return sortVolunteerTasks([...remaining, task]);
+}
 
 export function filterVolunteerTasks(
   tasks: readonly VolunteerTask[],

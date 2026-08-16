@@ -25,8 +25,8 @@ MapLibre base maps, CI/CD, and observability.
 Important deferred seams are listed in [`docs/architecture.md`](docs/architecture.md): media
 quarantine/signed delivery (presigned upload itself landed in CRIS-17), Amazon Location map
 tiles, custom subscriptions (the worker-to-AppSync publish call is wired in CRIS-19, but
-nothing subscribes yet), citizen alerts, interactive coordinator workflows, and security
-hardening. Do not infer the state of a deployed
+nothing subscribes yet), citizen alerts, team-assignment and duplicate-merge coordinator
+actions, WAF, and reporter-contact/media hardening. Do not infer the state of a deployed
 environment from the source tree.
 
 ## Repository map
@@ -60,8 +60,8 @@ environment from the source tree.
 Vite + React SPA for the coordinator/responder/volunteer web UI · TypeScript everywhere ·
 AWS Amplify Gen 2 (Cognito, AppSync GraphQL, DynamoDB, S3) with CDK escape hatches for the
 async pipeline · Bedrock (Claude) for classification · SQS + DynamoDB Streams · Lambda · SNS
-· MapLibre · Amazon Location integration in progress. Custom AppSync subscriptions are not
-currently enabled.
+· MapLibre · Amazon Location Places geocoding (Location map tiles are deferred). Custom AppSync
+subscriptions are not currently enabled.
 
 ## Commands
 

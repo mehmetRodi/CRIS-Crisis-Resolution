@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { PendingReport } from '@crisismap/shared';
+import { withoutPendingReportContact, type PendingReport } from '@crisismap/shared';
 
 /**
  * `AsyncStorage` persistence for the offline report queue (CRIS-26). Mobile
@@ -15,18 +15,15 @@ export async function loadQueue(): Promise<PendingReport[]> {
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) ? (parsed as PendingReport[]) : [];
+    return Array.isArray(parsed)
+      ? (parsed as PendingReport[]).map(withoutPendingReportContact)
+      : [];
   } catch {
     return [];
   }
 }
 
-/** Persists the queue. Never throws — storage failures just no-op for this session. */
+/** Persists the queue, rejecting when AsyncStorage cannot make the save durable. */
 export async function saveQueue(queue: readonly PendingReport[]): Promise<void> {
-  try {
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(queue));
-  } catch {
-    // Storage unavailable/full — the queue still works in-memory for this
-    // session, it just won't survive the app being killed.
-  }
+  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(queue.map(withoutPendingReportContact)));
 }

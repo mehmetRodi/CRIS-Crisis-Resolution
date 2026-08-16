@@ -10,9 +10,9 @@ import { defineFunction } from '@aws-amplify/backend';
  * JSON-only contract (`@crisismap/shared` triage schema) and calls a geocoding
  * tool when coordinates are missing, degrading to the MVP single-call classifier
  * if agent orchestration is unavailable — scores deterministically (§5.4.2),
- * writes the result back conditionally. Worker invocation of
- * `publishReportUpdate` and custom subscriptions remain deferred. A triage/parse
- * failure leaves the report as NEEDS_VERIFICATION, never
+ * writes the result back conditionally, and calls `publishReportUpdate` over its
+ * IAM grant so CRIS-28's authenticated subscriptions receive the redacted
+ * result. A triage/parse failure leaves the report as NEEDS_VERIFICATION, never
  * lost (§5.4.4).
  *
  * The SQS event-source mapping and least-privilege IAM (Bedrock, SQS, and direct

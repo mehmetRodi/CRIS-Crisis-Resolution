@@ -1,5 +1,11 @@
 import * as Crypto from 'expo-crypto';
-import { ReportSubmitError, toSubmissionText, type ReportSubmission } from '@crisismap/shared';
+import {
+  REPORT_SUBMIT_VALIDATION_PREFIX,
+  ReportSubmitError,
+  isReportSubmitValidationError,
+  toSubmissionText,
+  type ReportSubmission,
+} from '@crisismap/shared';
 
 import { client } from './amplify';
 
@@ -54,10 +60,12 @@ export async function submitReport(
 
   const { data, errors } = result;
   if ((errors && errors.length > 0) || !data) {
-    throw new ReportSubmitError(
-      errors?.[0]?.message ?? 'The report could not be submitted.',
-      false,
-    );
+    const message = errors?.[0]?.message ?? 'The report could not be submitted.';
+    const isValidation = isReportSubmitValidationError(message);
+    const displayMessage = isValidation
+      ? message.slice(REPORT_SUBMIT_VALIDATION_PREFIX.length).trim()
+      : message;
+    throw new ReportSubmitError(displayMessage, !isValidation);
   }
   return { reportId: data.id, status: data.status ?? 'NEW' };
 }

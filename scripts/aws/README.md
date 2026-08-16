@@ -23,18 +23,23 @@ and the decisions in [ADR-0017](../../docs/adr/0017-aws-account-identity-and-reg
 | 0    | `00-preflight.sh`        | Verify tooling, identity (not root), region + Bedrock access                  | read-only  |
 | 1    | `10-identity-center.sh`  | Org → Identity Center → `CrisisMapDeveloper` permission set → group → 5 users | ✅         |
 | 2    | `20-bootstrap.sh`        | `cdk bootstrap` + create the Amplify app                                      | ✅         |
-| 3    | `30-deploy-role.sh`      | Deploy the OIDC provider + branch-scoped deploy role (CloudFormation)         | ✅         |
+| 3    | `30-deploy-role.sh`      | Deploy the OIDC provider + repo/environment-scoped role (CloudFormation)      | ✅         |
 | 4    | `40-configure-github.sh` | Set the repo variables + secrets the Deploy workflow needs                    | ✅         |
 | 5    | `50-first-deploy.sh`     | Manually dispatch + watch the first backend deploy                            | n/a        |
 | 6    | `60-subscribe-alarms.sh` | Subscribe an endpoint to the ops alarm SNS topic                              | ✅         |
 
 Steps 1 (team) and 2–6 (CD path) are independent — do them in either order.
 
-## The one manual step
+## Manual console steps
 
 Enabling the **IAM Identity Center instance** is console-only (AWS exposes no
 create-instance API for the org-level directory). `10-identity-center.sh` detects
 this, prints the exact console click-path, and exits so you can re-run it after.
+
+The Deploy workflow always uses the GitHub `production` Environment. After step 4, configure that
+Environment's deployment-branch rule to allow `main` only. The role trusts the exact Environment
+subject, but an environment subject does not itself encode a branch. Required reviewers are
+optional.
 
 ## Team roster
 

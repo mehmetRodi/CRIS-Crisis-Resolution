@@ -258,6 +258,43 @@ describe('web ReportForm', () => {
       expect(submission).toMatchObject({ category: 'FIRE', urgency: 'HIGH' });
     });
 
+    it('keeps the form intact when durable offline storage fails', async () => {
+      useOfflineQueueMock.mockReturnValue({
+        isOnline: false,
+        pendingCount: 0,
+        isStale: false,
+        enqueue,
+      });
+      enqueue.mockRejectedValue(new DOMException('Quota exceeded', 'QuotaExceededError'));
+      render(<ReportForm />);
+
+      fillRequired();
+      fireEvent.click(screen.getByRole('button', { name: /submit report/i }));
+
+      expect(await screen.findByText(/could not be saved on this device/i)).toBeInTheDocument();
+      expect(screen.getByRole('form', { name: /emergency report/i })).toBeInTheDocument();
+      expect(screen.getByLabelText(/description/i)).toHaveValue(VALID_TEXT);
+      expect(screen.queryByText(/report saved/i)).not.toBeInTheDocument();
+    });
+
+    it('discloses that contact information is omitted from the offline copy', async () => {
+      useOfflineQueueMock.mockReturnValue({
+        isOnline: false,
+        pendingCount: 0,
+        isStale: false,
+        enqueue,
+      });
+      render(<ReportForm />);
+
+      fillRequired();
+      fireEvent.change(screen.getByLabelText(/contact info/i), {
+        target: { value: 'citizen@example.com' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: /submit report/i }));
+
+      expect(await screen.findByText(/contact information was not stored/i)).toBeInTheDocument();
+    });
+
     it('queues the report for retry when submission fails as retryable', async () => {
       submitReport.mockRejectedValue(new ReportSubmitError('Network request failed', true));
       render(<ReportForm />);
