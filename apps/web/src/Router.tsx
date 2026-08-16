@@ -13,6 +13,8 @@ import ConfirmSignupPage from './ConfirmSignupPage';
 import { CoordinatorDashboard } from './surfaces/coordinator/CoordinatorDashboard';
 import { useLiveReports } from './surfaces/coordinator/useLiveReports';
 import { useReportTransition } from './surfaces/coordinator/useReportTransition';
+import { useAssignTeam } from './surfaces/coordinator/useAssignTeam';
+import { useTeams } from './surfaces/coordinator/useTeams';
 import { useIncidentTimeline } from './surfaces/coordinator/useIncidentTimeline';
 import { VolunteerTaskBoard } from './surfaces/volunteer/VolunteerTaskBoard';
 import { useVolunteerTasks } from './surfaces/volunteer/useVolunteerTasks';
@@ -51,6 +53,18 @@ function CoordinatorRoute() {
       refreshTimeline();
     },
   });
+  // CRIS-32: guarded team assignment. Same reconciliation as a status
+  // transition — re-read the feed and timeline so the queue reflects the new
+  // `assignedTeamId` and a fresh optimistic-lock version, and the newly
+  // appended `ASSIGNED` audit event appears.
+  const { state: assignment, assign: applyAssignTeam } = useAssignTeam({
+    onSuccess: () => {
+      refresh();
+      refreshTimeline();
+    },
+  });
+  const teamsState = useTeams();
+  const teams = teamsState.status === 'ready' ? teamsState.teams : [];
   return (
     <CoordinatorDashboard
       onExit={() => navigate('/')}
@@ -60,6 +74,9 @@ function CoordinatorRoute() {
       transition={transition}
       onSelectIncident={setSelectedId}
       timeline={timeline}
+      onAssignTeam={(request) => void applyAssignTeam(request)}
+      assignment={assignment}
+      teams={teams}
       // RequireRole (below) only ever mounts this route for COORDINATOR/ADMIN,
       // but falls back to the dashboard's own default if that were ever null.
       callerRole={highestRole ?? undefined}

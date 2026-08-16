@@ -33,6 +33,8 @@ import {
   type TimelineEvent,
 } from './incidents';
 import type { TransitionRequest, TransitionUiState } from './useReportTransition';
+import type { AssignTeamRequest, AssignTeamUiState } from './useAssignTeam';
+import type { TeamOption } from './useTeams';
 import { IncidentMap } from '../map/IncidentMap';
 
 /**
@@ -57,7 +59,7 @@ import { IncidentMap } from '../map/IncidentMap';
  *   - Priority-ordered incident queue              → live here; filtered by CRIS-22
  *   - Incident detail (summary / score / timeline) → CRIS-23
  *   - Status transitions (verify/reject/resolve …) → CRIS-18 (wired here)
- *   - Guarded response actions (assign team, merge) → CRIS-32
+ *   - Guarded response actions (assign team)       → CRIS-32 (wired here); merge remains deferred
  *   - Recent activity (audit timeline)             → CRIS-28
  *   - Live-update push (subscriptions)             → CRIS-28
  *
@@ -96,6 +98,17 @@ interface CoordinatorDashboardProps {
    * presentational. Defaults to `idle` — the pre-wired shell shows no timeline.
    */
   timeline?: IncidentTimelineState;
+  /**
+   * Assign a response team to the selected incident (CRIS-32). Injected by the
+   * route wrapper (which owns `useAssignTeam`) so this component stays
+   * presentational. When omitted, the incident-detail panel shows no team
+   * picker (the pre-wired shell).
+   */
+  onAssignTeam?: (request: AssignTeamRequest) => void;
+  /** Lifecycle of the in-flight/last assignment, for inline feedback (CRIS-32). */
+  assignment?: AssignTeamUiState;
+  /** Response teams offered by the assignment picker (CRIS-32). */
+  teams?: readonly TeamOption[];
   /**
    * The signed-in caller's real Cognito role (CRIS-24), used to compute which
    * status-transition buttons to offer — mirroring the server's
@@ -779,7 +792,7 @@ function TransitionControls({
 /**
  * The shell's disabled action affordances, shown when no transition handler is
  * wired (the presentational default). Live actions arrive with the injected
- * `onTransition` (CRIS-18); assignment / merge are CRIS-32.
+ * `onTransition` (CRIS-18) / `onAssignTeam` (CRIS-32); merge remains deferred.
  */
 function DisabledActions() {
   return (
@@ -791,13 +804,103 @@ function DisabledActions() {
             type="button"
             disabled
             className="cursor-not-allowed rounded border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-400"
-            title="Select an incident to enable status actions (CRIS-18); assignment is CRIS-32"
+            title="Select an incident to enable status and assignment actions (CRIS-18/CRIS-32)"
           >
             {action}
           </button>
         ))}
       </div>
-      <p className="text-xs text-slate-400">Assignment and merge actions are built in CRIS-32.</p>
+      <p className="text-xs text-slate-400">Merging duplicate reports is not yet built.</p>
+    </div>
+  );
+}
+
+/**
+ * The CRIS-32 team-assignment controls for the selected incident. Independent
+ * of `TransitionControls`/`DisabledActions` — a report can be assigned a team
+ * regardless of which status actions are currently legal — so it renders
+ * whenever `onAssignTeam` is wired, alongside whichever of those two rendered.
+ */
+function AssignTeamControls({
+  incident,
+  teams,
+  onAssignTeam,
+  assignment,
+}: {
+  incident: CoordinatorIncident;
+  teams: readonly TeamOption[];
+  onAssignTeam: (request: AssignTeamRequest) => void;
+  assignment: AssignTeamUiState;
+}) {
+  const [teamId, setTeamId] = useState(incident.assignedTeamId ?? '');
+  const isSubmitting =
+    assignment.status === 'submitting' && assignment.reportId === incident.reportId;
+  const showError = assignment.status === 'error' && assignment.reportId === incident.reportId;
+  const showSuccess = assignment.status === 'success' && assignment.reportId === incident.reportId;
+  const currentTeamName = teams.find((team) => team.id === incident.assignedTeamId)?.name;
+
+  return (
+    <div className="space-y-2 border-t border-slate-100 pt-3">
+      <DetailLabel>Team assignment</DetailLabel>
+      {incident.assignedTeamId ? (
+        <p className="text-xs text-slate-500">
+          Currently assigned:{' '}
+          <span className="font-medium text-slate-700">
+            {currentTeamName ?? incident.assignedTeamId}
+          </span>
+        </p>
+      ) : (
+        <p className="text-xs text-slate-400">No team assigned yet.</p>
+      )}
+      {teams.length > 0 ? (
+        <div className="flex items-center gap-2">
+          <label className="sr-only" htmlFor="assign-team-select">
+            Team
+          </label>
+          <select
+            id="assign-team-select"
+            value={teamId}
+            onChange={(e) => setTeamId(e.target.value)}
+            className="flex-1 rounded border border-slate-300 px-2 py-1 text-xs text-slate-700 focus:border-sky-400 focus:outline-none"
+          >
+            <option value="">Select a team…</option>
+            {teams.map((team) => (
+              <option key={team.id} value={team.id}>
+                {team.name}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            disabled={!teamId || isSubmitting}
+            onClick={() =>
+              onAssignTeam({
+                reportId: incident.reportId,
+                teamId,
+                expectedVersion: incident.version,
+              })
+            }
+            className="whitespace-nowrap rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Assign
+          </button>
+        </div>
+      ) : (
+        <p className="text-xs text-slate-400">No teams available.</p>
+      )}
+      {isSubmitting ? <p className="text-xs text-slate-500">Assigning…</p> : null}
+      {showSuccess ? (
+        <p className="text-xs text-emerald-600" role="status">
+          Team assigned.
+        </p>
+      ) : null}
+      {showError ? (
+        <p className="text-xs text-red-600" role="alert">
+          {assignment.code === 'CONFLICT'
+            ? 'This report changed since you loaded it. Refresh and try again.'
+            : assignment.message}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -808,7 +911,8 @@ function DisabledActions() {
  * entities, the explainable score breakdown, and the per-incident audit
  * timeline — all PII-free. The CRIS-18 transition controls render below when an
  * `onTransition` handler is wired; otherwise the shell's disabled placeholders
- * do. Assignment / merge actions remain CRIS-32.
+ * do. The CRIS-32 team-assignment controls render independently when
+ * `onAssignTeam` is wired. Merging duplicate reports remains deferred.
  */
 function IncidentDetail({
   incident,
@@ -816,12 +920,18 @@ function IncidentDetail({
   callerRole,
   onTransition,
   transition,
+  onAssignTeam,
+  assignment,
+  teams,
 }: {
   incident: CoordinatorIncident;
   timeline: IncidentTimelineState;
   callerRole: UserRole;
   onTransition?: (request: TransitionRequest) => void;
   transition: TransitionUiState;
+  onAssignTeam?: (request: AssignTeamRequest) => void;
+  assignment: AssignTeamUiState;
+  teams: readonly TeamOption[];
 }) {
   return (
     <div className="space-y-4">
@@ -856,6 +966,15 @@ function IncidentDetail({
       ) : (
         <DisabledActions />
       )}
+
+      {onAssignTeam ? (
+        <AssignTeamControls
+          incident={incident}
+          teams={teams}
+          onAssignTeam={onAssignTeam}
+          assignment={assignment}
+        />
+      ) : null}
     </div>
   );
 }
@@ -915,6 +1034,9 @@ export function CoordinatorDashboard({
   transition = { status: 'idle' },
   onSelectIncident,
   timeline = { status: 'idle' },
+  onAssignTeam,
+  assignment = { status: 'idle' },
+  teams = [],
   callerRole = UserRole.COORDINATOR,
 }: CoordinatorDashboardProps) {
   const counts = feed.status === 'ready' ? countByBand(feed.incidents) : null;
@@ -1088,13 +1210,17 @@ export function CoordinatorDashboard({
               {selectedIncident ? (
                 // The full incident-detail interface (CRIS-23). CRIS-18 status
                 // transitions render within it when `onTransition` is wired;
-                // assignment / merge actions are CRIS-32.
+                // CRIS-32 team assignment renders when `onAssignTeam` is wired.
+                // Merging duplicate reports remains deferred.
                 <IncidentDetail
                   incident={selectedIncident}
                   timeline={timeline}
                   callerRole={callerRole}
                   onTransition={onTransition}
                   transition={transition}
+                  onAssignTeam={onAssignTeam}
+                  assignment={assignment}
+                  teams={teams}
                 />
               ) : (
                 <div className="space-y-3">
@@ -1106,9 +1232,9 @@ export function CoordinatorDashboard({
                     breakdown, extracted entities, and audit timeline here.
                   </p>
                   {/* Placeholder actions until an incident is selected. Live
-                      status transitions (Verify / Reject / Resolve …) render in
-                      the detail panel once a row is selected (CRIS-18);
-                      assignment / merge remain CRIS-32. */}
+                      status transitions (Verify / Reject / Resolve …) and team
+                      assignment render in the detail panel once a row is
+                      selected (CRIS-18/CRIS-32); merge remains deferred. */}
                   <DisabledActions />
                 </div>
               )}

@@ -5,6 +5,7 @@ import { transitionReport as transitionReportFn } from '../functions/transition-
 import { publishReportUpdate as publishReportUpdateFn } from '../functions/publish-report-update/resource';
 import { classifyReport as classifyReportFn } from '../functions/classify-report/resource';
 import { listVolunteerTasks as listVolunteerTasksFn } from '../functions/list-volunteer-tasks/resource';
+import { assignTeam as assignTeamFn } from '../functions/assign-team/resource';
 
 /**
  * GraphQL data model (AppSync + DynamoDB) — design doc §5.1, §5.2, §5.3.
@@ -24,6 +25,7 @@ import { listVolunteerTasks as listVolunteerTasksFn } from '../functions/list-vo
  * Custom API status:
  *   - `submitReport` implements the guarded, idempotent create path (CRIS-9).
  *   - `updateReportStatus` implements the guarded transition engine (CRIS-18).
+ *   - `assignTeam` implements the guarded team-assignment engine (CRIS-32).
  *   - `listVolunteerTasks` returns the server-redacted task projection
  *     (CRIS-33, ADR-0042).
  *   - `publishReportUpdate` is the internal fan-out mutation the triage worker
@@ -488,6 +490,27 @@ const schema = a
       .returns(a.ref('Report'))
       .handler(a.handler.function(transitionReportFn))
       .authorization((allow) => [allow.groups(['RESPONDER', 'COORDINATOR', 'ADMIN'])]),
+
+    /**
+     * CRIS-32 — the guarded team-assignment engine. Sets `Report.assignedTeamId`
+     * with an `expectedVersion` optimistic lock, creates a new `Assignment`
+     * record, and appends an `ASSIGNED` audit event (§5.1). A stale version
+     * returns a `CONFLICT` error, mirroring `updateReportStatus` (§5.3).
+     * COORDINATOR/ADMIN-only: unlike a status transition, there is no
+     * per-actor authority matrix for assignment, so the group gate here is the
+     * whole check (no fine-grained rule enforced in the resolver).
+     */
+    assignTeam: a
+      .mutation()
+      .arguments({
+        reportId: a.id().required(),
+        teamId: a.id().required(),
+        expectedVersion: a.integer().required(),
+        note: a.string(),
+      })
+      .returns(a.ref('Report'))
+      .handler(a.handler.function(assignTeamFn))
+      .authorization((allow) => [allow.groups(['COORDINATOR', 'ADMIN'])]),
 
     /* ---------------------------------------------------------------------- */
     /* Volunteer task projection (CRIS-33, ADR-0042)                           */

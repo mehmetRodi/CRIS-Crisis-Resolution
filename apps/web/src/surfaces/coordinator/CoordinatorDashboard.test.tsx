@@ -27,6 +27,7 @@ function incident(overrides: Partial<CoordinatorIncident> = {}): CoordinatorInci
     scoreVersion: null,
     scoreBreakdown: null,
     entities: null,
+    assignedTeamId: null,
     ...overrides,
   };
 }
@@ -261,6 +262,80 @@ describe('CoordinatorDashboard status transitions (CRIS-18)', () => {
     // Without onTransition the detail panel shows the read-only detail plus the
     // disabled action placeholders (live transitions arrive with onTransition).
     expect(screen.getByRole('button', { name: 'Verify' })).toBeDisabled();
+  });
+});
+
+describe('CoordinatorDashboard team assignment (CRIS-32)', () => {
+  const teams = [
+    { id: 'team-1', name: 'Alpha Rescue' },
+    { id: 'team-2', name: 'Bravo Medical' },
+  ];
+  const readyFeed: IncidentFeedState = {
+    status: 'ready',
+    incidents: [incident({ reportId: 'report-abc', status: 'VERIFIED', version: 3 })],
+  };
+
+  it('renders the team picker from the injected teams and assigns the selected one', () => {
+    const onAssignTeam = vi.fn();
+    render(
+      <CoordinatorDashboard
+        onExit={() => {}}
+        feed={readyFeed}
+        onAssignTeam={onAssignTeam}
+        teams={teams}
+      />,
+    );
+    fireEvent.click(screen.getByText(/report-a/));
+    const detail = screen.getByRole('region', { name: /incident detail/i });
+    fireEvent.change(within(detail).getByLabelText(/team/i), { target: { value: 'team-2' } });
+    fireEvent.click(within(detail).getByRole('button', { name: 'Assign' }));
+    expect(onAssignTeam).toHaveBeenCalledWith({
+      reportId: 'report-abc',
+      teamId: 'team-2',
+      expectedVersion: 3,
+    });
+  });
+
+  it('shows the currently assigned team by name', () => {
+    const feed: IncidentFeedState = {
+      status: 'ready',
+      incidents: [
+        incident({ reportId: 'report-abc', status: 'VERIFIED', assignedTeamId: 'team-1' }),
+      ],
+    };
+    render(
+      <CoordinatorDashboard onExit={() => {}} feed={feed} onAssignTeam={() => {}} teams={teams} />,
+    );
+    fireEvent.click(screen.getByText(/report-a/));
+    const detail = screen.getByRole('region', { name: /incident detail/i });
+    expect(within(detail).getByText(/currently assigned/i)).toHaveTextContent('Alpha Rescue');
+  });
+
+  it('surfaces a CONFLICT with a refresh hint', () => {
+    render(
+      <CoordinatorDashboard
+        onExit={() => {}}
+        feed={readyFeed}
+        onAssignTeam={() => {}}
+        teams={teams}
+        assignment={{
+          status: 'error',
+          reportId: 'report-abc',
+          teamId: 'team-1',
+          code: 'CONFLICT',
+          message: 'refetch and retry.',
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByText(/report-a/));
+    expect(screen.getByRole('alert')).toHaveTextContent(/refresh and try again/i);
+  });
+
+  it('renders no assignment controls when onAssignTeam is not wired', () => {
+    render(<CoordinatorDashboard onExit={() => {}} feed={readyFeed} />);
+    fireEvent.click(screen.getByText(/report-a/));
+    const detail = screen.getByRole('region', { name: /incident detail/i });
+    expect(within(detail).queryByText(/team assignment/i)).not.toBeInTheDocument();
   });
 });
 
