@@ -64,3 +64,4 @@ behind the code — essential when refactoring or extending the system.
 | [0046](0046-api-integration-test-strategy.md)                        | API integration tests: mocked adapter + live sandbox (CRIS-29)      | Accepted                         |
 | [0047](0047-deterministic-priority-scoring-v2.md)                    | Deterministic priority scoring v2 (CRIS-30)                         | Accepted                         |
 | [0048](0048-authenticated-subscriptions.md)                          | Authenticated subscriptions + snapshot reconciliation               | Accepted                         |
+| [0049](0049-proximity-alert-pipeline.md)                             | Proximity-alert pipeline (CRIS-34)                                   | Accepted                         |

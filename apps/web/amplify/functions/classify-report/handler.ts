@@ -5,6 +5,7 @@ import {
   scoreReport,
   shouldEscalateToVerification,
   toPublicReport,
+  type AlertCandidate,
   type PublicReport,
 } from '@crisismap/shared';
 import { createBedrockClassifier } from './bedrock';
@@ -12,6 +13,7 @@ import { createBedrockTriageAgent, createTriageAgent, type TriageAgent } from '.
 import { createAmazonLocationGeocoder, createNullGeocoder, type Geocoder } from './geocode';
 import { createDynamoStore, type ReportStore } from './store';
 import { resolveDuplicates, type DedupeInput, type DedupeResult } from './dedupe';
+import { createSqsAlertQueueClient, shouldAlert } from './alert-enqueue';
 import type { Publisher } from '../publish-report-update/client';
 
 /**
@@ -60,6 +62,12 @@ export interface WorkerDeps {
    * behaviour — only in wiring, so production can never forget to enable it.
    */
   dedupe?: (input: DedupeInput) => Promise<DedupeResult>;
+  /**
+   * Enqueues a threshold-crossing candidate onto the proximity-alert queue
+   * (§2.7, CRIS-34). Wired to the real SQS client in `buildDeps`; overridden
+   * with a fake in tests.
+   */
+  alertEnqueuer: (candidate: AlertCandidate) => Promise<void>;
   /** Event-time clock. Injected so age-based scoring and tests are deterministic. */
   now?: () => Date;
 }
@@ -140,6 +148,29 @@ async function groupDuplicates(
       suggested: [],
       strongDuplicateReports: 0,
     };
+  }
+}
+
+/**
+ * Enqueues a threshold-crossing candidate for the alert-dispatch worker
+ * (§2.7, CRIS-34) — best-effort, for the same reason as {@link publishUpdate}:
+ * the classification is already durable, and a queue-send failure must not
+ * re-drive the SQS message and reclassify an already-classified report.
+ */
+async function enqueueAlert(
+  deps: WorkerDeps,
+  candidate: AlertCandidate,
+  log: (entry: Record<string, unknown>) => void,
+): Promise<void> {
+  try {
+    await deps.alertEnqueuer(candidate);
+    log({ event: 'alert.enqueue.done', reportId: candidate.reportId, band: candidate.priorityBand });
+  } catch (err) {
+    log({
+      event: 'alert.enqueue.failed',
+      reportId: candidate.reportId,
+      reason: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
@@ -327,6 +358,25 @@ export async function processRecord(
     }
   }
 
+  // Proximity alerts (§2.7, CRIS-34): only a human-confirmed, P0/P1
+  // classification enqueues one — never NEEDS_VERIFICATION. Best-effort, like
+  // every other post-write step here.
+  if (shouldAlert(status, effectiveScoring.priorityBand)) {
+    await enqueueAlert(
+      deps,
+      {
+        reportId,
+        category: classification.category,
+        urgency: classification.urgency,
+        priorityBand: effectiveScoring.priorityBand,
+        regionId: report.regionId ?? null,
+        lat: location?.lat ?? null,
+        lng: location?.lng ?? null,
+      },
+      log,
+    );
+  }
+
   // Fan the redacted result out to subscribers (§5.3, CRIS-19). The durable
   // write above already committed, so this is best-effort. The custom
   // subscriptions that consume `publishReportUpdate` are enabled in CRIS-28.
@@ -390,6 +440,8 @@ async function buildDeps(): Promise<WorkerDeps> {
     }),
     // Worker IAM fan-out to `publishReportUpdate` (CRIS-19, ADR-0009/0029/0030).
     publisher: createAppSyncPublisher(),
+    // Proximity-alert queue send (§2.7, CRIS-34) — consumed by `alert-dispatch`.
+    alertEnqueuer: createSqsAlertQueueClient(env('ALERT_QUEUE_URL')).send,
   };
 }
 

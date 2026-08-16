@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { encodeGeohash, geohashPrefix, GEOHASH_PREFIX_PRECISION } from './geohash';
+import { decodeGeohash, encodeGeohash, geohashPrefix, GEOHASH_PREFIX_PRECISION } from './geohash';
+import { distanceMeters } from './duplicate';
 import { GEOHASH_PRECISION } from './domain';
 
 describe('encodeGeohash', () => {
@@ -50,5 +51,29 @@ describe('geohashPrefix', () => {
 
   it('throws when the geohash is shorter than the requested prefix', () => {
     expect(() => geohashPrefix('u4p')).toThrow(RangeError);
+  });
+});
+
+describe('decodeGeohash', () => {
+  it('recovers a point close to the original coordinate', () => {
+    const hash = encodeGeohash(57.64911, 10.40744, 11); // "u4pruydqqvj"
+    const point = decodeGeohash(hash);
+    expect(point.lat).toBeCloseTo(57.64911, 3);
+    expect(point.lng).toBeCloseTo(10.40744, 3);
+  });
+
+  it('round-trips through encode at the default report precision', () => {
+    const original = { lat: 41.0082, lng: 28.9784 }; // Istanbul
+    const hash = encodeGeohash(original.lat, original.lng);
+    const decoded = decodeGeohash(hash);
+    // Precision-7 cells are ~153m — well within a fraction of a degree.
+    expect(distanceMeters(original.lat, original.lng, decoded.lat, decoded.lng)).toBeLessThan(
+      200,
+    );
+  });
+
+  it('rejects an invalid geohash character', () => {
+    expect(() => decodeGeohash('u4prb')).not.toThrow();
+    expect(() => decodeGeohash('u4pri')).toThrow(RangeError); // 'i' is not in the alphabet
   });
 });

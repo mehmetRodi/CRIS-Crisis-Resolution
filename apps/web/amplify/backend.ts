@@ -16,6 +16,7 @@ import { publishReportUpdate } from './functions/publish-report-update/resource'
 import { classifyReport } from './functions/classify-report/resource';
 import { createMediaUploadUrl } from './functions/create-media-upload-url/resource';
 import { listVolunteerTasks } from './functions/list-volunteer-tasks/resource';
+import { alertDispatch } from './functions/alert-dispatch/resource';
 import { createDataKey } from './security/encryption';
 import { addObservability } from './observability';
 
@@ -42,8 +43,12 @@ import { addObservability } from './observability';
  * form a nested-stack cycle unless the worker lives in the data stack. So
  * `classify-report` is pinned to the `data` group (`resourceGroupName: 'data'`,
  * ADR-0031); every edge here is then intra-`data`-stack. CRIS-28's custom
- * subscriptions and both publisher grants live in the data schema; SNS
- * proximity alerts remain a deferred seam.
+ * subscriptions and both publisher grants live in the data schema.
+ * `classify-report` also enqueues P0/P1 `AI_CLASSIFIED` reports onto a second
+ * queue for `alert-dispatch` (§2.7, CRIS-34), which matches them against
+ * `AlertSubscription`s and delivers SMS (SNS)/email (SES) — PUSH is
+ * declarable but not yet delivered, pending mobile device-token
+ * infrastructure that doesn't exist yet.
  *
  * Run `npx ampx sandbox` from `apps/web` (with AWS credentials + Bedrock model
  * access) to stand up a personal dev environment. Source control does not
@@ -61,6 +66,7 @@ const backend = defineBackend({
   classifyReport,
   createMediaUploadUrl,
   listVolunteerTasks,
+  alertDispatch,
 });
 
 /* -------------------------------------------------------------------------- */
@@ -436,6 +442,99 @@ backend.classifyReport.addEnvironment(
 );
 
 /* -------------------------------------------------------------------------- */
+/* alert-dispatch pipeline (CRIS-34) — SQS queue → alert-dispatch Lambda       */
+/* -------------------------------------------------------------------------- */
+
+const alertDispatchFn = backend.alertDispatch.resources.lambda;
+
+// Same encrypted-queue-plus-DLQ shape as the classification pipeline above.
+// Co-located in the same `pipelineStack`: both `classify-report` and
+// `alert-dispatch` are pinned to `resourceGroupName: 'data'`, so this is
+// intra-stack either way (same reasoning as the pipeline-resources comment
+// above).
+const alertDlq = new Queue(pipelineStack, 'AlertDlq', {
+  retentionPeriod: Duration.days(14),
+  encryptionMasterKey: dataKey,
+});
+const alertQueue = new Queue(pipelineStack, 'AlertQueue', {
+  // visibilityTimeout must be ≥ the Lambda timeout; 6× (180s) absorbs
+  // retries, matching the classification queue's margin.
+  visibilityTimeout: Duration.seconds(180),
+  deadLetterQueue: { queue: alertDlq, maxReceiveCount: 3 },
+  encryptionMasterKey: dataKey,
+});
+
+// classify-report enqueues threshold-crossing candidates (§2.7, CRIS-34) as a
+// best-effort step after its durable classification write (handler.ts).
+alertQueue.grantSendMessages(worker);
+backend.classifyReport.addEnvironment('ALERT_QUEUE_URL', alertQueue.queueUrl);
+
+alertDispatchFn.addEventSource(
+  new SqsEventSource(alertQueue, {
+    batchSize: 5,
+    reportBatchItemFailures: true, // pairs with the handler's SQSBatchResponse
+  }),
+);
+alertQueue.grantConsumeMessages(alertDispatchFn);
+
+tables['AlertSubscription'].grantReadData(alertDispatchFn);
+tables['AlertDelivery'].grantReadWriteData(alertDispatchFn);
+
+// SMS: SNS `Publish` to a phone number has no ARN to scope to — the same
+// class of grant as `geo-places:Geocode` above. Email: the SES FROM identity
+// is verified outside CDK (an account-level, DNS-based setup step, like
+// enabling Bedrock model access) — there is likewise no identity resource
+// this stack manages to scope an ARN to.
+alertDispatchFn.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['sns:Publish'],
+    resources: ['*'],
+  }),
+);
+alertDispatchFn.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['ses:SendEmail', 'ses:SendRawEmail'],
+    resources: ['*'],
+  }),
+);
+
+// Recipient contact info is read from Cognito at dispatch time — §2.7's
+// `AlertSubscription` only carries `userId`, deliberately not a denormalized
+// (and staleness-prone) copy of contact info. Reuses the exact
+// account/region-wildcard-userpool ARN already built for
+// `citizenRoleAssignment` above.
+alertDispatchFn.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['cognito-idp:AdminGetUser'],
+    resources: [cognitoPoolsInDeploymentScope],
+  }),
+);
+
+backend.alertDispatch.addEnvironment(
+  'ALERT_SUBSCRIPTION_TABLE_NAME',
+  tables['AlertSubscription'].tableName,
+);
+backend.alertDispatch.addEnvironment(
+  'ALERT_DELIVERY_TABLE_NAME',
+  tables['AlertDelivery'].tableName,
+);
+// Physical name of the AlertSubscription.regionId GSI — same derivation
+// caveat as REPORT_GEO_INDEX_NAME above: best-effort from the transformer's
+// naming rule, not verified against a deployed schema (ADR-0011).
+backend.alertDispatch.addEnvironment(
+  'ALERT_SUBSCRIPTION_REGION_INDEX_NAME',
+  'alertSubscriptionsByRegionId',
+);
+backend.alertDispatch.addEnvironment('USER_POOL_ID', backend.auth.resources.userPool.userPoolId);
+// A real SES-verified sender identity is required for the email channel to
+// actually deliver — that verification is an account-level, DNS-based step
+// this stack doesn't manage, so this only supplies the address to send from.
+backend.alertDispatch.addEnvironment(
+  'ALERT_FROM_EMAIL',
+  process.env.ALERT_FROM_EMAIL ?? 'alerts@crisismap.example',
+);
+
+/* -------------------------------------------------------------------------- */
 /* Observability (CRIS-15, ADR-0015) — X-Ray tracing + CloudWatch alarms       */
 /* -------------------------------------------------------------------------- */
 
@@ -449,6 +548,7 @@ const tracedFunctions = [
   backend.publishReportUpdate,
   backend.classifyReport,
   backend.createMediaUploadUrl,
+  backend.alertDispatch,
 ];
 for (const fn of tracedFunctions) {
   fn.resources.cfnResources.cfnFunction.tracingConfig = { mode: 'Active' };

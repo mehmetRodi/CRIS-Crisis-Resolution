@@ -95,3 +95,47 @@ export function geohashPrefix(geohash: string, length = GEOHASH_PREFIX_PRECISION
   }
   return geohash.slice(0, length);
 }
+
+/** A WGS84 point, as decoded from a geohash. */
+export interface GeoPoint {
+  lat: number;
+  lng: number;
+}
+
+/**
+ * Decode a geohash back to its cell's center point — the inverse of
+ * {@link encodeGeohash}, replaying the same even-bit-splits-longitude,
+ * odd-bit-splits-latitude bisection. Used by the proximity-alert matcher
+ * (CRIS-34) to recover an `AlertSubscription.centerGeohash` as a point for an
+ * exact distance check (`distanceMeters`, `./duplicate.ts`). Throws on an
+ * unrecognized character (a corrupt geohash must never silently resolve to
+ * the wrong place).
+ */
+export function decodeGeohash(hash: string): GeoPoint {
+  let latMin = -90;
+  let latMax = 90;
+  let lngMin = -180;
+  let lngMax = 180;
+  let even = true;
+
+  for (const char of hash) {
+    const idx = BASE32.indexOf(char);
+    if (idx === -1) throw new RangeError(`invalid geohash character: "${char}"`);
+    for (let bitpos = 4; bitpos >= 0; bitpos--) {
+      const bit = (idx >> bitpos) & 1;
+      if (even) {
+        const mid = (lngMin + lngMax) / 2;
+        if (bit === 1) lngMin = mid;
+        else lngMax = mid;
+      } else {
+        const mid = (latMin + latMax) / 2;
+        if (bit === 1) latMin = mid;
+        else latMax = mid;
+      }
+      even = !even;
+    }
+  }
+
+  return { lat: (latMin + latMax) / 2, lng: (lngMin + lngMax) / 2 };
+}
+
