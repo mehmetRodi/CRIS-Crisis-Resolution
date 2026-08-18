@@ -9,12 +9,12 @@ for exact generated CRUD input and selection-set types.
 
 The default authorization mode is Cognito User Pools. Custom operations use these modes:
 
-| Mode                                 | Callers                                             | Notes                                                                                                                                    |
-| ------------------------------------ | --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| Cognito User Pool                    | Signed-in users with the operation's required group | The default mode for staff operations.                                                                                                   |
-| Cognito Identity Pool, authenticated | Signed-in web/mobile reporting clients              | Clients explicitly pass `authMode: 'identityPool'` for submission and media upload.                                                      |
-| Cognito Identity Pool, guest         | Anonymous reporting clients                         | Allowed only on submission and media upload.                                                                                             |
-| IAM resource access                  | `classify-report` worker                            | Used for the worker's `publishReportUpdate` call. The schema-level grant covers mutation operations, not arbitrary external IAM callers. |
+| Mode                                 | Callers                                             | Notes                                                                                                                                                                               |
+| ------------------------------------ | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cognito User Pool                    | Signed-in users with the operation's required group | The default mode for staff operations.                                                                                                                                              |
+| Cognito Identity Pool, authenticated | Signed-in web/mobile reporting clients              | Clients explicitly pass `authMode: 'identityPool'` for submission and media upload.                                                                                                 |
+| Cognito Identity Pool, guest         | Anonymous reporting clients                         | Allowed only on submission and media upload.                                                                                                                                        |
+| IAM resource access                  | Direct report-writer Lambdas                        | Used by `classify-report`, `transition-report`, and `assign-team` for `publishReportUpdate`. The schema-level grant covers mutation operations, not arbitrary external IAM callers. |
 
 Authorization failures rejected by AppSync before Lambda invocation use AppSync's standard
 `Unauthorized` error rather than an application error prefix.
@@ -95,6 +95,27 @@ application groups, the resolver uses the highest-ranked role.
 | `FORBIDDEN:`          | The caller's effective role cannot perform the legal edge. | Escalate or choose an allowed action.              |
 | `CONFLICT:`           | The read version or conditional write is stale.            | Refetch, reassess, and retry with the new version. |
 
+### `assignTeam` mutation
+
+Assigns the first active response team to a report with optimistic locking, creating the
+`Assignment` row and `ASSIGNED` audit event in the same transaction.
+
+**Authorization:** `COORDINATOR` or `ADMIN` Cognito group.
+
+| Argument          | Type     | Required | Contract                                             |
+| ----------------- | -------- | -------- | ---------------------------------------------------- |
+| `reportId`        | `ID`     | yes      | Existing, non-terminal, currently unassigned report. |
+| `teamId`          | `ID`     | yes      | Existing team id.                                    |
+| `expectedVersion` | `Int`    | yes      | Version last read by the caller.                     |
+| `note`            | `String` | no       | Trimmed and stored in the audit-event detail.        |
+
+**Returns:** the updated `Report`; `assignedTeamId` is set, `version` is incremented, and
+`updatedAt` is advanced. A redacted live-update signal is published best-effort after commit.
+
+**Stable error prefixes:** `NOT_FOUND:` for a missing report/team, `ILLEGAL:` for a terminal or
+already-assigned report, and `CONFLICT:` for a stale version or concurrent write. Reassignment is
+deferred until the previous assignment lifecycle can be retired atomically.
+
 ### `listVolunteerTasks` query
 
 Returns the read-only volunteer board projection by joining a bounded working set of reports,
@@ -118,9 +139,10 @@ does not paginate; this is an explicit MVP bound.
 Echoes a redacted `PublicReport` projection through AppSync so subscriptions can fan it out. It
 does not persist data and publish failure never rolls back the worker's durable write.
 
-**Authorization:** the intended caller is the `classify-report` worker using its schema-level IAM
-resource grant. `ADMIN` User Pool access also exists because Amplify Gen 2 requires a per-operation
-authorization rule on every Lambda-backed custom operation; clients should not use that door.
+**Authorization:** the intended callers are the trusted direct report-writer Lambdas using their
+schema-level IAM resource grants. `ADMIN` User Pool access also exists because Amplify Gen 2
+requires a per-operation authorization rule on every Lambda-backed custom operation; clients
+should not use that door.
 
 **Arguments:** `reportId` and `status` are required. Optional public fields are `category`,
 `urgency`, `priorityScore`, `priorityBand`, `summary`, `lat`, `lng`, `geohash`, `geohashPrefix`,
@@ -129,8 +151,8 @@ authorization rule on every Lambda-backed custom operation; clients should not u
 **Returns:** `PublicReport`, containing exactly those public fields. Omitted optional values are
 normalized to null. The type has no wire representation for PII or raw report text.
 
-Custom subscriptions consuming this mutation are disabled pending CRIS-28, so the mutation
-currently has no subscribers.
+Three authenticated custom subscriptions consume this mutation: unfiltered, by region, and by
+status.
 
 ## Generated model operations
 

@@ -6,8 +6,9 @@
  * performs the conditional write. Unlike a status transition, assignment has
  * no per-actor authority matrix — the `assignTeam` mutation is COORDINATOR/
  * ADMIN-only at the schema level (`data/resource.ts`), so there is no
- * `FORBIDDEN` case to compute here. The only report-side guard is that a
- * terminal (REJECTED) report cannot be assigned a team.
+ * `FORBIDDEN` case to compute here. Report-side guards reject terminal reports
+ * and prevent a second active assignment until reassignment lifecycle semantics
+ * are implemented.
  */
 import {
   isTerminalStatus,
@@ -22,6 +23,7 @@ export interface CurrentReport {
   id: string;
   status: ReportStatusT;
   version: number;
+  assignedTeamId: string | null;
 }
 
 /** A requested assignment. `expectedVersion` drives the optimistic lock (§5.3). */
@@ -89,6 +91,14 @@ export class AssignmentIllegalError extends Error {
   }
 }
 
+/** Reassignment requires retiring the existing assignment lifecycle first. */
+export class AlreadyAssignedError extends Error {
+  constructor(teamId: string) {
+    super(`Report is already assigned to team ${teamId}.`);
+    this.name = 'AlreadyAssignedError';
+  }
+}
+
 /** `expectedVersion` did not match the current report version (§5.3 CONFLICT). */
 export class VersionConflictError extends Error {
   constructor(expected: number, actual: number) {
@@ -109,6 +119,9 @@ export function buildAssignmentPlan(
 ): AssignmentPlan {
   if (isTerminalStatus(current.status)) {
     throw new AssignmentIllegalError(current.status);
+  }
+  if (current.assignedTeamId) {
+    throw new AlreadyAssignedError(current.assignedTeamId);
   }
   if (command.expectedVersion !== current.version) {
     throw new VersionConflictError(command.expectedVersion, current.version);

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ReportEventType, ReportStatus, UserRole } from '@crisismap/shared';
 import {
+  AlreadyAssignedError,
   AssignmentIllegalError,
   buildAssignmentPlan,
   VersionConflictError,
@@ -19,6 +20,7 @@ const current: CurrentReport = {
   id: '01J000000000000000000RPT',
   status: ReportStatus.VERIFIED,
   version: 3,
+  assignedTeamId: null,
 };
 
 function cmd(overrides: Partial<AssignCommand> = {}): AssignCommand {
@@ -60,6 +62,12 @@ describe('buildAssignmentPlan', () => {
   it('rejects assigning a team to a terminal (REJECTED) report', () => {
     const rejected: CurrentReport = { ...current, status: ReportStatus.REJECTED };
     expect(() => buildAssignmentPlan(rejected, cmd(), ctx)).toThrow(AssignmentIllegalError);
+  });
+
+  it('rejects a second active assignment', () => {
+    expect(() =>
+      buildAssignmentPlan({ ...current, assignedTeamId: 'existing-team' }, cmd(), ctx),
+    ).toThrow(AlreadyAssignedError);
   });
 
   it('enforces the optimistic lock (CONFLICT on stale version)', () => {

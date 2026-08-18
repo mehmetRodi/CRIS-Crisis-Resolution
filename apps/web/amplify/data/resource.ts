@@ -32,8 +32,8 @@ import { assignTeam as assignTeamFn } from '../functions/assign-team/resource';
  *     calls over IAM after its durable write; it also carries an `ADMIN` group
  *     gate so it satisfies Amplify's per-operation auth requirement (CRIS-19,
  *     ADR-0009/0029/0030). CRIS-28's authenticated custom subscriptions consume
- *     this mutation; both the triage worker and transition resolver publish
- *     after their durable writes (ADR-0048).
+ *     this mutation; the triage worker, transition resolver, and assignment
+ *     resolver publish after their durable writes (ADR-0048/0049).
  *
  * ENUM SYNC: `a.enum()` requires literal arrays, so the members below are
  * duplicated from `@crisismap/shared` (the source of truth). When you change an
@@ -656,11 +656,11 @@ const schema = a
    * Schema-level function access (CRIS-19, ADR-0029). `allow.resource` can ONLY
    * be declared here, not on an individual model or operation — Amplify grants a
    * function access to the API surface, then scopes it by operation *type*. We
-   * grant both direct DynamoDB writers `mutate` so they can call the internal
-   * `publishReportUpdate` after their durable writes: the classify worker and
-   * the human transition resolver (CRIS-28, ADR-0048).
+   * grant all direct DynamoDB report writers `mutate` so they can call the
+   * internal `publishReportUpdate` after their durable writes: the classify
+   * worker, human transition resolver, and assignment resolver.
    *
-   * Consequence to accept: these are API-wide `mutate` grants, so either trusted
+   * Consequence to accept: these are API-wide `mutate` grants, so any trusted
    * function role could technically call other mutations over IAM — Amplify
    * offers no field-scoped function grant. Production code calls only
    * `publishReportUpdate`, and guarded model mutations retain their own checks.
@@ -669,12 +669,13 @@ const schema = a
    * All models and custom operations — including `publishReportUpdate`, which
    * declares its own `allow.groups(['ADMIN'])` rule (ADR-0030) — carry their own
    * per-op rules, so this schema-level rule is NOT a client-facing default. It
-   * only attaches function IAM `mutate` access to the API surface; both direct
+   * only attaches function IAM `mutate` access to the API surface; direct
    * writers call `publishReportUpdate` with `authMode: 'iam'` on that grant.
    */
   .authorization((allow) => [
     allow.resource(classifyReportFn).to(['mutate']),
     allow.resource(transitionReportFn).to(['mutate']),
+    allow.resource(assignTeamFn).to(['mutate']),
   ]);
 
 export type Schema = ClientSchema<typeof schema>;

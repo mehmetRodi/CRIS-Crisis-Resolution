@@ -10,7 +10,8 @@ import { defineFunction } from '@aws-amplify/backend';
 export const assignTeam = defineFunction({
   name: 'assign-team',
   entry: './handler.ts',
-  timeoutSeconds: 10,
+  // Includes headroom for the post-commit AppSync publish client initialization.
+  timeoutSeconds: 20,
   memoryMB: 256,
   // Data resolver + table grants in backend.ts → assign to the data stack to
   // avoid a nested-stack circular dependency (Amplify Gen 2 prescribed fix).

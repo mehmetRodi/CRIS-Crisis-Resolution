@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import {
   AFFECTED_PEOPLE_MAX_POINTS,
   canActorTransition,
@@ -857,6 +857,9 @@ function AssignTeamControls({
   assignment: AssignTeamUiState;
 }) {
   const [teamId, setTeamId] = useState(incident.assignedTeamId ?? '');
+  useEffect(() => {
+    setTeamId(incident.assignedTeamId ?? '');
+  }, [incident.reportId, incident.assignedTeamId]);
   const isSubmitting =
     assignment.status === 'submitting' && assignment.reportId === incident.reportId;
   const showError = assignment.status === 'error' && assignment.reportId === incident.reportId;
@@ -876,7 +879,7 @@ function AssignTeamControls({
       ) : (
         <p className="text-xs text-slate-400">No team assigned yet.</p>
       )}
-      {teams.length > 0 ? (
+      {!incident.assignedTeamId && teams.length > 0 ? (
         <div className="flex items-center gap-2">
           <label className="sr-only" htmlFor="assign-team-select">
             Team
@@ -909,9 +912,9 @@ function AssignTeamControls({
             Assign
           </button>
         </div>
-      ) : (
+      ) : !incident.assignedTeamId ? (
         <p className="text-xs text-slate-400">No teams available.</p>
-      )}
+      ) : null}
       {isSubmitting ? <p className="text-xs text-slate-500">Assigning…</p> : null}
       {showSuccess ? (
         <p className="text-xs text-emerald-600" role="status">

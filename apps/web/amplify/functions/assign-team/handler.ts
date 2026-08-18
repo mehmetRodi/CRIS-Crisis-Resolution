@@ -3,10 +3,12 @@
  *
  * Mirrors `transition-report/handler.ts`: loads the report (and the team, to
  * reject a bogus/deleted `teamId` up front), validates the assignment
- * (legality + optimistic lock) via the pure `core.ts`, then atomically applies
+ * (legality + single-active guard + optimistic lock) via the pure `core.ts`,
+ * then atomically applies
  * the version-checked `Report.assignedTeamId` update, creates a new
  * `Assignment` record, and appends the immutable `ASSIGNED` audit event. A
  * stale `expectedVersion` surfaces as a machine-readable `CONFLICT` (§5.3).
+ * After commit it publishes a redacted invalidation event for CRIS-28 clients.
  *
  * The mutation itself is COORDINATOR/ADMIN-only at the schema level
  * (`data/resource.ts`), so unlike `updateReportStatus` there is no per-actor
@@ -19,11 +21,13 @@ import { DynamoDBDocumentClient, GetCommand, TransactWriteCommand } from '@aws-s
 import { ulid } from 'ulid';
 import { highestRole, type ReportStatus, type TransitionActor } from '@crisismap/shared';
 import {
+  AlreadyAssignedError,
   AssignmentIllegalError,
   buildAssignmentPlan,
   VersionConflictError,
   type CurrentReport,
 } from './core';
+import { publishAssignmentUpdate } from './publish';
 
 const REPORT_TABLE = requireEnv('REPORT_TABLE_NAME');
 const ASSIGNMENT_TABLE = requireEnv('ASSIGNMENT_TABLE_NAME');
@@ -67,6 +71,7 @@ export const handler: AppSyncResolverHandler<AssignTeamArgs, Record<string, unkn
     id: existingReport.Item.id as string,
     status: existingReport.Item.status as ReportStatus,
     version: existingReport.Item.version as number,
+    assignedTeamId: (existingReport.Item.assignedTeamId as string | undefined) ?? null,
   };
 
   let plan;
@@ -135,19 +140,27 @@ export const handler: AppSyncResolverHandler<AssignTeamArgs, Record<string, unkn
     throw err;
   }
 
-  return {
+  const updated = {
     ...existingReport.Item,
     assignedTeamId: plan.update.teamId,
     version: plan.update.nextVersion,
     updatedAt: plan.update.updatedAt,
   };
+
+  await publishAssignmentUpdate({
+    ...updated,
+    id: current.id,
+    status: current.status,
+  });
+
+  return updated;
 };
 
 function mapDomainError(err: unknown): Error {
   if (err instanceof VersionConflictError) {
     return new Error('CONFLICT: report was modified concurrently; refetch and retry.');
   }
-  if (err instanceof AssignmentIllegalError) {
+  if (err instanceof AssignmentIllegalError || err instanceof AlreadyAssignedError) {
     return new Error(`ILLEGAL: ${err.message}`);
   }
   return err instanceof Error ? err : new Error(String(err));

@@ -345,6 +345,33 @@ describe('CoordinatorDashboard team assignment (CRIS-32)', () => {
     fireEvent.click(screen.getByText(/report-a/));
     const detail = screen.getByRole('region', { name: /incident detail/i });
     expect(within(detail).getByText(/currently assigned/i)).toHaveTextContent('Alpha Rescue');
+    expect(within(detail).queryByRole('button', { name: 'Assign' })).not.toBeInTheDocument();
+  });
+
+  it('resets an unsubmitted team selection when another incident is opened', () => {
+    const onAssignTeam = vi.fn();
+    const feed: IncidentFeedState = {
+      status: 'ready',
+      incidents: [
+        incident({ reportId: 'report-alpha' }),
+        incident({ reportId: 'report-bravo', summary: 'second incident' }),
+      ],
+    };
+    render(
+      <CoordinatorDashboard
+        onExit={() => {}}
+        feed={feed}
+        onAssignTeam={onAssignTeam}
+        teams={teams}
+      />,
+    );
+
+    fireEvent.click(screen.getByText(/report-a/));
+    fireEvent.change(screen.getByLabelText(/team/i), { target: { value: 'team-2' } });
+    fireEvent.click(screen.getByText(/report-b/));
+
+    expect(screen.getByLabelText(/team/i)).toHaveValue('');
+    expect(screen.getByRole('button', { name: 'Assign' })).toBeDisabled();
   });
 
   it('surfaces a CONFLICT with a refresh hint', () => {

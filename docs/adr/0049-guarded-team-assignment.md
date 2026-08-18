@@ -49,10 +49,10 @@ scope: the queue has no multi-select today. Both remain deferred to a future tic
 1. **`assignTeam` custom mutation** (`data/resource.ts`), COORDINATOR/ADMIN-only, taking
    `reportId`, `teamId`, `expectedVersion`, and an optional `note`, returning the updated
    `Report`.
-2. **`buildAssignmentPlan`** (`amplify/functions/assign-team/core.ts`) validates two things
-   only: the report is not in a terminal status (`isTerminalStatus`, reused from
-   `@crisismap/shared` — a REJECTED report cannot be assigned a team), and `expectedVersion`
-   matches the report's current `version` (the same optimistic lock as CRIS-18, §5.3). It
+2. **`buildAssignmentPlan`** (`amplify/functions/assign-team/core.ts`) validates that the report
+   is not terminal (`isTerminalStatus`), has no existing active assignment, and that
+   `expectedVersion` matches the report's current `version` (the same optimistic lock as
+   CRIS-18, §5.3). It
    returns a plan covering all three writes: the `Report.assignedTeamId` update, a new
    `Assignment` record (`status: 'ASSIGNED'`), and a `ReportEvent` (`type: 'ASSIGNED'`).
 3. **`handler.ts`** loads the report AND the team (rejecting a bogus/deleted `teamId` as
@@ -60,9 +60,10 @@ scope: the queue has no multi-select today. Both remain deferred to a future tic
    entity to check), then applies the plan in one `TransactWriteCommand`: a conditional
    `Update` on `Report`, a `Put` on `Assignment`, and a `Put` on `ReportEvent`. A version
    conflict on the conditional update surfaces as `CONFLICT:`, matching CRIS-18's contract.
-4. **Every call creates a new `Assignment` record** rather than updating an existing one —
-   append-only, mirroring `ReportEvent`, so reassignment history is preserved rather than
-   overwritten. `Report.assignedTeamId` always reflects only the latest.
+4. **The MVP permits one active assignment per report.** If `Report.assignedTeamId` is already
+   set, the mutation returns `ILLEGAL:` instead of creating a second active `Assignment` row.
+   Reassignment is deferred until its transaction can retire the previous assignment and
+   preserve a coherent lifecycle for responders.
 5. **Client wiring mirrors CRIS-18 exactly**: `lib/assign-team.ts` (typed `AssignError` with a
    `CONFLICT | NOT_FOUND | ILLEGAL | UNKNOWN` code, mapped from the resolver's stable prefix)
    and `useAssignTeam` (idle → submitting → success/error state machine). `CoordinatorRoute`
@@ -76,6 +77,9 @@ scope: the queue has no multi-select today. Both remain deferred to a future tic
 7. **`CoordinatorIncident` gains `assignedTeamId`**, read off `Report.assignedTeamId` in
    `useLiveReports`'s `toRedactedIncident` (the field already existed on the schema, unread
    until now) — so the detail panel can show the current assignment.
+8. **A committed assignment publishes a redacted `publishReportUpdate` signal best-effort**, as
+   status transitions do. Coordinator subscribers use it as an invalidation and re-read the
+   authoritative report, including the new assignment and optimistic-lock version.
 
 ## Tradeoffs & consequences
 
@@ -85,8 +89,7 @@ scope: the queue has no multi-select today. Both remain deferred to a future tic
 - **Give up / interim:** merging duplicate report groups remains unbuilt (no agreed contract
   per ADR-0038); there is no bulk/multi-select assignment; the team picker is a flat list with
   no capability/region matching (the Dispatch Agent's smarter routing is Phase 2, design doc
-  §5.5); reassignment history lives only in the append-only `Assignment` table and the audit
-  timeline, with no dedicated "assignment history" UI.
+  §5.5); reassignment remains deferred until the prior assignment can be retired atomically.
 - **Commits us to:** a future merge-action ticket must still decide the data contract ADR-0038
   left open before it can reuse this same guarded-mutation shape; any UI that lets a
   RESPONDER/VOLUNTEER update their own `Assignment.status` (accept/en-route/on-scene) is a
