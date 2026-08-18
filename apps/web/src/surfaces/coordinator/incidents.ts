@@ -56,6 +56,8 @@ export interface CoordinatorIncident extends PublicReport {
   scoreBreakdown: ScoreBreakdown | null;
   /** People affected / infrastructure / hazards the Triage Agent extracted. */
   entities: TriageEntities | null;
+  /** The currently-assigned response team, or `null` if none (CRIS-32). */
+  assignedTeamId: string | null;
 }
 
 /** One PII-free activity item received during the current browser session. */

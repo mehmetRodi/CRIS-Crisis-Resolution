@@ -16,6 +16,7 @@ import { publishReportUpdate } from './functions/publish-report-update/resource'
 import { classifyReport } from './functions/classify-report/resource';
 import { createMediaUploadUrl } from './functions/create-media-upload-url/resource';
 import { listVolunteerTasks } from './functions/list-volunteer-tasks/resource';
+import { assignTeam } from './functions/assign-team/resource';
 import { createDataKey } from './security/encryption';
 import { addObservability } from './observability';
 
@@ -42,7 +43,7 @@ import { addObservability } from './observability';
  * form a nested-stack cycle unless the worker lives in the data stack. So
  * `classify-report` is pinned to the `data` group (`resourceGroupName: 'data'`,
  * ADR-0031); every edge here is then intra-`data`-stack. CRIS-28's custom
- * subscriptions and both publisher grants live in the data schema; SNS
+ * subscriptions and all three publisher grants live in the data schema; SNS
  * proximity alerts remain a deferred seam.
  *
  * Run `npx ampx sandbox` from `apps/web` (with AWS credentials + Bedrock model
@@ -61,6 +62,7 @@ const backend = defineBackend({
   classifyReport,
   createMediaUploadUrl,
   listVolunteerTasks,
+  assignTeam,
 });
 
 /* -------------------------------------------------------------------------- */
@@ -198,6 +200,24 @@ tables['Team'].grantReadData(volunteerTasksFn);
 backend.listVolunteerTasks.addEnvironment('REPORT_TABLE_NAME', tables['Report'].tableName);
 backend.listVolunteerTasks.addEnvironment('ASSIGNMENT_TABLE_NAME', tables['Assignment'].tableName);
 backend.listVolunteerTasks.addEnvironment('TEAM_TABLE_NAME', tables['Team'].tableName);
+
+/* -------------------------------------------------------------------------- */
+/* assignTeam (CRIS-32) — grant table access + inject table names             */
+/* -------------------------------------------------------------------------- */
+
+const assignTeamFn = backend.assignTeam.resources.lambda;
+
+// Reads the report + team, applies the version-checked assignedTeamId update,
+// creates the Assignment record, appends the audit event.
+tables['Report'].grantReadWriteData(assignTeamFn);
+tables['Team'].grantReadData(assignTeamFn);
+tables['Assignment'].grantWriteData(assignTeamFn);
+tables['ReportEvent'].grantWriteData(assignTeamFn);
+
+backend.assignTeam.addEnvironment('REPORT_TABLE_NAME', tables['Report'].tableName);
+backend.assignTeam.addEnvironment('TEAM_TABLE_NAME', tables['Team'].tableName);
+backend.assignTeam.addEnvironment('ASSIGNMENT_TABLE_NAME', tables['Assignment'].tableName);
+backend.assignTeam.addEnvironment('REPORT_EVENT_TABLE_NAME', tables['ReportEvent'].tableName);
 
 /* -------------------------------------------------------------------------- */
 /* classify-report pipeline (CRIS-10) — Streams → Pipe → SQS → Lambda          */
@@ -449,6 +469,7 @@ const tracedFunctions = [
   backend.publishReportUpdate,
   backend.classifyReport,
   backend.createMediaUploadUrl,
+  backend.assignTeam,
 ];
 for (const fn of tracedFunctions) {
   fn.resources.cfnResources.cfnFunction.tracingConfig = { mode: 'Active' };
