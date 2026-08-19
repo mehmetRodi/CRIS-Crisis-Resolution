@@ -32,10 +32,8 @@ export function parseMessage(body: string): AlertCandidate | null {
     return null;
   }
   if (typeof raw !== 'object' || raw === null) return null;
-  const { reportId, category, urgency, priorityBand, regionId, lat, lng } = raw as Record<
-    string,
-    unknown
-  >;
+  const { reportId, category, urgency, priorityBand, regionId, lat, lng, geohashPrefix } =
+    raw as Record<string, unknown>;
 
   if (typeof reportId !== 'string') return null;
   if (!Object.values(PriorityBand).includes(priorityBand as PriorityBand)) return null;
@@ -50,6 +48,7 @@ export function parseMessage(body: string): AlertCandidate | null {
     regionId: typeof regionId === 'string' ? regionId : null,
     lat: typeof lat === 'number' ? lat : null,
     lng: typeof lng === 'number' ? lng : null,
+    geohashPrefix: typeof geohashPrefix === 'string' ? geohashPrefix : null,
   };
 }
 
@@ -65,6 +64,7 @@ function buildDeps(): AlertDispatchDeps {
       alertSubscription: requireEnv('ALERT_SUBSCRIPTION_TABLE_NAME'),
       alertDelivery: requireEnv('ALERT_DELIVERY_TABLE_NAME'),
       regionIndex: requireEnv('ALERT_SUBSCRIPTION_REGION_INDEX_NAME'),
+      geohashPrefixIndex: requireEnv('ALERT_SUBSCRIPTION_GEOHASH_PREFIX_INDEX_NAME'),
     },
     DynamoDBDocumentClient.from(new DynamoDBClient({}), {
       marshallOptions: { removeUndefinedValues: true },

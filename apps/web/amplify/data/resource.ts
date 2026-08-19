@@ -318,11 +318,23 @@ const schema = a
         /** Geofence: center cell + radius for proximity matching (§2.7). */
         centerGeohash: a.string(),
         radiusMeters: a.integer(),
+        /**
+         * Precision-5 prefix of `centerGeohash` (mirrors `Report.geohashPrefix`,
+         * §5.2) — the candidate-discovery partition key for a subscription with
+         * no `regionId` (CRIS-34, ADR-0049). DynamoDB can't derive a prefix at
+         * query time, so it's stored, the same reason `Report` stores both
+         * `geohash` and `geohashPrefix`. Must equal
+         * `geohashPrefix(centerGeohash)` (`@crisismap/shared`) — currently the
+         * creator's responsibility (no subscription-management UI computes this
+         * yet; see the ADR's scope note).
+         */
+        centerGeohashPrefix: a.string(),
         active: a.boolean(),
       })
       .secondaryIndexes((index) => [
         index('regionId').queryField('subscriptionsByRegion'),
         index('userId').queryField('subscriptionsByUser'),
+        index('centerGeohashPrefix').queryField('subscriptionsByGeohashPrefix'),
       ])
       // Owner-scoped: a user manages their own subscriptions; coordinators audit.
       .authorization((allow) => [

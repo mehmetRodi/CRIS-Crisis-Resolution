@@ -62,6 +62,19 @@ here.
   unworkable for a dynamic per-user list built from `AlertSubscription`) or a platform-endpoint
   ARN (push). Rejected in favor of Amazon SES's `SendEmail`, the direct-to-address equivalent
   SNS doesn't offer.
+- **Discover candidate subscriptions by `regionId` only.** The first cut of this design did
+  exactly that — until real end-to-end testing showed `Report.regionId` is never actually set
+  by either citizen client today (neither `apps/web` nor `apps/mobile` collects one), which
+  would have made every region-scoped subscription permanently unreachable, and a
+  geofence-only subscription (`centerGeohash`/`radiusMeters`, no region) was *already*
+  undiscoverable by construction — region-only lookup can't find it regardless. Rejected in
+  favor of two independent, merged candidate-discovery paths (see Decision).
+- **Decompose a subscription's radius into the full set of geohash-prefix cells it could touch**
+  (mirroring how the map-viewport query covers a bounding box). More correct at cell
+  boundaries, but a materially bigger change for a proximity feature with no subscription-
+  management UI yet to even exercise the difference. Rejected for now in favor of the same
+  single-cell-lookup tradeoff `classify-report`'s own duplicate-candidate query already accepts
+  (ADR-0038) — consistent with existing precedent, revisit if it proves too lossy in practice.
 
 ## Decision
 
@@ -70,18 +83,25 @@ here.
    doesn't alert the public off a classification it isn't confident enough in to skip human
    review) at `P0`/`P1` (`ALERT_TRIGGER_BANDS`, `packages/shared/src/alerts.ts`) enqueues. The
    enqueued message carries only PII-free fields (`reportId`, `category`, `urgency`,
-   `priorityBand`, `regionId`, `lat`, `lng`) — no report text, no reporter data, the same
-   discipline already applied to the classification queue's own payload. Idempotency is
-   inherited for free: this step only runs on the path already gated by
+   `priorityBand`, `regionId`, `lat`, `lng`, `geohashPrefix`) — no report text, no reporter
+   data, the same discipline already applied to the classification queue's own payload.
+   Idempotency is inherited for free: this step only runs on the path already gated by
    `report.lastProcessedEventId` (§5.4.4), so a redelivered classification message doesn't
    re-enqueue.
 2. **A new `alert-dispatch` Lambda** consumes a second, independently-encrypted SQS queue +
-   DLQ (same KMS/retry shape as the classification pipeline). It queries `AlertSubscription` via
-   the existing `subscriptionsByRegion` GSI (coarse region filter — no new index needed), then
-   applies a pure predicate (`matchesSubscription`, `packages/shared/src/alerts.ts`): `active`,
-   `categories` (empty = any), `minUrgency`, and — when the subscription sets both
-   `centerGeohash` and `radiusMeters` — an exact great-circle distance check (`decodeGeohash`,
-   new in `geohash.ts`; `distanceMeters`, reused from `duplicate.ts` rather than duplicated).
+   DLQ (same KMS/retry shape as the classification pipeline). It discovers candidate
+   subscriptions via **two independent GSI lookups, merged by id**: `subscriptionsByRegion`
+   (the candidate's `regionId`) and a new `subscriptionsByGeohashPrefix` (the candidate's
+   `geohashPrefix`, matched against a new stored `AlertSubscription.centerGeohashPrefix` —
+   DynamoDB can't derive a prefix at query time, so it's stored, the same reason `Report` stores
+   both `geohash` and `geohashPrefix`). Neither signal is required on either side: a
+   region-scoped subscription with no geofence, a geofence-only subscription with no region, and
+   a report with only one of the two resolved, all still find each other. Each merged candidate
+   then passes through a pure predicate (`matchesSubscription`,
+   `packages/shared/src/alerts.ts`): `active`, `categories` (empty = any), `minUrgency`, and —
+   when the subscription sets both `centerGeohash` and `radiusMeters` — an exact great-circle
+   distance check (`decodeGeohash`, new in `geohash.ts`; `distanceMeters`, reused from
+   `duplicate.ts` rather than duplicated).
    **Conservative by construction**, matching the existing dedup philosophy: any field a filter
    depends on that the candidate doesn't have resolves to "does not match."
 3. **Delivery is idempotent per recipient per channel.** Before attempting a send,
@@ -107,16 +127,27 @@ here.
   closing a long-standing deferred seam; the same guarded, idempotent, best-effort discipline
   already proven for classification/dedup/publish now covers alerting too.
 - **Give up / interim:** push notifications remain undelivered (declarable, silently skipped
-  with a log line) until device-token infrastructure exists; a subscription with no `regionId`
-  set is never matched (the region GSI query is the only candidate-discovery path — an
-  "all-regions" subscription is a known, deferred gap); the SES sender identity and its DNS
-  verification are an account-level prerequisite this stack doesn't manage — email delivery
-  silently fails (recorded `FAILED`, logged) until that's set up; the
-  `alertSubscriptionsByRegionId` physical GSI name is a best-effort derivation from the Amplify
+  with a log line) until device-token infrastructure exists; a report with neither a `regionId`
+  nor a resolved location can never match anything (correctly — there is nothing to be
+  "proximate" to); geofence matching only checks the report's location against the *single*
+  geohash-prefix cell the subscription's `centerGeohash` falls in, not every cell its
+  `radiusMeters` could reach, so a subscription can miss a report near a cell boundary (the
+  same accepted tradeoff `classify-report`'s own duplicate-candidate query already makes,
+  ADR-0038); `AlertSubscription.centerGeohashPrefix` must currently be computed and supplied by
+  whoever creates the subscription (`geohashPrefix(centerGeohash)`, `@crisismap/shared`) —
+  there is no subscription-management UI or guarded mutation yet to compute it automatically,
+  so a manually-created subscription with a mismatched prefix silently never matches; the SES
+  sender identity and its DNS verification are an account-level prerequisite this stack doesn't
+  manage — email delivery silently fails (recorded `FAILED`, logged) until that's set up; both
+  new physical GSI names (`alertSubscriptionsByRegionId`,
+  `alertSubscriptionsByCenterGeohashPrefix`) are best-effort derivations from the Amplify
   transformer's naming rule, unverified against a deployed schema (same caveat already
   documented for `REPORT_GEO_INDEX_NAME`, ADR-0011) — wrong would silently match zero
-  subscriptions rather than error, until deploy-time introspection confirms it.
+  subscriptions rather than error, until deploy-time introspection confirms them.
 - **Commits us to:** a future ticket adding push must add the token-registration and platform-
-  application infrastructure this ADR deliberately left out; a future "all-regions subscription"
-  feature needs either a sentinel region value or a different (more expensive) candidate query;
-  CRIS-35 must extend the observability dashboard/alarms to cover the new `AlertQueue`/`AlertDlq`.
+  application infrastructure this ADR deliberately left out; a future subscription-management UI
+  (or a guarded `createAlertSubscription`-equivalent mutation) must compute
+  `centerGeohashPrefix` server-side rather than trusting a client-supplied value; if single-cell
+  geofence matching proves too lossy in practice, a future revision needs the same
+  viewport-style multi-prefix decomposition `packages/shared` doesn't yet have; CRIS-35 must
+  extend the observability dashboard/alarms to cover the new `AlertQueue`/`AlertDlq`.

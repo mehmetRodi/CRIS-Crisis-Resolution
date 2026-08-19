@@ -372,6 +372,7 @@ export async function processRecord(
         regionId: report.regionId ?? null,
         lat: location?.lat ?? null,
         lng: location?.lng ?? null,
+        geohashPrefix: location?.geohashPrefix ?? null,
       },
       log,
     );

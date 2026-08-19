@@ -525,6 +525,13 @@ backend.alertDispatch.addEnvironment(
   'ALERT_SUBSCRIPTION_REGION_INDEX_NAME',
   'alertSubscriptionsByRegionId',
 );
+// Physical name of the AlertSubscription.centerGeohashPrefix GSI — same
+// derivation caveat as above, the other of the two independent
+// candidate-discovery paths (CRIS-34, ADR-0049).
+backend.alertDispatch.addEnvironment(
+  'ALERT_SUBSCRIPTION_GEOHASH_PREFIX_INDEX_NAME',
+  'alertSubscriptionsByCenterGeohashPrefix',
+);
 backend.alertDispatch.addEnvironment('USER_POOL_ID', backend.auth.resources.userPool.userPoolId);
 // A real SES-verified sender identity is required for the email channel to
 // actually deliver — that verification is an account-level, DNS-based step

@@ -12,6 +12,7 @@ function candidate(overrides: Partial<AlertCandidate> = {}): AlertCandidate {
     regionId: 'region-a',
     lat: 41.0082,
     lng: 28.9784, // Istanbul
+    geohashPrefix: 'sxk97',
     ...overrides,
   };
 }

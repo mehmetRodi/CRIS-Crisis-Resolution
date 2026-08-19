@@ -39,8 +39,14 @@ export interface AlertDeliveryRecord {
 }
 
 export interface AlertStore {
-  /** Active subscriptions in a region — the coarse candidate set (§2.7). */
+  /** Active subscriptions in a region — one of two independent candidate sets (§2.7). */
   queryActiveSubscriptions(regionId: string): Promise<AlertSubscriptionRecord[]>;
+  /**
+   * Subscriptions whose geofence center falls in this geohash prefix cell —
+   * the other candidate set, for a subscription with no `regionId` (CRIS-34).
+   * The caller merges both by `id` before matching.
+   */
+  queryActiveSubscriptionsByGeohashPrefix(geohashPrefix: string): Promise<AlertSubscriptionRecord[]>;
   /**
    * Conditionally creates the delivery record. Returns `false` (no write) when
    * one already exists at this id — the idempotency guard against an
@@ -69,11 +75,31 @@ export interface AlertStoreTables {
    * deployed schema. Best-effort derivation: `alertSubscriptionsByRegionId`.
    */
   regionIndex: string;
+  /**
+   * Physical name of the `AlertSubscription.centerGeohashPrefix` GSI
+   * (`subscriptionsByGeohashPrefix`). Same injection convention and caveat as
+   * {@link AlertStoreTables.regionIndex}. Best-effort derivation:
+   * `alertSubscriptionsByCenterGeohashPrefix`.
+   */
+  geohashPrefixIndex: string;
 }
 
 /** True when a DynamoDB error is a failed conditional (optimistic-lock) write. */
 function isConditionalCheckFailed(err: unknown): boolean {
   return (err as { name?: string })?.name === 'ConditionalCheckFailedException';
+}
+
+function toSubscriptionRecord(item: Record<string, unknown>): AlertSubscriptionRecord {
+  return {
+    id: item.id as string,
+    userId: item.userId as string,
+    categories: (item.categories as string[] | undefined) ?? null,
+    minUrgency: (item.minUrgency as Urgency | undefined) ?? null,
+    channels: (item.channels as string[] | undefined) ?? null,
+    centerGeohash: (item.centerGeohash as string | undefined) ?? null,
+    radiusMeters: (item.radiusMeters as number | undefined) ?? null,
+    active: (item.active as boolean | undefined) ?? null,
+  };
 }
 
 export function createDynamoAlertStore(
@@ -96,16 +122,19 @@ export function createDynamoAlertStore(
           ExpressionAttributeValues: { ':regionId': regionId },
         }),
       );
-      return Items.map((item) => ({
-        id: item.id as string,
-        userId: item.userId as string,
-        categories: (item.categories as string[] | undefined) ?? null,
-        minUrgency: (item.minUrgency as Urgency | undefined) ?? null,
-        channels: (item.channels as string[] | undefined) ?? null,
-        centerGeohash: (item.centerGeohash as string | undefined) ?? null,
-        radiusMeters: (item.radiusMeters as number | undefined) ?? null,
-        active: (item.active as boolean | undefined) ?? null,
-      }));
+      return Items.map(toSubscriptionRecord);
+    },
+
+    async queryActiveSubscriptionsByGeohashPrefix(geohashPrefix) {
+      const { Items = [] } = await doc.send(
+        new QueryCommand({
+          TableName: tables.alertSubscription,
+          IndexName: tables.geohashPrefixIndex,
+          KeyConditionExpression: 'centerGeohashPrefix = :prefix',
+          ExpressionAttributeValues: { ':prefix': geohashPrefix },
+        }),
+      );
+      return Items.map(toSubscriptionRecord);
     },
 
     async putDeliveryIfAbsent(delivery) {

@@ -13,6 +13,7 @@ function candidate(overrides: Partial<Parameters<typeof processCandidate>[1]> = 
     regionId: 'region-a',
     lat: 41.0082,
     lng: 28.9784,
+    geohashPrefix: 'sxk97',
     ...overrides,
   };
 }
@@ -46,6 +47,9 @@ function fakeDeps(
 
   const store: AlertStore = {
     async queryActiveSubscriptions() {
+      return subscriptions;
+    },
+    async queryActiveSubscriptionsByGeohashPrefix() {
       return subscriptions;
     },
     async putDeliveryIfAbsent(delivery) {
@@ -85,10 +89,28 @@ function fakeDeps(
 }
 
 describe('processCandidate', () => {
-  it('does nothing when the candidate has no region', async () => {
+  it('does nothing when the candidate has neither a region nor a location', async () => {
+    const { deps, deliveries } = fakeDeps([subscription()]);
+    await processCandidate(deps, candidate({ regionId: null, geohashPrefix: null }));
+    expect(deliveries.size).toBe(0);
+  });
+
+  it('still matches via geohash-prefix discovery when the candidate has no region', async () => {
     const { deps, deliveries } = fakeDeps([subscription()]);
     await processCandidate(deps, candidate({ regionId: null }));
-    expect(deliveries.size).toBe(0);
+    expect(deliveries.size).toBe(2); // SMS + EMAIL
+  });
+
+  it('still matches via region discovery when the candidate has no resolved location', async () => {
+    const { deps, deliveries } = fakeDeps([subscription()]);
+    await processCandidate(deps, candidate({ geohashPrefix: null, lat: null, lng: null }));
+    expect(deliveries.size).toBe(2);
+  });
+
+  it('does not double-dispatch when the same subscription is found by both paths', async () => {
+    const { deps, deliverSms } = fakeDeps([subscription()]); // fakeDeps returns the same set for both queries
+    await processCandidate(deps, candidate());
+    expect(deliverSms).toHaveBeenCalledTimes(1);
   });
 
   it('delivers SMS and EMAIL to a matching, active subscription', async () => {

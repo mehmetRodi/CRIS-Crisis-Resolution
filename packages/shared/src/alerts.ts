@@ -8,10 +8,14 @@ import { PriorityBand, Urgency, type Category } from './domain';
  * A just-classified report becomes an `AlertCandidate` — the PII-free subset
  * of its fields an `AlertSubscription` can be matched against — and this
  * module's `matchesSubscription` is the pure eligibility check the dispatch
- * worker runs per candidate subscription (already narrowed to the report's
- * `regionId` via the `subscriptionsByRegion` GSI before this runs). Kept
- * framework-free, like `duplicate.ts`, so the matching rule the worker applies
- * and the rule a test asserts are the same implementation.
+ * worker runs per candidate subscription. Candidates are narrowed to a
+ * manageable set before this runs via two independent DynamoDB lookups —
+ * `subscriptionsByRegion` (the candidate's `regionId`) and
+ * `subscriptionsByGeohashPrefix` (the candidate's `geohashPrefix`) — merged by
+ * the caller, since a subscription may set a region, a geofence, or both, and
+ * a report may carry a region, a location, both, or (today, in practice)
+ * neither. Kept framework-free, like `duplicate.ts`, so the matching rule the
+ * worker applies and the rule a test asserts are the same implementation.
  *
  * **Conservative by construction**, matching this codebase's existing dedup
  * philosophy: an unknown candidate field that a subscription's filter depends
@@ -32,6 +36,8 @@ export interface AlertCandidate {
   regionId: string | null;
   lat: number | null;
   lng: number | null;
+  /** Precision-5 prefix of the resolved location's geohash, if any (§5.2). */
+  geohashPrefix: string | null;
 }
 
 /**
@@ -62,10 +68,10 @@ function meetsMinUrgency(urgency: Urgency, minUrgency: Urgency): boolean {
 
 /**
  * Whether `subscription` should receive an alert for `candidate`. Callers are
- * expected to have already narrowed candidates to the same `regionId` (via
- * `subscriptionsByRegion`) — a subscription with no `regionId` set is never
- * matched by that query and so never reached here; region-agnostic
- * subscriptions are a known, deferred gap (see the CRIS-34 ADR).
+ * expected to have already narrowed candidates via `subscriptionsByRegion`
+ * and/or `subscriptionsByGeohashPrefix` (see the module doc) — this function
+ * only applies the finer-grained filters (category, urgency, exact geofence
+ * distance) to whatever candidate set the caller already assembled.
  */
 export function matchesSubscription(
   subscription: AlertSubscriptionFilter,

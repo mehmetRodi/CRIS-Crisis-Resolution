@@ -119,12 +119,24 @@ export async function processCandidate(
   const log = deps.log ?? ((entry) => console.log(JSON.stringify(entry)));
   const nowIso = (deps.now ?? (() => new Date()))().toISOString();
 
-  if (!candidate.regionId) {
-    log({ event: 'alert.skip.noRegion', reportId: candidate.reportId });
+  // Two independent, non-exclusive candidate sets (CRIS-34): a subscription
+  // may set a regionId, a geofence (centerGeohash/radiusMeters), or both — and
+  // a report may carry a region, a resolved location, both, or neither.
+  // Querying both and merging by id (rather than requiring one signal) means
+  // a region-less geofence subscription still works, and vice versa.
+  const [byRegion, byGeohash] = await Promise.all([
+    candidate.regionId ? deps.store.queryActiveSubscriptions(candidate.regionId) : [],
+    candidate.geohashPrefix
+      ? deps.store.queryActiveSubscriptionsByGeohashPrefix(candidate.geohashPrefix)
+      : [],
+  ]);
+  const subscriptions = [...new Map([...byRegion, ...byGeohash].map((s) => [s.id, s])).values()];
+
+  if (subscriptions.length === 0) {
+    log({ event: 'alert.skip.noCandidates', reportId: candidate.reportId });
     return;
   }
 
-  const subscriptions = await deps.store.queryActiveSubscriptions(candidate.regionId);
   let matched = 0;
 
   for (const subscription of subscriptions) {
