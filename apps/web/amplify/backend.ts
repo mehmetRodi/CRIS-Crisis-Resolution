@@ -492,6 +492,12 @@ addObservability({
     transitionReport: transitionFn,
     publishReportUpdate: backend.publishReportUpdate.resources.lambda,
     classifyReport: worker,
+    createMediaUploadUrl: mediaUploadFn,
+    listVolunteerTasks: volunteerTasksFn,
+    assignTeam: assignTeamFn,
+    // Lives in the auth stack; alarming it from here adds a data→auth metric
+    // reference, the dependency direction that already exists (ADR-0050).
+    citizenRoleAssignment: citizenRoleFn,
   },
   classificationQueue,
   classificationDlq,

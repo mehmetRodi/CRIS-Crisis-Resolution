@@ -15,7 +15,7 @@ import { addObservability, type BackendFunctions } from './observability';
  * the same `Template.fromStack` pattern as `security/encryption.test.ts`.
  */
 
-const EXPECTED_ALARMS = 8;
+const EXPECTED_ALARMS = 12;
 
 interface SynthesizedObservability {
   template: Template;
@@ -38,8 +38,10 @@ function lambdaStub(scope: Stack, id: string): LambdaFunction {
 function synthesizeObservability(): SynthesizedObservability {
   const app = new App();
   const root = new Stack(app, 'ObservabilityRoot');
-  // Alarms live in the data (pipeline) nested stack in backend.ts; mirror that.
+  // Alarms live in the data (pipeline) nested stack in backend.ts; mirror that,
+  // including the auth-stack trigger referenced across stacks (ADR-0050).
   const data = new NestedStack(root, 'Data');
+  const auth = new NestedStack(root, 'Auth');
   const encryptionKey = createDataKey(root);
 
   const functions: BackendFunctions = {
@@ -47,6 +49,10 @@ function synthesizeObservability(): SynthesizedObservability {
     transitionReport: lambdaStub(data, 'TransitionReportFn'),
     publishReportUpdate: lambdaStub(data, 'PublishReportUpdateFn'),
     classifyReport: lambdaStub(data, 'ClassifyReportFn'),
+    createMediaUploadUrl: lambdaStub(data, 'CreateMediaUploadUrlFn'),
+    listVolunteerTasks: lambdaStub(data, 'ListVolunteerTasksFn'),
+    assignTeam: lambdaStub(data, 'AssignTeamFn'),
+    citizenRoleAssignment: lambdaStub(auth, 'CitizenRoleAssignmentFn'),
   };
 
   const classificationDlq = new Queue(data, 'ClassificationDlq');
@@ -140,6 +146,10 @@ describe('observability baseline (ADR-0015, ADR-0050)', () => {
       'TransitionReportErrors',
       'PublishReportUpdateErrors',
       'ClassifyWorkerErrors',
+      'MediaUploadUrlErrors',
+      'VolunteerTasksErrors',
+      'AssignTeamErrors',
+      'CitizenRoleAssignmentErrors',
     ]) {
       expect(alarmByLogicalIdPrefix(alarms, prefix)).toMatchObject({
         MetricName: 'Errors',

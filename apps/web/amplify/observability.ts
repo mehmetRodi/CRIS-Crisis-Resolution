@@ -40,12 +40,17 @@ import { configureEncryptedAlarmTopic } from './security/encryption';
  * one account don't collide.
  */
 
-/** The four backend Lambdas, keyed by role. */
+/** The alarmed backend Lambdas, keyed by role (ADR-0015; completed by ADR-0050). */
 export interface BackendFunctions {
   submitReport: IFunction;
   transitionReport: IFunction;
   publishReportUpdate: IFunction;
   classifyReport: IFunction;
+  createMediaUploadUrl: IFunction;
+  listVolunteerTasks: IFunction;
+  assignTeam: IFunction;
+  /** Cognito post-confirmation trigger — lives in the auth stack, alarmed from here. */
+  citizenRoleAssignment: IFunction;
 }
 
 export interface ObservabilityProps {
@@ -216,6 +221,36 @@ export function addObservability(props: ObservabilityProps): Topic {
     }),
   );
 
+  /* ---- Support resolvers + auth trigger (ADR-0050) ------------------------ */
+  // The remaining wired Lambdas. Same any-error-pages policy as the write path:
+  // each of these failing breaks a user-visible flow, just a narrower one.
+  register(
+    lambdaErrorAlarm(scope, 'MediaUploadUrlErrors', functions.createMediaUploadUrl, {
+      description:
+        'createMediaUploadUrl resolver errors — citizens cannot attach photos to reports ' +
+        '(CRIS-17; alarm deferred in ADR-0035, closed by ADR-0050).',
+    }),
+  );
+  register(
+    lambdaErrorAlarm(scope, 'VolunteerTasksErrors', functions.listVolunteerTasks, {
+      description:
+        'listVolunteerTasks resolver errors — the volunteer task board read path is failing (CRIS-33).',
+    }),
+  );
+  register(
+    lambdaErrorAlarm(scope, 'AssignTeamErrors', functions.assignTeam, {
+      description:
+        'assignTeam resolver errors — coordinators cannot dispatch response teams (CRIS-32).',
+    }),
+  );
+  register(
+    lambdaErrorAlarm(scope, 'CitizenRoleAssignmentErrors', functions.citizenRoleAssignment, {
+      description:
+        'citizen-role-assignment trigger errors — sign-up confirmation may be failing, or new ' +
+        'accounts are left without the CITIZEN role (CRIS-24).',
+    }),
+  );
+
   /* ---- Dashboard ---------------------------------------------------------- */
   buildDashboard(scope, functions, classificationQueue, classificationDlq, queueAge, dlqVisible);
 
@@ -348,6 +383,32 @@ function buildDashboard(
         ],
         leftYAxis: { label: 'count', showUnits: false },
         rightYAxis: { label: '%', showUnits: false, min: 0 },
+        width: 12,
+        height: 6,
+      }),
+    ),
+  );
+
+  dashboard.addWidgets(
+    new Row(
+      new GraphWidget({
+        title: 'Support resolvers — media upload / volunteer tasks / assign team / roles',
+        // Unlabelled on purpose: the console legend falls back to the function-name
+        // dimension, which distinguishes the lines better than a shared label.
+        left: [
+          errors(functions.createMediaUploadUrl),
+          errors(functions.listVolunteerTasks),
+          errors(functions.assignTeam),
+          errors(functions.citizenRoleAssignment),
+        ],
+        right: [
+          invocations(functions.createMediaUploadUrl),
+          invocations(functions.listVolunteerTasks),
+          invocations(functions.assignTeam),
+          invocations(functions.citizenRoleAssignment),
+        ],
+        leftYAxis: { label: 'errors', showUnits: false },
+        rightYAxis: { label: 'invocations', showUnits: false },
         width: 12,
         height: 6,
       }),
