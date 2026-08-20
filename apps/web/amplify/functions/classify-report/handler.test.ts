@@ -5,7 +5,6 @@ import {
   PUBLIC_REPORT_FIELDS,
   ReportStatus,
   Urgency,
-  type AlertCandidate,
   type ClassificationResult,
   type PublicReport,
 } from '@crisismap/shared';
@@ -88,16 +87,6 @@ function fakePublisher(fail = false) {
   return { publisher, published };
 }
 
-/** Captures every enqueued alert candidate; `fail` makes the enqueue reject. */
-function fakeAlertEnqueuer(fail = false) {
-  const enqueued: AlertCandidate[] = [];
-  const alertEnqueuer: WorkerDeps['alertEnqueuer'] = vi.fn(async (candidate: AlertCandidate) => {
-    if (fail) throw new Error('sqs unavailable');
-    enqueued.push(candidate);
-  });
-  return { alertEnqueuer, enqueued };
-}
-
 const NEW_REPORT: ReportRecord = {
   id: 'r1',
   version: 3,
@@ -111,16 +100,10 @@ const NEW_REPORT: ReportRecord = {
 const NOW = new Date('2026-07-22T00:00:00.000Z');
 
 const message = { reportId: 'r1', version: 3, streamEventId: 'evt-1' };
-const deps = (
-  store: ReportStore,
-  triage: TriageAgent,
-  publisher?: Publisher,
-  alertEnqueuer?: WorkerDeps['alertEnqueuer'],
-): WorkerDeps => ({
+const deps = (store: ReportStore, triage: TriageAgent, publisher?: Publisher): WorkerDeps => ({
   store,
   triage,
   publisher: publisher ?? fakePublisher().publisher,
-  alertEnqueuer: alertEnqueuer ?? fakeAlertEnqueuer().alertEnqueuer,
   log: () => {},
   now: () => NOW,
 });
@@ -292,81 +275,6 @@ describe('processRecord', () => {
       reportId: 'r1',
       claimedVersion: 4,
       reason: 'classification_failed',
-    });
-  });
-
-  describe('proximity alerts (§2.7, CRIS-34)', () => {
-    it('enqueues an alert for a P0 AI_CLASSIFIED report', async () => {
-      const { store } = fakeStore(NEW_REPORT);
-      const { alertEnqueuer, enqueued } = fakeAlertEnqueuer();
-      const agent = fakeAgent(async () => ({ classification: CLASSIFICATION, location: LOCATION }));
-
-      await processRecord(deps(store, agent, undefined, alertEnqueuer), message);
-
-      expect(enqueued).toHaveLength(1);
-      expect(enqueued[0]).toMatchObject({
-        reportId: 'r1',
-        category: Category.MEDICAL,
-        urgency: Urgency.CRITICAL,
-        priorityBand: 'P0',
-        regionId: 'region-1',
-        lat: LOCATION.lat,
-        lng: LOCATION.lng,
-      } satisfies Partial<AlertCandidate>);
-    });
-
-    it('does not enqueue an alert for a low-urgency, low-priority classification', async () => {
-      const { store } = fakeStore(NEW_REPORT);
-      const { alertEnqueuer, enqueued } = fakeAlertEnqueuer();
-      const agent = fakeAgent(async () => ({
-        classification: {
-          ...CLASSIFICATION,
-          urgency: Urgency.LOW,
-          confidence: 0.95,
-          entities: { peopleAffected: null, infrastructure: [], hazards: [] },
-        },
-        location: null,
-      }));
-
-      await processRecord(deps(store, agent, undefined, alertEnqueuer), message);
-
-      expect(enqueued).toHaveLength(0);
-    });
-
-    it('does not enqueue an alert when the classification escalates to NEEDS_VERIFICATION', async () => {
-      const { store } = fakeStore(NEW_REPORT);
-      const { alertEnqueuer, enqueued } = fakeAlertEnqueuer();
-      const agent = fakeAgent(async () => ({
-        classification: { ...CLASSIFICATION, needsHumanReview: true },
-        location: null,
-      }));
-
-      await processRecord(deps(store, agent, undefined, alertEnqueuer), message);
-
-      expect(enqueued).toHaveLength(0);
-    });
-
-    it('does not enqueue when triage fails outright', async () => {
-      const { store } = fakeStore(NEW_REPORT);
-      const { alertEnqueuer, enqueued } = fakeAlertEnqueuer();
-      const agent = fakeAgent(async () => {
-        throw new ClassificationError(['invalid category: ...']);
-      });
-
-      await processRecord(deps(store, agent, undefined, alertEnqueuer), message);
-
-      expect(enqueued).toHaveLength(0);
-    });
-
-    it('does not fail the record when enqueueing fails', async () => {
-      const { store, persisted } = fakeStore(NEW_REPORT);
-      const { alertEnqueuer } = fakeAlertEnqueuer(true);
-      const agent = fakeAgent(async () => ({ classification: CLASSIFICATION, location: LOCATION }));
-
-      await expect(
-        processRecord(deps(store, agent, undefined, alertEnqueuer), message),
-      ).resolves.not.toThrow();
-      expect(persisted).toHaveLength(1);
     });
   });
 

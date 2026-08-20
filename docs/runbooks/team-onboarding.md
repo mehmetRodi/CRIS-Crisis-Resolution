@@ -58,6 +58,7 @@ inference-profile.
 ```bash
 npm install                     # from the repo root, once
 cd apps/web
+export ALERT_FROM_EMAIL=<your-SES-verified-sandbox-sender>
 npx ampx sandbox                # deploys YOUR isolated backend stack
 ```
 

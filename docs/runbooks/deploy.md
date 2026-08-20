@@ -49,6 +49,7 @@ in** — the job is skipped (green) unless `AWS_DEPLOY_ENABLED` is `true`.
 | Variable    | `AWS_REGION`          | `eu-central-1` (must have Bedrock model access)                   |
 | Secret      | `AWS_DEPLOY_ROLE_ARN` | ARN of the deploy role from step 3                                |
 | Secret      | `AMPLIFY_APP_ID`      | App ID from step 1                                                |
+| Secret      | `ALERT_FROM_EMAIL`    | SES-verified sender address for citizen alert emails              |
 | Environment | `production`          | Required by `deploy.yml`; restrict to `main` (reviewers optional) |
 
 The workflow's environment-gated OIDC token contains the `production` Environment subject, not a
@@ -58,6 +59,7 @@ only; the IAM trust alone cannot recover the branch name from that subject.
 Also confirm Bedrock model access is enabled for `BEDROCK_MODEL_ID`
 (`eu.anthropic.claude-haiku-4-5-20251001-v1:0` by default, via the EU inference profile) in
 `AWS_REGION`. See [ADR-0017](../adr/0017-aws-account-identity-and-region-topology.md).
+Verify the `ALERT_FROM_EMAIL` address or domain in SES in the same region before deploying.
 
 ### Deploy
 

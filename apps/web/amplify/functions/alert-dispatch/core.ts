@@ -37,16 +37,26 @@ export interface AlertDispatchDeps {
 }
 
 const SUPPORTED_CHANNELS: readonly AlertChannel[] = [AlertChannel.SMS, AlertChannel.EMAIL];
+/** Shorter than the queue's 180-second visibility timeout, so crashed attempts can resume. */
+const DELIVERY_ATTEMPT_LEASE_MS = 120_000;
+
+class MissingContactError extends Error {}
 
 function deliveryId(reportId: string, recipientId: string, channel: AlertChannel): string {
   return `${reportId}#${recipientId}#${channel}`;
 }
 
+/** Stable Cognito identifier extracted from Amplify's default owner representation. */
+export function recipientIdFromOwner(owner: string): string {
+  const delimiter = owner.indexOf('::');
+  return delimiter > 0 ? owner.slice(0, delimiter) : owner;
+}
+
 /**
- * Attempts one channel for one matched subscription. Idempotent (skips if a
- * delivery record already exists) and self-contained: a failure here is
- * logged and recorded as `FAILED`, never thrown — one recipient's bad contact
- * info or a transient SNS/SES error must not stop the rest of the fan-out.
+ * Attempts one channel for one matched subscription. SENT deliveries are
+ * skipped; failed or expired PENDING attempts are claimed again. The outcome
+ * lets the caller finish the fan-out before asking SQS to retry transient
+ * provider/infrastructure failures.
  */
 async function dispatchChannel(
   deps: AlertDispatchDeps,
@@ -55,25 +65,31 @@ async function dispatchChannel(
   channel: AlertChannel,
   log: (entry: Record<string, unknown>) => void,
   nowIso: string,
-): Promise<void> {
-  const id = deliveryId(candidate.reportId, subscription.userId, channel);
-  const created = await deps.store.putDeliveryIfAbsent({
-    id,
-    reportId: candidate.reportId,
-    recipientId: subscription.userId,
-    channel,
-    status: AlertDeliveryStatus.PENDING,
-    attempts: 0,
-    lastAttemptAt: null,
-    createdAt: nowIso,
+  leaseExpiresBefore: string,
+): Promise<'sent' | 'skipped' | 'permanent-failure' | 'retryable-failure'> {
+  const recipientId = recipientIdFromOwner(subscription.userId);
+  const id = deliveryId(candidate.reportId, recipientId, channel);
+  const attempts = await deps.store.claimDeliveryAttempt({
+    delivery: {
+      id,
+      reportId: candidate.reportId,
+      recipientId,
+      channel,
+      status: AlertDeliveryStatus.PENDING,
+      attempts: 0,
+      lastAttemptAt: nowIso,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    },
+    leaseExpiresBefore,
   });
-  if (!created) {
-    log({ event: 'alert.delivery.skip.duplicate', id });
-    return;
+  if (attempts == null) {
+    log({ event: 'alert.delivery.skip.duplicate', reportId: candidate.reportId, channel });
+    return 'skipped';
   }
 
   try {
-    const contact = await deps.lookupContact(subscription.userId);
+    const contact = await deps.lookupContact(recipientId);
     if (channel === AlertChannel.SMS && contact?.phoneNumber) {
       await deps.deliver.deliverSms(
         contact.phoneNumber,
@@ -86,28 +102,43 @@ async function dispatchChannel(
         `A ${candidate.priorityBand} incident (${candidate.category ?? 'uncategorized'}) was reported near your subscribed area.`,
       );
     } else {
-      throw new Error(`no ${channel} contact info for user`);
+      throw new MissingContactError(`no ${channel} contact info for user`);
     }
     await deps.store.updateDeliveryStatus({
       id,
       status: AlertDeliveryStatus.SENT,
-      attempts: 1,
+      attempts,
       lastAttemptAt: nowIso,
     });
-    log({ event: 'alert.delivery.sent', id, channel });
+    log({ event: 'alert.delivery.sent', reportId: candidate.reportId, channel, attempts });
+    return 'sent';
   } catch (err) {
-    await deps.store.updateDeliveryStatus({
-      id,
-      status: AlertDeliveryStatus.FAILED,
-      attempts: 1,
-      lastAttemptAt: nowIso,
-    });
+    let statusRecorded = true;
+    try {
+      await deps.store.updateDeliveryStatus({
+        id,
+        status: AlertDeliveryStatus.FAILED,
+        attempts,
+        lastAttemptAt: nowIso,
+      });
+    } catch (statusErr) {
+      statusRecorded = false;
+      log({
+        event: 'alert.delivery.statusUpdateFailed',
+        reportId: candidate.reportId,
+        channel,
+        errorType: statusErr instanceof Error ? statusErr.name : typeof statusErr,
+      });
+    }
     log({
       event: 'alert.delivery.failed',
-      id,
+      reportId: candidate.reportId,
       channel,
-      reason: err instanceof Error ? err.message : String(err),
+      errorType: err instanceof Error ? err.name : typeof err,
     });
+    return err instanceof MissingContactError && statusRecorded
+      ? 'permanent-failure'
+      : 'retryable-failure';
   }
 }
 
@@ -122,7 +153,9 @@ export async function processCandidate(
   candidate: AlertCandidate,
 ): Promise<void> {
   const log = deps.log ?? ((entry) => console.log(JSON.stringify(entry)));
-  const nowIso = (deps.now ?? (() => new Date()))().toISOString();
+  const now = (deps.now ?? (() => new Date()))();
+  const nowIso = now.toISOString();
+  const leaseExpiresBefore = new Date(now.getTime() - DELIVERY_ATTEMPT_LEASE_MS).toISOString();
 
   // Two independent, non-exclusive candidate sets (CRIS-34): a subscription
   // may set a regionId, a geofence (centerGeohash/radiusMeters), or both — and
@@ -143,6 +176,7 @@ export async function processCandidate(
   }
 
   let matched = 0;
+  let retryableFailures = 0;
 
   for (const subscription of subscriptions) {
     if (!matchesSubscription(subscription, candidate)) continue;
@@ -155,11 +189,20 @@ export async function processCandidate(
       (c) => !(SUPPORTED_CHANNELS as readonly string[]).includes(c),
     );
     for (const c of unsupported) {
-      log({ event: 'alert.channel.unsupported', channel: c, userId: subscription.userId });
+      log({ event: 'alert.channel.unsupported', channel: c, reportId: candidate.reportId });
     }
 
     for (const channel of channels) {
-      await dispatchChannel(deps, candidate, subscription, channel, log, nowIso);
+      const outcome = await dispatchChannel(
+        deps,
+        candidate,
+        subscription,
+        channel,
+        log,
+        nowIso,
+        leaseExpiresBefore,
+      );
+      if (outcome === 'retryable-failure') retryableFailures += 1;
     }
   }
 
@@ -168,5 +211,10 @@ export async function processCandidate(
     reportId: candidate.reportId,
     subscriptions: subscriptions.length,
     matched,
+    retryableFailures,
   });
+
+  if (retryableFailures > 0) {
+    throw new Error(`${retryableFailures} alert delivery attempt(s) need retry`);
+  }
 }

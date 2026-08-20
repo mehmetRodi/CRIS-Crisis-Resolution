@@ -20,7 +20,7 @@ import {
  * the same `Template.fromStack` pattern as `security/encryption.test.ts`.
  */
 
-const EXPECTED_ALARMS = 13;
+const EXPECTED_ALARMS = 16;
 
 interface SynthesizedObservability {
   template: Template;
@@ -54,6 +54,7 @@ function synthesizeObservability(): SynthesizedObservability {
     transitionReport: lambdaStub(data, 'TransitionReportFn'),
     publishReportUpdate: lambdaStub(data, 'PublishReportUpdateFn'),
     classifyReport: lambdaStub(data, 'ClassifyReportFn'),
+    alertDispatch: lambdaStub(data, 'AlertDispatchFn'),
     createMediaUploadUrl: lambdaStub(data, 'CreateMediaUploadUrlFn'),
     listVolunteerTasks: lambdaStub(data, 'ListVolunteerTasksFn'),
     assignTeam: lambdaStub(data, 'AssignTeamFn'),
@@ -65,12 +66,16 @@ function synthesizeObservability(): SynthesizedObservability {
     deadLetterQueue: { queue: classificationDlq, maxReceiveCount: 3 },
   });
   const pipeDlq = new Queue(data, 'ReportStreamPipeDlq');
+  const alertDlq = new Queue(data, 'AlertDlq');
+  const alertPipeDlq = new Queue(data, 'AlertStreamPipeDlq');
 
   addObservability({
     scope: data,
     functions,
     classificationQueue,
     classificationDlq,
+    alertDlq,
+    alertPipeDlq,
     pipeDlq,
     encryptionKey,
     graphqlApiId: 'testGraphqlApiId',
@@ -120,7 +125,12 @@ describe('observability baseline (ADR-0015, ADR-0051)', () => {
   it('pages on a single message in either DLQ (§5.4.4 never-lost)', () => {
     const { alarms } = synthesizeObservability();
 
-    for (const prefix of ['ClassificationDlqNotEmpty', 'ReportStreamPipeDlqNotEmpty']) {
+    for (const prefix of [
+      'ClassificationDlqNotEmpty',
+      'AlertDlqNotEmpty',
+      'AlertStreamPipeDlqNotEmpty',
+      'ReportStreamPipeDlqNotEmpty',
+    ]) {
       expect(alarmByLogicalIdPrefix(alarms, prefix)).toMatchObject({
         MetricName: 'ApproximateNumberOfMessagesVisible',
         Namespace: 'AWS/SQS',
@@ -166,6 +176,7 @@ describe('observability baseline (ADR-0015, ADR-0051)', () => {
     for (const prefix of [
       'PublishReportUpdateErrors',
       'ClassifyWorkerErrors',
+      'AlertDispatchErrors',
       'VolunteerTasksErrors',
       'CitizenRoleAssignmentErrors',
     ]) {

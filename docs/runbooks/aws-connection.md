@@ -156,6 +156,7 @@ CRIS-35 deploy. `ampx pipeline-deploy` does not update this bootstrap role.
 | Variable    | `AWS_REGION`          | `eu-central-1` (must have Bedrock model access)                   |
 | Secret      | `AWS_DEPLOY_ROLE_ARN` | ARN of the role from step 4                                       |
 | Secret      | `AMPLIFY_APP_ID`      | App ID from step 2                                                |
+| Secret      | `ALERT_FROM_EMAIL`    | SES-verified sender address for citizen alert emails              |
 | Environment | `production`          | Required by `deploy.yml`; restrict to `main` (reviewers optional) |
 
 Until `AWS_DEPLOY_ENABLED == 'true'`, the Deploy workflow is a skipped no-op (green).
@@ -190,7 +191,8 @@ aws sns subscribe \
 - [ ] CDK bootstrap stack exists in `<ACCOUNT_ID>/<REGION>`.
 - [ ] Deploy role trust lists only the exact `main` ref and `production` Environment subjects.
 - [ ] The `production` Environment allows deployments from `main` only.
-- [ ] No static AWS keys in GitHub secrets — only `AWS_DEPLOY_ROLE_ARN` + `AMPLIFY_APP_ID`.
+- [ ] No static AWS keys in GitHub secrets — only deployment identifiers/configuration.
+- [ ] `ALERT_FROM_EMAIL` is verified in SES in `AWS_REGION`.
 - [ ] `AWS_REGION` has Bedrock access for `BEDROCK_MODEL_ID`.
 - [ ] `amplify_outputs.json` is still git-ignored and not committed.
 - [ ] Manual `workflow_dispatch` deploy succeeds before enabling auto-deploy on `main`.

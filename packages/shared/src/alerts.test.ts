@@ -41,6 +41,7 @@ describe('matchesSubscription', () => {
 
   it('rejects an inactive subscription', () => {
     expect(matchesSubscription(subscription({ active: false }), candidate())).toBe(false);
+    expect(matchesSubscription(subscription({ active: null }), candidate())).toBe(false);
   });
 
   it('filters by category, treating an unclassified candidate as excluded', () => {
@@ -71,6 +72,27 @@ describe('matchesSubscription', () => {
   it('treats a subscription with no geofence as region-wide (no distance check)', () => {
     const sub = subscription();
     expect(matchesSubscription(sub, candidate({ lat: null, lng: null }))).toBe(true);
+  });
+
+  it('rejects incomplete or malformed geofences without throwing', () => {
+    expect(
+      matchesSubscription(
+        subscription({ centerGeohash: 'sxk97', radiusMeters: null }),
+        candidate(),
+      ),
+    ).toBe(false);
+    expect(
+      matchesSubscription(subscription({ centerGeohash: null, radiusMeters: 500 }), candidate()),
+    ).toBe(false);
+    expect(
+      matchesSubscription(
+        subscription({ centerGeohash: 'invalid!', radiusMeters: 500 }),
+        candidate(),
+      ),
+    ).toBe(false);
+    expect(
+      matchesSubscription(subscription({ centerGeohash: 'sxk97', radiusMeters: -1 }), candidate()),
+    ).toBe(false);
   });
 
   it('combines all active filters with AND', () => {

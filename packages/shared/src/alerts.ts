@@ -77,7 +77,9 @@ export function matchesSubscription(
   subscription: AlertSubscriptionFilter,
   candidate: AlertCandidate,
 ): boolean {
-  if (subscription.active === false) return false;
+  // Alerts are opt-in. An absent flag is not enough evidence that a
+  // subscription should receive emergency notifications.
+  if (subscription.active !== true) return false;
 
   if (subscription.categories && subscription.categories.length > 0) {
     if (!candidate.category || !subscription.categories.includes(candidate.category)) {
@@ -91,9 +93,20 @@ export function matchesSubscription(
     }
   }
 
+  const hasCenter = Boolean(subscription.centerGeohash);
+  const hasRadius = subscription.radiusMeters != null;
+  // A half-configured or invalid geofence must never widen into a region-wide
+  // match, and user-authored data must never poison the whole SQS record.
+  if (hasCenter !== hasRadius || (hasRadius && subscription.radiusMeters! < 0)) return false;
+
   if (subscription.centerGeohash && subscription.radiusMeters != null) {
     if (candidate.lat == null || candidate.lng == null) return false;
-    const center = decodeGeohash(subscription.centerGeohash);
+    let center;
+    try {
+      center = decodeGeohash(subscription.centerGeohash);
+    } catch {
+      return false;
+    }
     if (
       distanceMeters(center.lat, center.lng, candidate.lat, candidate.lng) >
       subscription.radiusMeters

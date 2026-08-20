@@ -1,11 +1,19 @@
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import {
   DynamoDBDocumentClient,
-  PutCommand,
+  GetCommand,
   QueryCommand,
   UpdateCommand,
+  type QueryCommandInput,
 } from '@aws-sdk/lib-dynamodb';
-import { AlertDeliveryStatus, type AlertChannel, type Urgency } from '@crisismap/shared';
+import {
+  AlertDeliveryStatus,
+  Category,
+  Urgency,
+  type AlertCandidate,
+  type AlertChannel,
+  type PriorityBand,
+} from '@crisismap/shared';
 
 /**
  * Durable persistence for the alert-dispatch worker (design doc §2.7, §5,
@@ -36,9 +44,12 @@ export interface AlertDeliveryRecord {
   attempts: number;
   lastAttemptAt: string | null;
   createdAt: string;
+  updatedAt: string;
 }
 
 export interface AlertStore {
+  /** Reads only the PII-free report fields required for alert matching. */
+  getAlertCandidate(reportId: string, priorityBand: PriorityBand): Promise<AlertCandidate | null>;
   /** Active subscriptions in a region — one of two independent candidate sets (§2.7). */
   queryActiveSubscriptions(regionId: string): Promise<AlertSubscriptionRecord[]>;
   /**
@@ -49,12 +60,11 @@ export interface AlertStore {
   queryActiveSubscriptionsByGeohashPrefix(
     geohashPrefix: string,
   ): Promise<AlertSubscriptionRecord[]>;
-  /**
-   * Conditionally creates the delivery record. Returns `false` (no write) when
-   * one already exists at this id — the idempotency guard against an
-   * at-least-once SQS redelivery double-dispatching the same alert.
-   */
-  putDeliveryIfAbsent(delivery: AlertDeliveryRecord): Promise<boolean>;
+  /** Claims a new, failed, or expired delivery attempt; returns its attempt count. */
+  claimDeliveryAttempt(input: {
+    delivery: AlertDeliveryRecord;
+    leaseExpiresBefore: string;
+  }): Promise<number | null>;
   /** Records the outcome of a delivery attempt. */
   updateDeliveryStatus(input: {
     id: string;
@@ -65,6 +75,7 @@ export interface AlertStore {
 }
 
 export interface AlertStoreTables {
+  report: string;
   alertSubscription: string;
   alertDelivery: string;
   /**
@@ -104,6 +115,22 @@ function toSubscriptionRecord(item: Record<string, unknown>): AlertSubscriptionR
   };
 }
 
+async function queryAll(
+  doc: DynamoDBDocumentClient,
+  input: QueryCommandInput,
+): Promise<Record<string, unknown>[]> {
+  const items: Record<string, unknown>[] = [];
+  let exclusiveStartKey: Record<string, unknown> | undefined;
+  do {
+    const page = await doc.send(
+      new QueryCommand({ ...input, ExclusiveStartKey: exclusiveStartKey }),
+    );
+    items.push(...((page.Items ?? []) as Record<string, unknown>[]));
+    exclusiveStartKey = page.LastEvaluatedKey;
+  } while (exclusiveStartKey);
+  return items;
+}
+
 export function createDynamoAlertStore(
   tables: AlertStoreTables,
   client?: DynamoDBDocumentClient,
@@ -115,42 +142,89 @@ export function createDynamoAlertStore(
     });
 
   return {
-    async queryActiveSubscriptions(regionId) {
-      const { Items = [] } = await doc.send(
-        new QueryCommand({
-          TableName: tables.alertSubscription,
-          IndexName: tables.regionIndex,
-          KeyConditionExpression: 'regionId = :regionId',
-          ExpressionAttributeValues: { ':regionId': regionId },
+    async getAlertCandidate(reportId, priorityBand) {
+      const { Item } = await doc.send(
+        new GetCommand({
+          TableName: tables.report,
+          Key: { id: reportId },
+          ProjectionExpression: '#id, category, urgency, regionId, lat, lng, geohashPrefix',
+          ExpressionAttributeNames: { '#id': 'id' },
         }),
       );
-      return Items.map(toSubscriptionRecord);
+      if (!Item) return null;
+      return {
+        reportId: Item.id as string,
+        category: Object.values(Category).includes(Item.category as Category)
+          ? (Item.category as Category)
+          : null,
+        urgency: Object.values(Urgency).includes(Item.urgency as Urgency)
+          ? (Item.urgency as Urgency)
+          : null,
+        priorityBand,
+        regionId: (Item.regionId as string | undefined) ?? null,
+        lat: (Item.lat as number | undefined) ?? null,
+        lng: (Item.lng as number | undefined) ?? null,
+        geohashPrefix: (Item.geohashPrefix as string | undefined) ?? null,
+      };
+    },
+
+    async queryActiveSubscriptions(regionId) {
+      const items = await queryAll(doc, {
+        TableName: tables.alertSubscription,
+        IndexName: tables.regionIndex,
+        KeyConditionExpression: 'regionId = :regionId',
+        ExpressionAttributeValues: { ':regionId': regionId },
+      });
+      return items.map(toSubscriptionRecord);
     },
 
     async queryActiveSubscriptionsByGeohashPrefix(geohashPrefix) {
-      const { Items = [] } = await doc.send(
-        new QueryCommand({
-          TableName: tables.alertSubscription,
-          IndexName: tables.geohashPrefixIndex,
-          KeyConditionExpression: 'centerGeohashPrefix = :prefix',
-          ExpressionAttributeValues: { ':prefix': geohashPrefix },
-        }),
-      );
-      return Items.map(toSubscriptionRecord);
+      const items = await queryAll(doc, {
+        TableName: tables.alertSubscription,
+        IndexName: tables.geohashPrefixIndex,
+        KeyConditionExpression: 'centerGeohashPrefix = :prefix',
+        ExpressionAttributeValues: { ':prefix': geohashPrefix },
+      });
+      return items.map(toSubscriptionRecord);
     },
 
-    async putDeliveryIfAbsent(delivery) {
+    async claimDeliveryAttempt({ delivery, leaseExpiresBefore }) {
       try {
-        await doc.send(
-          new PutCommand({
+        const result = await doc.send(
+          new UpdateCommand({
             TableName: tables.alertDelivery,
-            Item: delivery,
-            ConditionExpression: 'attribute_not_exists(id)',
+            Key: { id: delivery.id },
+            UpdateExpression:
+              'SET #reportId = if_not_exists(#reportId, :reportId), #recipientId = if_not_exists(#recipientId, :recipientId), #channel = if_not_exists(#channel, :channel), #createdAt = if_not_exists(#createdAt, :now), #s = :pending, #attempts = if_not_exists(#attempts, :zero) + :one, #lastAttemptAt = :now, #updatedAt = :now',
+            ConditionExpression:
+              'attribute_not_exists(id) OR #s = :failed OR (#s = :pending AND (attribute_not_exists(#lastAttemptAt) OR #lastAttemptAt < :leaseExpiresBefore))',
+            ExpressionAttributeNames: {
+              '#reportId': 'reportId',
+              '#recipientId': 'recipientId',
+              '#channel': 'channel',
+              '#createdAt': 'createdAt',
+              '#s': 'status',
+              '#attempts': 'attempts',
+              '#lastAttemptAt': 'lastAttemptAt',
+              '#updatedAt': 'updatedAt',
+            },
+            ExpressionAttributeValues: {
+              ':reportId': delivery.reportId,
+              ':recipientId': delivery.recipientId,
+              ':channel': delivery.channel,
+              ':pending': AlertDeliveryStatus.PENDING,
+              ':failed': AlertDeliveryStatus.FAILED,
+              ':zero': 0,
+              ':one': 1,
+              ':now': delivery.updatedAt,
+              ':leaseExpiresBefore': leaseExpiresBefore,
+            },
+            ReturnValues: 'ALL_NEW',
           }),
         );
-        return true;
+        return (result.Attributes?.attempts as number | undefined) ?? 1;
       } catch (err) {
-        if (isConditionalCheckFailed(err)) return false;
+        if (isConditionalCheckFailed(err)) return null;
         throw err;
       }
     },
@@ -160,7 +234,8 @@ export function createDynamoAlertStore(
         new UpdateCommand({
           TableName: tables.alertDelivery,
           Key: { id: input.id },
-          UpdateExpression: 'SET #s = :status, attempts = :attempts, lastAttemptAt = :now',
+          UpdateExpression:
+            'SET #s = :status, attempts = :attempts, lastAttemptAt = :now, updatedAt = :now',
           ExpressionAttributeNames: { '#s': 'status' },
           ExpressionAttributeValues: {
             ':status': input.status,

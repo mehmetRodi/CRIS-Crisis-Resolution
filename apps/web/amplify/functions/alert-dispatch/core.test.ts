@@ -52,16 +52,32 @@ function fakeDeps(
   const deliveries = new Map<string, AlertDeliveryRecord>();
 
   const store: AlertStore = {
+    async getAlertCandidate() {
+      return candidate();
+    },
     async queryActiveSubscriptions() {
       return subscriptions;
     },
     async queryActiveSubscriptionsByGeohashPrefix() {
       return subscriptions;
     },
-    async putDeliveryIfAbsent(delivery) {
-      if (deliveries.has(delivery.id)) return false;
-      deliveries.set(delivery.id, delivery);
-      return true;
+    async claimDeliveryAttempt({ delivery, leaseExpiresBefore }) {
+      const existing = deliveries.get(delivery.id);
+      if (
+        existing?.status === AlertDeliveryStatus.SENT ||
+        (existing?.status === AlertDeliveryStatus.PENDING &&
+          existing.lastAttemptAt != null &&
+          existing.lastAttemptAt >= leaseExpiresBefore)
+      ) {
+        return null;
+      }
+      const attempts = (existing?.attempts ?? 0) + 1;
+      deliveries.set(delivery.id, {
+        ...delivery,
+        createdAt: existing?.createdAt ?? delivery.createdAt,
+        attempts,
+      });
+      return attempts;
     },
     async updateDeliveryStatus(input) {
       const existing = deliveries.get(input.id);
@@ -71,6 +87,7 @@ function fakeDeps(
           status: input.status,
           attempts: input.attempts,
           lastAttemptAt: input.lastAttemptAt,
+          updatedAt: input.lastAttemptAt,
         });
       }
     },
@@ -137,6 +154,19 @@ describe('processCandidate', () => {
     }
   });
 
+  it('uses the Cognito sub rather than the composite owner value as recipient id', async () => {
+    const { deps, deliveries } = fakeDeps(
+      [subscription({ userId: 'user-sub::citizen@example.com', channels: [AlertChannel.EMAIL] })],
+      {
+        'user-sub': { email: 'citizen@example.com', phoneNumber: null },
+      },
+    );
+
+    await processCandidate(deps, candidate());
+
+    expect(deliveries.has('report-1#user-sub#EMAIL')).toBe(true);
+  });
+
   it('skips an inactive subscription', async () => {
     const { deps, deliveries } = fakeDeps([subscription({ active: false })]);
     await processCandidate(deps, candidate());
@@ -167,17 +197,35 @@ describe('processCandidate', () => {
     expect(deliverEmail).toHaveBeenCalledTimes(1);
   });
 
-  it('records FAILED and continues when delivery throws, without failing other recipients', async () => {
-    const { deps, deliveries } = fakeDeps([subscription({ id: 'sub-1', userId: 'user-1' })]);
+  it('records FAILED, finishes the fan-out, and asks SQS to retry a provider failure', async () => {
+    const { deps, deliveries, deliverEmail } = fakeDeps([
+      subscription({ id: 'sub-1', userId: 'user-1' }),
+    ]);
     (deps.deliver.deliverSms as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new Error('SNS unavailable'),
     );
-    await processCandidate(deps, candidate());
+    await expect(processCandidate(deps, candidate())).rejects.toThrow('need retry');
 
     const sms = deliveries.get('report-1#user-1#SMS');
     expect(sms?.status).toBe(AlertDeliveryStatus.FAILED);
     const email = deliveries.get('report-1#user-1#EMAIL');
     expect(email?.status).toBe(AlertDeliveryStatus.SENT);
+    expect(deliverEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries FAILED channels without resending channels already marked SENT', async () => {
+    const { deps, deliveries, deliverSms, deliverEmail } = fakeDeps([subscription()]);
+    deliverSms.mockRejectedValueOnce(new Error('SNS unavailable'));
+
+    await expect(processCandidate(deps, candidate())).rejects.toThrow('need retry');
+    await processCandidate(deps, candidate());
+
+    expect(deliverSms).toHaveBeenCalledTimes(2);
+    expect(deliverEmail).toHaveBeenCalledTimes(1);
+    expect(deliveries.get('report-1#user-1#SMS')).toMatchObject({
+      status: AlertDeliveryStatus.SENT,
+      attempts: 2,
+    });
   });
 
   it('records FAILED when the recipient has no contact info for the channel', async () => {
