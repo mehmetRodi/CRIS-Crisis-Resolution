@@ -85,7 +85,10 @@ describe('matchesSubscription', () => {
       matchesSubscription(sub, candidate({ category: Category.FIRE, urgency: Urgency.CRITICAL })),
     ).toBe(true);
     expect(
-      matchesSubscription(sub, candidate({ category: Category.MEDICAL, urgency: Urgency.CRITICAL })),
+      matchesSubscription(
+        sub,
+        candidate({ category: Category.MEDICAL, urgency: Urgency.CRITICAL }),
+      ),
     ).toBe(false);
   });
 });

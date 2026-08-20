@@ -1,4 +1,9 @@
-import { AlertChannel, AlertDeliveryStatus, matchesSubscription, type AlertCandidate } from '@crisismap/shared';
+import {
+  AlertChannel,
+  AlertDeliveryStatus,
+  matchesSubscription,
+  type AlertCandidate,
+} from '@crisismap/shared';
 import type { AlertStore, AlertSubscriptionRecord } from './store';
 import type { Deliverer } from './deliver';
 

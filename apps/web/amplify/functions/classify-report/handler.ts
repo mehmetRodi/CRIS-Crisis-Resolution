@@ -164,7 +164,11 @@ async function enqueueAlert(
 ): Promise<void> {
   try {
     await deps.alertEnqueuer(candidate);
-    log({ event: 'alert.enqueue.done', reportId: candidate.reportId, band: candidate.priorityBand });
+    log({
+      event: 'alert.enqueue.done',
+      reportId: candidate.reportId,
+      band: candidate.priorityBand,
+    });
   } catch (err) {
     log({
       event: 'alert.enqueue.failed',

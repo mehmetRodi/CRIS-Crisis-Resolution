@@ -67,9 +67,7 @@ describe('decodeGeohash', () => {
     const hash = encodeGeohash(original.lat, original.lng);
     const decoded = decodeGeohash(hash);
     // Precision-7 cells are ~153m — well within a fraction of a degree.
-    expect(distanceMeters(original.lat, original.lng, decoded.lat, decoded.lng)).toBeLessThan(
-      200,
-    );
+    expect(distanceMeters(original.lat, original.lng, decoded.lat, decoded.lng)).toBeLessThan(200);
   });
 
   it('rejects an invalid geohash character', () => {

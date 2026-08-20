@@ -1,5 +1,10 @@
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
-import { ALERT_TRIGGER_BANDS, ReportStatus, type AlertCandidate, type PriorityBand } from '@crisismap/shared';
+import {
+  ALERT_TRIGGER_BANDS,
+  ReportStatus,
+  type AlertCandidate,
+  type PriorityBand,
+} from '@crisismap/shared';
 
 /**
  * Enqueues threshold-crossing classifications onto the proximity-alert queue

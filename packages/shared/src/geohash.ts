@@ -138,4 +138,3 @@ export function decodeGeohash(hash: string): GeoPoint {
 
   return { lat: (latMin + latMax) / 2, lng: (lngMin + lngMax) / 2 };
 }
-

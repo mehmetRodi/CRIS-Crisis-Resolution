@@ -46,7 +46,9 @@ export interface AlertStore {
    * the other candidate set, for a subscription with no `regionId` (CRIS-34).
    * The caller merges both by `id` before matching.
    */
-  queryActiveSubscriptionsByGeohashPrefix(geohashPrefix: string): Promise<AlertSubscriptionRecord[]>;
+  queryActiveSubscriptionsByGeohashPrefix(
+    geohashPrefix: string,
+  ): Promise<AlertSubscriptionRecord[]>;
   /**
    * Conditionally creates the delivery record. Returns `false` (no write) when
    * one already exists at this id — the idempotency guard against an

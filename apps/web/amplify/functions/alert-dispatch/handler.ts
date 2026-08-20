@@ -81,8 +81,7 @@ function buildDeps(): AlertDispatchDeps {
       const { UserAttributes } = await cognito.send(
         new AdminGetUserCommand({ UserPoolId: userPoolId, Username: userId }),
       );
-      const attr = (name: string) =>
-        UserAttributes?.find((a) => a.Name === name)?.Value ?? null;
+      const attr = (name: string) => UserAttributes?.find((a) => a.Name === name)?.Value ?? null;
       return { email: attr('email'), phoneNumber: attr('phone_number') };
     } catch {
       return null;

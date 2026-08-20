@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { AlertChannel, AlertDeliveryStatus, Category, PriorityBand, Urgency } from '@crisismap/shared';
+import {
+  AlertChannel,
+  AlertDeliveryStatus,
+  Category,
+  PriorityBand,
+  Urgency,
+} from '@crisismap/shared';
 import { processCandidate, type AlertDispatchDeps, type ContactInfo } from './core';
 import type { AlertDeliveryRecord, AlertStore, AlertSubscriptionRecord } from './store';
 import type { Deliverer } from './deliver';
@@ -75,7 +81,9 @@ function fakeDeps(
   const deliver: Deliverer = { deliverSms, deliverEmail };
 
   const lookupContact = async (userId: string) =>
-    userId in contacts ? contacts[userId]! : { email: 'user@example.com', phoneNumber: '+15551234567' };
+    userId in contacts
+      ? contacts[userId]!
+      : { email: 'user@example.com', phoneNumber: '+15551234567' };
 
   const deps: AlertDispatchDeps = {
     store,
@@ -173,7 +181,9 @@ describe('processCandidate', () => {
   });
 
   it('records FAILED when the recipient has no contact info for the channel', async () => {
-    const { deps, deliveries } = fakeDeps([subscription()], { 'user-1': { email: null, phoneNumber: null } });
+    const { deps, deliveries } = fakeDeps([subscription()], {
+      'user-1': { email: null, phoneNumber: null },
+    });
     await processCandidate(deps, candidate());
     expect(deliveries.get('report-1#user-1#SMS')?.status).toBe(AlertDeliveryStatus.FAILED);
     expect(deliveries.get('report-1#user-1#EMAIL')?.status).toBe(AlertDeliveryStatus.FAILED);

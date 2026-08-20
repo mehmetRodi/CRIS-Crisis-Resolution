@@ -94,7 +94,10 @@ export function matchesSubscription(
   if (subscription.centerGeohash && subscription.radiusMeters != null) {
     if (candidate.lat == null || candidate.lng == null) return false;
     const center = decodeGeohash(subscription.centerGeohash);
-    if (distanceMeters(center.lat, center.lng, candidate.lat, candidate.lng) > subscription.radiusMeters) {
+    if (
+      distanceMeters(center.lat, center.lng, candidate.lat, candidate.lng) >
+      subscription.radiusMeters
+    ) {
       return false;
     }
   }

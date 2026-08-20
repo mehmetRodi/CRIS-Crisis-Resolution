@@ -66,7 +66,7 @@ here.
   exactly that — until real end-to-end testing showed `Report.regionId` is never actually set
   by either citizen client today (neither `apps/web` nor `apps/mobile` collects one), which
   would have made every region-scoped subscription permanently unreachable, and a
-  geofence-only subscription (`centerGeohash`/`radiusMeters`, no region) was *already*
+  geofence-only subscription (`centerGeohash`/`radiusMeters`, no region) was _already_
   undiscoverable by construction — region-only lookup can't find it regardless. Rejected in
   favor of two independent, merged candidate-discovery paths (see Decision).
 - **Decompose a subscription's radius into the full set of geohash-prefix cells it could touch**
@@ -79,7 +79,7 @@ here.
 ## Decision
 
 1. **`classify-report` gains a new best-effort step** (`alert-enqueue.ts`): `shouldAlert(status,
-   priorityBand)` is a pure gate — only `AI_CLASSIFIED` (never `NEEDS_VERIFICATION`; the system
+priorityBand)` is a pure gate — only `AI_CLASSIFIED` (never `NEEDS_VERIFICATION`; the system
    doesn't alert the public off a classification it isn't confident enough in to skip human
    review) at `P0`/`P1` (`ALERT_TRIGGER_BANDS`, `packages/shared/src/alerts.ts`) enqueues. The
    enqueued message carries only PII-free fields (`reportId`, `category`, `urgency`,
@@ -109,10 +109,10 @@ here.
    (`` `${reportId}#${recipientId}#${channel}` ``, condition `attribute_not_exists(id)` — the
    same idempotency pattern already used for `ReportEvent`/`Assignment` puts), so an
    at-least-once SQS redelivery can't double-dispatch. SMS sends via `SNSClient.Publish({
-   PhoneNumber })`; email via `SESv2Client.SendEmail`. A per-recipient delivery failure is
+PhoneNumber })`; email via `SESv2Client.SendEmail`. A per-recipient delivery failure is
    caught, recorded as `AlertDelivery.status = FAILED`, and logged — it never fails the whole
    SQS record, the same "one bad candidate must not block the others" discipline as `classify-
-   report`'s dedup/publish steps.
+report`'s dedup/publish steps.
 4. **Recipient contact info comes from Cognito** (`cognito-idp:AdminGetUser`), not a
    denormalized field — see "Options considered."
 5. **`alert-dispatch` is traced (X-Ray) but not added to the observability dashboard's fixed
@@ -129,7 +129,7 @@ here.
 - **Give up / interim:** push notifications remain undelivered (declarable, silently skipped
   with a log line) until device-token infrastructure exists; a report with neither a `regionId`
   nor a resolved location can never match anything (correctly — there is nothing to be
-  "proximate" to); geofence matching only checks the report's location against the *single*
+  "proximate" to); geofence matching only checks the report's location against the _single_
   geohash-prefix cell the subscription's `centerGeohash` falls in, not every cell its
   `radiusMeters` could reach, so a subscription can miss a report near a cell boundary (the
   same accepted tradeoff `classify-report`'s own duplicate-candidate query already makes,
