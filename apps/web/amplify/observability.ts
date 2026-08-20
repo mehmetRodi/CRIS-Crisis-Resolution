@@ -5,6 +5,7 @@ import {
   Dashboard,
   GraphWidget,
   MathExpression,
+  Metric,
   Row,
   Stats,
   TextWidget,
@@ -73,6 +74,11 @@ export interface ObservabilityProps {
    * `addObservability` installs the required CloudWatch, SNS, and KMS policies.
    */
   encryptionKey: IKey;
+  /**
+   * GraphQL API id (`CfnGraphQLApi.attrApiId`) for the API-level 5XX alarm
+   * (ADR-0050) — failures AppSync serves itself never appear in any Lambda metric.
+   */
+  graphqlApiId: string;
 }
 
 /** §3.2 targets, in the units CloudWatch reports them. */
@@ -81,8 +87,15 @@ const CLASSIFICATION_P95_SECONDS = 15;
 
 /** Builds the ops alarm topic, alarms, and dashboard. Returns the topic so callers can subscribe. */
 export function addObservability(props: ObservabilityProps): Topic {
-  const { scope, functions, classificationQueue, classificationDlq, pipeDlq, encryptionKey } =
-    props;
+  const {
+    scope,
+    functions,
+    classificationQueue,
+    classificationDlq,
+    pipeDlq,
+    encryptionKey,
+    graphqlApiId,
+  } = props;
 
   /* ---- Ops alarm topic ---------------------------------------------------- */
   // Dedicated to operational alarms, separate from the app's (future) proximity-
@@ -251,10 +264,52 @@ export function addObservability(props: ObservabilityProps): Topic {
     }),
   );
 
+  /* ---- API surface (ADR-0050) --------------------------------------------- */
+  // 5XX from AppSync itself: request/response mapping faults, auth-plumbing
+  // breakage, resolver invoke failures — none of which increment a Lambda Errors
+  // metric. 4XX is deliberately NOT alarmed (dominated by client mistakes and
+  // auth denials) but is charted on the dashboard.
+  register(
+    new Alarm(scope, 'AppSyncServerErrors', {
+      metric: appSyncMetric(graphqlApiId, '5XXError', Duration.minutes(5)),
+      threshold: 1,
+      comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      evaluationPeriods: 1,
+      treatMissingData: TreatMissingData.NOT_BREACHING,
+      alarmDescription:
+        'AppSync returned 5XX server errors — an API-level failure independent of any resolver ' +
+        'Lambda (99.9% availability, §3.2). Check AppSync request logs and X-Ray for the failing field.',
+    }),
+  );
+
   /* ---- Dashboard ---------------------------------------------------------- */
-  buildDashboard(scope, functions, classificationQueue, classificationDlq, queueAge, dlqVisible);
+  buildDashboard(
+    scope,
+    functions,
+    classificationQueue,
+    classificationDlq,
+    queueAge,
+    dlqVisible,
+    graphqlApiId,
+  );
 
   return alarmTopic;
+}
+
+/** An AppSync API-level metric (`AWS/AppSync`, keyed by GraphQL API id). */
+function appSyncMetric(
+  graphqlApiId: string,
+  metricName: '5XXError' | '4XXError' | 'Latency',
+  period: Duration,
+  statistic: string = Stats.SUM,
+): Metric {
+  return new Metric({
+    namespace: 'AWS/AppSync',
+    metricName,
+    dimensionsMap: { GraphQLAPIId: graphqlApiId },
+    period,
+    statistic,
+  });
 }
 
 /** A standard "Lambda raised errors" alarm: any error over a 5-min window pages. */
@@ -274,7 +329,7 @@ function lambdaErrorAlarm(
   });
 }
 
-/** One-screen SLA view: submission, classification pipeline, worker, resolver health. */
+/** One-screen SLA view: submission, classification pipeline, worker, resolver + API health. */
 function buildDashboard(
   scope: Construct,
   functions: BackendFunctions,
@@ -282,6 +337,7 @@ function buildDashboard(
   dlq: IQueue,
   queueAge: IMetric,
   dlqVisible: IMetric,
+  graphqlApiId: string,
 ): void {
   const dashboard = new Dashboard(scope, 'ObservabilityDashboard', {
     // Auto-name would be an opaque hash; scope by stack so branches don't collide
@@ -409,6 +465,18 @@ function buildDashboard(
         ],
         leftYAxis: { label: 'errors', showUnits: false },
         rightYAxis: { label: 'invocations', showUnits: false },
+        width: 12,
+        height: 6,
+      }),
+      new GraphWidget({
+        title: 'API — AppSync (5XX alarmed, 4XX charted)',
+        left: [
+          appSyncMetric(graphqlApiId, '5XXError', Duration.minutes(1)),
+          appSyncMetric(graphqlApiId, '4XXError', Duration.minutes(1)),
+        ],
+        right: [appSyncMetric(graphqlApiId, 'Latency', Duration.minutes(1), Stats.percentile(95))],
+        leftYAxis: { label: 'errors', showUnits: false },
+        rightYAxis: { label: 'ms', showUnits: false },
         width: 12,
         height: 6,
       }),

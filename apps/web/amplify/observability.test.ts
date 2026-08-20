@@ -15,7 +15,7 @@ import { addObservability, type BackendFunctions } from './observability';
  * the same `Template.fromStack` pattern as `security/encryption.test.ts`.
  */
 
-const EXPECTED_ALARMS = 12;
+const EXPECTED_ALARMS = 13;
 
 interface SynthesizedObservability {
   template: Template;
@@ -68,6 +68,7 @@ function synthesizeObservability(): SynthesizedObservability {
     classificationDlq,
     pipeDlq,
     encryptionKey,
+    graphqlApiId: 'testGraphqlApiId',
   });
 
   const template = Template.fromStack(data);
@@ -164,6 +165,20 @@ describe('observability baseline (ADR-0015, ADR-0050)', () => {
       MetricName: 'Throttles',
       Namespace: 'AWS/Lambda',
       Threshold: 1,
+    });
+  });
+
+  it('alarms on AppSync 5XX server errors at the API level', () => {
+    const { alarms } = synthesizeObservability();
+
+    expect(alarmByLogicalIdPrefix(alarms, 'AppSyncServerErrors')).toMatchObject({
+      MetricName: '5XXError',
+      Namespace: 'AWS/AppSync',
+      Statistic: 'Sum',
+      Threshold: 1,
+      ComparisonOperator: 'GreaterThanOrEqualToThreshold',
+      EvaluationPeriods: 1,
+      Dimensions: [{ Name: 'GraphQLAPIId', Value: 'testGraphqlApiId' }],
     });
   });
 });

@@ -503,4 +503,5 @@ addObservability({
   classificationDlq,
   pipeDlq,
   encryptionKey: dataKey,
+  graphqlApiId: backend.data.resources.cfnResources.cfnGraphqlApi.attrApiId,
 });
