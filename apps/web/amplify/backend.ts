@@ -16,6 +16,7 @@ import { publishReportUpdate } from './functions/publish-report-update/resource'
 import { classifyReport } from './functions/classify-report/resource';
 import { createMediaUploadUrl } from './functions/create-media-upload-url/resource';
 import { listVolunteerTasks } from './functions/list-volunteer-tasks/resource';
+import { assignTeam } from './functions/assign-team/resource';
 import { alertDispatch } from './functions/alert-dispatch/resource';
 import { createDataKey } from './security/encryption';
 import { addObservability } from './observability';
@@ -43,7 +44,7 @@ import { addObservability } from './observability';
  * form a nested-stack cycle unless the worker lives in the data stack. So
  * `classify-report` is pinned to the `data` group (`resourceGroupName: 'data'`,
  * ADR-0031); every edge here is then intra-`data`-stack. CRIS-28's custom
- * subscriptions and both publisher grants live in the data schema.
+ * subscriptions and all three publisher grants live in the data schema.
  * `classify-report` also enqueues P0/P1 `AI_CLASSIFIED` reports onto a second
  * queue for `alert-dispatch` (§2.7, CRIS-34), which matches them against
  * `AlertSubscription`s and delivers SMS (SNS)/email (SES) — PUSH is
@@ -66,6 +67,7 @@ const backend = defineBackend({
   classifyReport,
   createMediaUploadUrl,
   listVolunteerTasks,
+  assignTeam,
   alertDispatch,
 });
 
@@ -204,6 +206,24 @@ tables['Team'].grantReadData(volunteerTasksFn);
 backend.listVolunteerTasks.addEnvironment('REPORT_TABLE_NAME', tables['Report'].tableName);
 backend.listVolunteerTasks.addEnvironment('ASSIGNMENT_TABLE_NAME', tables['Assignment'].tableName);
 backend.listVolunteerTasks.addEnvironment('TEAM_TABLE_NAME', tables['Team'].tableName);
+
+/* -------------------------------------------------------------------------- */
+/* assignTeam (CRIS-32) — grant table access + inject table names             */
+/* -------------------------------------------------------------------------- */
+
+const assignTeamFn = backend.assignTeam.resources.lambda;
+
+// Reads the report + team, applies the version-checked assignedTeamId update,
+// creates the Assignment record, appends the audit event.
+tables['Report'].grantReadWriteData(assignTeamFn);
+tables['Team'].grantReadData(assignTeamFn);
+tables['Assignment'].grantWriteData(assignTeamFn);
+tables['ReportEvent'].grantWriteData(assignTeamFn);
+
+backend.assignTeam.addEnvironment('REPORT_TABLE_NAME', tables['Report'].tableName);
+backend.assignTeam.addEnvironment('TEAM_TABLE_NAME', tables['Team'].tableName);
+backend.assignTeam.addEnvironment('ASSIGNMENT_TABLE_NAME', tables['Assignment'].tableName);
+backend.assignTeam.addEnvironment('REPORT_EVENT_TABLE_NAME', tables['ReportEvent'].tableName);
 
 /* -------------------------------------------------------------------------- */
 /* classify-report pipeline (CRIS-10) — Streams → Pipe → SQS → Lambda          */
@@ -527,7 +547,7 @@ backend.alertDispatch.addEnvironment(
 );
 // Physical name of the AlertSubscription.centerGeohashPrefix GSI — same
 // derivation caveat as above, the other of the two independent
-// candidate-discovery paths (CRIS-34, ADR-0049).
+// candidate-discovery paths (CRIS-34, ADR-0050).
 backend.alertDispatch.addEnvironment(
   'ALERT_SUBSCRIPTION_GEOHASH_PREFIX_INDEX_NAME',
   'alertSubscriptionsByCenterGeohashPrefix',
@@ -555,6 +575,7 @@ const tracedFunctions = [
   backend.publishReportUpdate,
   backend.classifyReport,
   backend.createMediaUploadUrl,
+  backend.assignTeam,
   backend.alertDispatch,
 ];
 for (const fn of tracedFunctions) {

@@ -1,4 +1,4 @@
-# ADR-0049: Proximity-alert pipeline (CRIS-34)
+# ADR-0050: Proximity-alert pipeline (CRIS-34)
 
 - **Status:** Accepted
 - **Date:** 2026-08-17

@@ -135,6 +135,7 @@ describe('reconcileIncident', () => {
     scoreVersion: null,
     scoreBreakdown: null,
     entities: null,
+    assignedTeamId: null,
     ...overrides,
   });
 

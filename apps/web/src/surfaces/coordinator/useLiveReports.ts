@@ -80,6 +80,7 @@ function toRedactedIncident(report: Schema['Report']['type']): CoordinatorIncide
     scoreVersion: report.scoreVersion ?? null,
     scoreBreakdown: parseScoreBreakdown(report.scoreBreakdown),
     entities: report.entities != null ? parseEntities(report.entities) : null,
+    assignedTeamId: report.assignedTeamId ?? null,
   };
 }
 
