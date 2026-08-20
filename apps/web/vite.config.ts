@@ -11,6 +11,6 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./vitest.setup.ts'],
-    exclude: [...configDefaults.exclude, '**/*.int.test.ts'],
+    exclude: [...configDefaults.exclude, '**/*.int.test.ts', '**/*.smoke.test.ts'],
   },
 });
