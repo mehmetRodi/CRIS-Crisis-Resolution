@@ -94,3 +94,18 @@ jobs:
       - name: Deploy backend (ampx pipeline-deploy)
         working-directory: apps/web
         run: npx ampx pipeline-deploy --branch "${{ github.event.workflow_run.head_branch || github.ref_name }}" --app-id "${{ secrets.AMPLIFY_APP_ID }}"
+
+      # CRIS-35 (ADR-0050): verify the deploy actually works before the run goes
+      # green. `pipeline-deploy` wrote this environment's `amplify_outputs.json`,
+      # so the smoke suite targets exactly what was just deployed, reusing the
+      # OIDC session for its one throwaway Cognito coordinator. It submits one
+      # marked synthetic guest report, requires the async pipeline to land it in
+      # AI_CLASSIFIED (NEEDS_VERIFICATION fails the gate — degraded Bedrock
+      # triage is invisible to every alarm), then rejects it. A red run here
+      # means the deploy is LIVE but unverified: triage with
+      # docs/runbooks/incident-response.md, roll back manually if needed.
+      - name: Post-deploy smoke test
+        working-directory: apps/web
+        env:
+          CRISISMAP_SMOKE_TARGET: deployed
+        run: npm run test:smoke
