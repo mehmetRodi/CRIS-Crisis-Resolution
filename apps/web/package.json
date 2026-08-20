@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p amplify/tsconfig.json",
     "test": "vitest run",
-    "test:integration": "vitest run --config vitest.integration.config.ts"
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:smoke": "vitest run --config vitest.smoke.config.ts"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.1081.0",

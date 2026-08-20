@@ -39,16 +39,17 @@ Shared conventions for CrisisMap AI. Keep this current; it is the reference for 
 - Emit **structured JSON logs** (one object per line) with a correlation/trace id, the
   `reportId`, and the event type. No free-form string logs for domain events. (See the
   `classify-report` handler for the pattern.)
-- **AWS X-Ray** active tracing is enabled on AppSync and five Lambdas in `backend.ts`: submit,
-  transition, publish, classification, and media-upload URL creation. The volunteer-task resolver
-  and Cognito role-assignment trigger are known tracing gaps. New request/worker Lambdas get
-  tracing + the `xray:Put*` grant the same way, and existing gaps should be closed when those
-  paths receive observability work.
+- **AWS X-Ray** active tracing is enabled on AppSync and six Lambdas in `backend.ts`: submit,
+  transition, publish, classification, media-upload URL creation, and team assignment. The
+  volunteer-task resolver and Cognito role-assignment trigger are known tracing gaps (they are
+  alarmed, not traced). New request/worker Lambdas get tracing + the `xray:Put*` grant the same
+  way, and existing gaps should be closed when those paths receive observability work.
 - **Alarms/metrics/dashboard** live in `apps/web/amplify/observability.ts` (`addObservability`).
-  Thresholds trace back to the §3.2 SLAs; alarms notify the ops SNS topic. When you add a
-  worker/queue/failure mode, add the matching alarm + a dashboard widget there, and record the
-  first-response in `docs/runbooks/deploy.md`. Keep `treatMissingData: NOT_BREACHING` so idle
-  environments don't page.
+  Thresholds trace back to the §3.2 SLAs; alarms notify the ops SNS topic, and the module has a
+  synth-assertion test (`observability.test.ts`) that pins the alarm set. When you add a
+  worker/queue/failure mode, add the matching alarm + a dashboard widget there, extend the synth
+  test, and record the first-response in `docs/runbooks/incident-response.md`. Keep
+  `treatMissingData: NOT_BREACHING` so idle environments don't page.
 
 ## Backend custom resolvers (Amplify Gen 2)
 
@@ -88,6 +89,13 @@ rationale in ADR-0011):
   root. The exact flag is a destructive-write acknowledgement: the suite creates temporary users,
   reports, audit/idempotency rows, and an S3 object. It refuses to run without the flag and must
   never target a shared environment.
+- The post-deploy smoke suite (`npm run test:smoke`, guarded by
+  `CRISISMAP_SMOKE_TARGET=deployed`) is the one deliberate exception to "never target a shared
+  environment": `deploy.yml` runs it against the environment it just deployed (CRIS-35,
+  ADR-0051/0052). It submits one marked synthetic guest report, requires the async pipeline to
+  produce structured AI fields (`AI_CLASSIFIED` or a valid `NEEDS_VERIFICATION`), then rejects it
+  and deletes its throwaway coordinator. Failure triage lives in
+  `docs/runbooks/incident-response.md`.
 
 ## Accessibility (ADR-0036)
 
