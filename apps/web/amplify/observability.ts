@@ -5,6 +5,7 @@ import {
   Dashboard,
   GraphWidget,
   MathExpression,
+  Metric,
   Row,
   Stats,
   TextWidget,
@@ -18,6 +19,12 @@ import { Topic } from 'aws-cdk-lib/aws-sns';
 import type { IQueue } from 'aws-cdk-lib/aws-sqs';
 import type { Construct } from 'constructs';
 import { configureEncryptedAlarmTopic } from './security/encryption';
+import {
+  RESOLVER_METRIC_NAMESPACE,
+  UNEXPECTED_ERROR_METRIC,
+  ResolverOperation,
+  type ResolverOperation as ResolverOperationT,
+} from './functions/resolver-metrics';
 
 /**
  * Observability baseline (design doc §3.1 "CloudWatch / X-Ray", §3.2 SLAs; CRIS-15,
@@ -40,12 +47,17 @@ import { configureEncryptedAlarmTopic } from './security/encryption';
  * one account don't collide.
  */
 
-/** The four backend Lambdas, keyed by role. */
+/** The alarmed backend Lambdas, keyed by role (ADR-0015; completed by ADR-0050). */
 export interface BackendFunctions {
   submitReport: IFunction;
   transitionReport: IFunction;
   publishReportUpdate: IFunction;
   classifyReport: IFunction;
+  createMediaUploadUrl: IFunction;
+  listVolunteerTasks: IFunction;
+  assignTeam: IFunction;
+  /** Cognito post-confirmation trigger — lives in the auth stack, alarmed from here. */
+  citizenRoleAssignment: IFunction;
 }
 
 export interface ObservabilityProps {
@@ -68,6 +80,11 @@ export interface ObservabilityProps {
    * `addObservability` installs the required CloudWatch, SNS, and KMS policies.
    */
   encryptionKey: IKey;
+  /**
+   * GraphQL API id (`CfnGraphQLApi.attrApiId`) for the API-level 5XX alarm
+   * (ADR-0050) — failures AppSync serves itself never appear in any Lambda metric.
+   */
+  graphqlApiId: string;
 }
 
 /** §3.2 targets, in the units CloudWatch reports them. */
@@ -76,8 +93,15 @@ const CLASSIFICATION_P95_SECONDS = 15;
 
 /** Builds the ops alarm topic, alarms, and dashboard. Returns the topic so callers can subscribe. */
 export function addObservability(props: ObservabilityProps): Topic {
-  const { scope, functions, classificationQueue, classificationDlq, pipeDlq, encryptionKey } =
-    props;
+  const {
+    scope,
+    functions,
+    classificationQueue,
+    classificationDlq,
+    pipeDlq,
+    encryptionKey,
+    graphqlApiId,
+  } = props;
 
   /* ---- Ops alarm topic ---------------------------------------------------- */
   // Dedicated to operational alarms, separate from the app's (future) proximity-
@@ -121,7 +145,7 @@ export function addObservability(props: ObservabilityProps): Topic {
       treatMissingData: TreatMissingData.NOT_BREACHING,
       alarmDescription:
         'Classification DLQ is non-empty: a report exhausted its retries (poison message). ' +
-        'Inspect the message and redrive after fixing the cause. See docs/runbooks/deploy.md.',
+        'Inspect the message and redrive after fixing the cause. See docs/runbooks/incident-response.md.',
     }),
   );
 
@@ -143,7 +167,7 @@ export function addObservability(props: ObservabilityProps): Topic {
         'Stream→SQS pipe DLQ is non-empty: report stream records never reached the ' +
         'classification queue and were parked. These reports are unclassified and ' +
         'invisible to the queue DLQ. Do NOT redrive into ClassificationQueue — the ' +
-        'payloads are stream records, not worker messages. See docs/runbooks/deploy.md.',
+        'payloads are stream records, not worker messages. See docs/runbooks/incident-response.md.',
     }),
   );
 
@@ -196,18 +220,28 @@ export function addObservability(props: ObservabilityProps): Topic {
   );
 
   /* ---- Write-path / resolver availability (99.9%, §3.2) ------------------- */
-  // The submit path is the fast citizen ack (p95 < 800 ms); any error is a failed
-  // submission. transition/publish errors degrade the coordinator/real-time path.
+  // The submit path is the fast citizen ack (p95 < 800 ms). Public/guarded
+  // resolvers alarm on their explicit unexpected-error metric so normal client
+  // validation and state-machine rejections cannot page; the internal publish
+  // resolver has no expected error path and retains its Lambda Errors alarm.
   register(
-    lambdaErrorAlarm(scope, 'SubmitReportErrors', functions.submitReport, {
+    resolverUnexpectedErrorAlarm(scope, 'SubmitReportErrors', ResolverOperation.SUBMIT_REPORT, {
       description:
-        'submitReport resolver errors — citizens may be unable to file reports (99.9% availability, §3.2).',
+        'submitReport unexpected errors — citizens may be unable to file reports ' +
+        '(expected validation failures excluded; 99.9% availability, §3.2).',
     }),
   );
   register(
-    lambdaErrorAlarm(scope, 'TransitionReportErrors', functions.transitionReport, {
-      description: 'updateReportStatus resolver errors — coordinator state transitions failing.',
-    }),
+    resolverUnexpectedErrorAlarm(
+      scope,
+      'TransitionReportErrors',
+      ResolverOperation.UPDATE_REPORT_STATUS,
+      {
+        description:
+          'updateReportStatus unexpected errors — coordinator state transitions failing ' +
+          '(expected authorization, legality, and optimistic-lock rejections excluded).',
+      },
+    ),
   );
   register(
     lambdaErrorAlarm(scope, 'PublishReportUpdateErrors', functions.publishReportUpdate, {
@@ -216,10 +250,89 @@ export function addObservability(props: ObservabilityProps): Topic {
     }),
   );
 
+  /* ---- Support resolvers + auth trigger (ADR-0050) ------------------------ */
+  // The remaining wired Lambdas. Public/guarded operations use the same
+  // expected-error-aware policy as the write path; pure read/trigger handlers
+  // with no client/domain rejection path retain Lambda Errors.
+  register(
+    resolverUnexpectedErrorAlarm(
+      scope,
+      'MediaUploadUrlErrors',
+      ResolverOperation.CREATE_MEDIA_UPLOAD_URL,
+      {
+        description:
+          'createMediaUploadUrl unexpected errors — citizens cannot attach photos to reports ' +
+          '(expected validation failures excluded; CRIS-17/ADR-0035).',
+      },
+    ),
+  );
+  register(
+    lambdaErrorAlarm(scope, 'VolunteerTasksErrors', functions.listVolunteerTasks, {
+      description:
+        'listVolunteerTasks resolver errors — the volunteer task board read path is failing (CRIS-33).',
+    }),
+  );
+  register(
+    resolverUnexpectedErrorAlarm(scope, 'AssignTeamErrors', ResolverOperation.ASSIGN_TEAM, {
+      description:
+        'assignTeam unexpected errors — coordinators cannot dispatch response teams ' +
+        '(expected authorization, legality, and optimistic-lock rejections excluded; CRIS-32).',
+    }),
+  );
+  register(
+    lambdaErrorAlarm(scope, 'CitizenRoleAssignmentErrors', functions.citizenRoleAssignment, {
+      description:
+        'citizen-role-assignment trigger errors — sign-up confirmation may be failing, or new ' +
+        'accounts are left without the CITIZEN role (CRIS-24).',
+    }),
+  );
+
+  /* ---- API surface (ADR-0050) --------------------------------------------- */
+  // 5XX from AppSync itself: request/response mapping faults, auth-plumbing
+  // breakage, resolver invoke failures — none of which increment a Lambda Errors
+  // metric. 4XX is deliberately NOT alarmed (dominated by client mistakes and
+  // auth denials) but is charted on the dashboard.
+  register(
+    new Alarm(scope, 'AppSyncServerErrors', {
+      metric: appSyncMetric(graphqlApiId, '5XXError', Duration.minutes(5)),
+      threshold: 1,
+      comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      evaluationPeriods: 1,
+      treatMissingData: TreatMissingData.NOT_BREACHING,
+      alarmDescription:
+        'AppSync returned 5XX server errors — an API-level failure independent of any resolver ' +
+        'Lambda (99.9% availability, §3.2). Check AppSync request logs and X-Ray for the failing field.',
+    }),
+  );
+
   /* ---- Dashboard ---------------------------------------------------------- */
-  buildDashboard(scope, functions, classificationQueue, classificationDlq, queueAge, dlqVisible);
+  buildDashboard(
+    scope,
+    functions,
+    classificationQueue,
+    classificationDlq,
+    queueAge,
+    dlqVisible,
+    graphqlApiId,
+  );
 
   return alarmTopic;
+}
+
+/** An AppSync API-level metric (`AWS/AppSync`, keyed by GraphQL API id). */
+function appSyncMetric(
+  graphqlApiId: string,
+  metricName: '5XXError' | '4XXError' | 'Latency',
+  period: Duration,
+  statistic: string = Stats.SUM,
+): Metric {
+  return new Metric({
+    namespace: 'AWS/AppSync',
+    metricName,
+    dimensionsMap: { GraphQLAPIId: graphqlApiId },
+    period,
+    statistic,
+  });
 }
 
 /** A standard "Lambda raised errors" alarm: any error over a 5-min window pages. */
@@ -239,7 +352,30 @@ function lambdaErrorAlarm(
   });
 }
 
-/** One-screen SLA view: submission, classification pipeline, worker, resolver health. */
+/** Pages on the PII-free EMF metric emitted only for unexpected resolver failures. */
+function resolverUnexpectedErrorAlarm(
+  scope: Construct,
+  id: string,
+  operation: ResolverOperationT,
+  opts: { description: string },
+): Alarm {
+  return new Alarm(scope, id, {
+    metric: new Metric({
+      namespace: RESOLVER_METRIC_NAMESPACE,
+      metricName: UNEXPECTED_ERROR_METRIC,
+      dimensionsMap: { Operation: operation },
+      period: Duration.minutes(5),
+      statistic: Stats.SUM,
+    }),
+    threshold: 1,
+    comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+    evaluationPeriods: 1,
+    treatMissingData: TreatMissingData.NOT_BREACHING,
+    alarmDescription: opts.description,
+  });
+}
+
+/** One-screen SLA view: submission, classification pipeline, worker, resolver + API health. */
 function buildDashboard(
   scope: Construct,
   functions: BackendFunctions,
@@ -247,6 +383,7 @@ function buildDashboard(
   dlq: IQueue,
   queueAge: IMetric,
   dlqVisible: IMetric,
+  graphqlApiId: string,
 ): void {
   const dashboard = new Dashboard(scope, 'ObservabilityDashboard', {
     // Auto-name would be an opaque hash; scope by stack so branches don't collide
@@ -348,6 +485,44 @@ function buildDashboard(
         ],
         leftYAxis: { label: 'count', showUnits: false },
         rightYAxis: { label: '%', showUnits: false, min: 0 },
+        width: 12,
+        height: 6,
+      }),
+    ),
+  );
+
+  dashboard.addWidgets(
+    new Row(
+      new GraphWidget({
+        title: 'Support resolvers — media upload / volunteer tasks / assign team / roles',
+        // Unlabelled on purpose: the console legend falls back to the function-name
+        // dimension, which distinguishes the lines better than a shared label.
+        left: [
+          errors(functions.createMediaUploadUrl),
+          errors(functions.listVolunteerTasks),
+          errors(functions.assignTeam),
+          errors(functions.citizenRoleAssignment),
+        ],
+        right: [
+          invocations(functions.createMediaUploadUrl),
+          invocations(functions.listVolunteerTasks),
+          invocations(functions.assignTeam),
+          invocations(functions.citizenRoleAssignment),
+        ],
+        leftYAxis: { label: 'errors', showUnits: false },
+        rightYAxis: { label: 'invocations', showUnits: false },
+        width: 12,
+        height: 6,
+      }),
+      new GraphWidget({
+        title: 'API — AppSync (5XX alarmed, 4XX charted)',
+        left: [
+          appSyncMetric(graphqlApiId, '5XXError', Duration.minutes(1)),
+          appSyncMetric(graphqlApiId, '4XXError', Duration.minutes(1)),
+        ],
+        right: [appSyncMetric(graphqlApiId, 'Latency', Duration.minutes(1), Stats.percentile(95))],
+        leftYAxis: { label: 'errors', showUnits: false },
+        rightYAxis: { label: 'ms', showUnits: false },
         width: 12,
         height: 6,
       }),

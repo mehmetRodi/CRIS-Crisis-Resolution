@@ -183,8 +183,10 @@ custom mutations.
 - Generated model mutations coexist with guarded custom operations. Use `submitReport` for report
   creation and `updateReportStatus` for human status changes so idempotency, version checks, and
   audit events cannot be bypassed accidentally.
-- The API has no active custom subscriptions until CRIS-28. Dashboard and volunteer reads are
-  refresh/one-shot paths today.
+- Three authenticated custom subscriptions (unfiltered, region-filtered, and status-filtered)
+  stream the redacted `PublicReport` projection (CRIS-28, ADR-0048). Anonymous/public map
+  streaming is still deferred, and both live dashboards reload their durable snapshots after a
+  WebSocket disruption rather than trusting the stream alone.
 
 ## Integration testing
 

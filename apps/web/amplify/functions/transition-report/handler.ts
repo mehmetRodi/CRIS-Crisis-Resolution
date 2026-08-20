@@ -10,7 +10,11 @@
  * This is human-only: the pipeline's NEW→PROCESSING and classification
  * transitions run on the internal (IAM) path, not through this mutation.
  */
-import type { AppSyncIdentityCognito, AppSyncResolverHandler } from 'aws-lambda';
+import type {
+  AppSyncIdentityCognito,
+  AppSyncResolverEvent,
+  AppSyncResolverHandler,
+} from 'aws-lambda';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
 import { ulid } from 'ulid';
@@ -23,6 +27,11 @@ import {
   type CurrentReport,
 } from './core';
 import { publishTransitionUpdate } from './publish';
+import {
+  ResolverOperation,
+  hasExpectedErrorCode,
+  withResolverErrorMetrics,
+} from '../resolver-metrics';
 
 const REPORT_TABLE = requireEnv('REPORT_TABLE_NAME');
 const REPORT_EVENT_TABLE = requireEnv('REPORT_EVENT_TABLE_NAME');
@@ -38,10 +47,9 @@ interface UpdateReportStatusArgs {
   note?: string | null;
 }
 
-export const handler: AppSyncResolverHandler<
-  UpdateReportStatusArgs,
-  Record<string, unknown>
-> = async (event) => {
+async function resolveReportTransition(
+  event: AppSyncResolverEvent<UpdateReportStatusArgs>,
+): Promise<Record<string, unknown>> {
   const identity = event.identity as AppSyncIdentityCognito | undefined;
   const actorRole: TransitionActor | null = highestRole(identity?.groups ?? undefined);
   if (!actorRole) {
@@ -136,7 +144,17 @@ export const handler: AppSyncResolverHandler<
   });
 
   return updated;
-};
+}
+
+export const handler: AppSyncResolverHandler<
+  UpdateReportStatusArgs,
+  Record<string, unknown>
+> = withResolverErrorMetrics(
+  ResolverOperation.UPDATE_REPORT_STATUS,
+  (error) =>
+    hasExpectedErrorCode(error, ['FORBIDDEN', 'NOT_FOUND', 'CONFLICT', 'ILLEGAL_TRANSITION']),
+  resolveReportTransition,
+);
 
 function mapDomainError(err: unknown): Error {
   if (err instanceof VersionConflictError) {

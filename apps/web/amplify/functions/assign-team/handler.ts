@@ -15,7 +15,11 @@
  * authority matrix to check here — AppSync rejects any other caller before
  * this handler ever runs.
  */
-import type { AppSyncIdentityCognito, AppSyncResolverHandler } from 'aws-lambda';
+import type {
+  AppSyncIdentityCognito,
+  AppSyncResolverEvent,
+  AppSyncResolverHandler,
+} from 'aws-lambda';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
 import { ulid } from 'ulid';
@@ -28,6 +32,11 @@ import {
   type CurrentReport,
 } from './core';
 import { publishAssignmentUpdate } from './publish';
+import {
+  ResolverOperation,
+  hasExpectedErrorCode,
+  withResolverErrorMetrics,
+} from '../resolver-metrics';
 
 const REPORT_TABLE = requireEnv('REPORT_TABLE_NAME');
 const ASSIGNMENT_TABLE = requireEnv('ASSIGNMENT_TABLE_NAME');
@@ -45,9 +54,9 @@ interface AssignTeamArgs {
   note?: string | null;
 }
 
-export const handler: AppSyncResolverHandler<AssignTeamArgs, Record<string, unknown>> = async (
-  event,
-) => {
+async function resolveTeamAssignment(
+  event: AppSyncResolverEvent<AssignTeamArgs>,
+): Promise<Record<string, unknown>> {
   const identity = event.identity as AppSyncIdentityCognito | undefined;
   const actorRole: TransitionActor | null = highestRole(identity?.groups ?? undefined);
   if (!actorRole) {
@@ -154,7 +163,16 @@ export const handler: AppSyncResolverHandler<AssignTeamArgs, Record<string, unkn
   });
 
   return updated;
-};
+}
+
+export const handler: AppSyncResolverHandler<
+  AssignTeamArgs,
+  Record<string, unknown>
+> = withResolverErrorMetrics(
+  ResolverOperation.ASSIGN_TEAM,
+  (error) => hasExpectedErrorCode(error, ['FORBIDDEN', 'NOT_FOUND', 'CONFLICT', 'ILLEGAL']),
+  resolveTeamAssignment,
+);
 
 function mapDomainError(err: unknown): Error {
   if (err instanceof VersionConflictError) {
