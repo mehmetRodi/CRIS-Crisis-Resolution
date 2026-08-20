@@ -4,11 +4,10 @@
  * Proves the deployed environment works end to end — the one thing neither CI
  * (no AWS, ADR-0012) nor the sandbox-only live suite (ADR-0046) can: a guest
  * report submitted through the real API is picked up by the async pipeline
- * (Streams → Pipe → SQS → Lambda → Bedrock → scoring → write-back) and lands
- * in AI_CLASSIFIED. NEEDS_VERIFICATION fails the gate on purpose: the worker
- * converts handled Bedrock failures into that status and reports success, so a
- * broken model configuration is invisible to every alarm — this is the only
- * check that can see it.
+ * (Streams → Pipe → SQS → Lambda → Bedrock → scoring → write-back) and produces
+ * structured classification fields. A valid low-confidence classification may
+ * land in NEEDS_VERIFICATION; the gate fails only when that status has no AI
+ * fields, which is how the worker records handled Bedrock/contract failures.
  *
  * Footprint per run: ONE report (marked "[CRIS-35 SMOKE]", driven to REJECTED
  * or deleted in cleanup) and ONE throwaway coordinator user (deleted in
@@ -30,6 +29,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { ReportStatus, UserRole } from '@crisismap/shared';
 import type { Schema } from '../../amplify/data/resource';
 import outputs from '../../amplify_outputs.json';
+import { hasStructuredClassification } from './classification-outcome';
 
 const REQUIRED_TARGET = 'deployed';
 const RUN_ID = randomUUID();
@@ -64,6 +64,9 @@ interface SmokeReport {
   id: string;
   status: string;
   version: number;
+  category?: string | null;
+  urgency?: string | null;
+  confidence?: number | null;
   priorityScore?: number | null;
   priorityBand?: string | null;
   summary?: string | null;
@@ -172,6 +175,9 @@ async function getReport(reportId: string): Promise<SmokeReport | undefined> {
             id
             status
             version
+            category
+            urgency
+            confidence
             priorityScore
             priorityBand
             summary
@@ -301,11 +307,17 @@ describe('post-deploy smoke transaction', () => {
       );
     }
     if (classified.status === ReportStatus.NEEDS_VERIFICATION) {
-      throw new Error(
-        `Report ${smokeReportId} landed in NEEDS_VERIFICATION: the pipeline ran but AI triage ` +
-          'is degraded (Bedrock model access, quota, or contract parsing). No alarm covers this ' +
-          'case — see docs/runbooks/incident-response.md.',
-      );
+      // NEEDS_VERIFICATION is also a valid model outcome for an intentionally
+      // synthetic/low-confidence report. A handled Bedrock or contract failure
+      // takes the same status path but leaves every classification field unset.
+      if (!hasStructuredClassification(classified)) {
+        throw new Error(
+          `Report ${smokeReportId} landed in NEEDS_VERIFICATION without structured AI fields: ` +
+            'Bedrock triage is degraded (model access, quota, or contract parsing). No alarm ' +
+            'covers this case — see docs/runbooks/incident-response.md.',
+        );
+      }
+      return;
     }
     expect(classified.status).toBe(ReportStatus.AI_CLASSIFIED);
     expect(classified.priorityScore).toEqual(expect.any(Number));

@@ -11,11 +11,22 @@
  * AWS adapter. Table names are injected as env vars by `backend.ts`.
  */
 import { randomUUID } from 'node:crypto';
-import type { AppSyncIdentityCognito, AppSyncResolverHandler } from 'aws-lambda';
+import type {
+  AppSyncIdentityCognito,
+  AppSyncResolverEvent,
+  AppSyncResolverHandler,
+} from 'aws-lambda';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
 import { ulid } from 'ulid';
-import { buildSubmitPlan, forDynamoItem, type ReportRecord, type SubmitReportInput } from './core';
+import {
+  buildSubmitPlan,
+  forDynamoItem,
+  SubmitValidationError,
+  type ReportRecord,
+  type SubmitReportInput,
+} from './core';
+import { ResolverOperation, withResolverErrorMetrics } from '../resolver-metrics';
 
 const REPORT_TABLE = requireEnv('REPORT_TABLE_NAME');
 const REPORT_EVENT_TABLE = requireEnv('REPORT_EVENT_TABLE_NAME');
@@ -28,7 +39,9 @@ const docClient = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
 /** GraphQL arguments (identity is resolved server-side, never from the client). */
 type SubmitReportArgs = Omit<SubmitReportInput, 'reporterId'>;
 
-export const handler: AppSyncResolverHandler<SubmitReportArgs, ReportRecord> = async (event) => {
+async function resolveSubmitReport(
+  event: AppSyncResolverEvent<SubmitReportArgs>,
+): Promise<ReportRecord> {
   const reporterId = cognitoSub(event.identity);
   const input: SubmitReportInput = { ...event.arguments, reporterId };
 
@@ -76,7 +89,14 @@ export const handler: AppSyncResolverHandler<SubmitReportArgs, ReportRecord> = a
     }
     throw err;
   }
-};
+}
+
+export const handler: AppSyncResolverHandler<SubmitReportArgs, ReportRecord> =
+  withResolverErrorMetrics(
+    ResolverOperation.SUBMIT_REPORT,
+    (error) => error instanceof SubmitValidationError,
+    resolveSubmitReport,
+  );
 
 /**
  * A retried submission (same `clientRequestId`) surfaces one of two ways:

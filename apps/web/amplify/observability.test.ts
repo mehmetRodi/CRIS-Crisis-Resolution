@@ -7,6 +7,11 @@ import { Queue } from 'aws-cdk-lib/aws-sqs';
 import { describe, expect, it } from 'vitest';
 import { createDataKey } from './security/encryption';
 import { addObservability, type BackendFunctions } from './observability';
+import {
+  RESOLVER_METRIC_NAMESPACE,
+  UNEXPECTED_ERROR_METRIC,
+  ResolverOperation,
+} from './functions/resolver-metrics';
 
 /**
  * Synth-level contract for the observability module (CRIS-35, ADR-0050): every
@@ -139,17 +144,29 @@ describe('observability baseline (ADR-0015, ADR-0050)', () => {
     });
   });
 
-  it('alarms on any error from each write-path resolver and the classify worker', () => {
+  it('alarms on unexpected errors while excluding expected resolver rejections', () => {
     const { alarms } = synthesizeObservability();
 
+    for (const [prefix, operation] of [
+      ['SubmitReportErrors', ResolverOperation.SUBMIT_REPORT],
+      ['TransitionReportErrors', ResolverOperation.UPDATE_REPORT_STATUS],
+      ['MediaUploadUrlErrors', ResolverOperation.CREATE_MEDIA_UPLOAD_URL],
+      ['AssignTeamErrors', ResolverOperation.ASSIGN_TEAM],
+    ] as const) {
+      expect(alarmByLogicalIdPrefix(alarms, prefix)).toMatchObject({
+        MetricName: UNEXPECTED_ERROR_METRIC,
+        Namespace: RESOLVER_METRIC_NAMESPACE,
+        Statistic: 'Sum',
+        Threshold: 1,
+        ComparisonOperator: 'GreaterThanOrEqualToThreshold',
+        Dimensions: [{ Name: 'Operation', Value: operation }],
+      });
+    }
+
     for (const prefix of [
-      'SubmitReportErrors',
-      'TransitionReportErrors',
       'PublishReportUpdateErrors',
       'ClassifyWorkerErrors',
-      'MediaUploadUrlErrors',
       'VolunteerTasksErrors',
-      'AssignTeamErrors',
       'CitizenRoleAssignmentErrors',
     ]) {
       expect(alarmByLogicalIdPrefix(alarms, prefix)).toMatchObject({

@@ -31,10 +31,15 @@ in** — the job is skipped (green) unless `AWS_DEPLOY_ENABLED` is `true`.
    repo:mehmetRodi/CRIS-Crisis-Resolution:ref:refs/heads/main
    repo:mehmetRodi/CRIS-Crisis-Resolution:environment:production
    ```
-   The role assumes the CDK bootstrap roles that hold provisioning power; its only direct access is
-   the narrow read-only CloudFormation, SSM, and Amplify-codegen S3 access `ampx` needs.
+   The role assumes the CDK bootstrap roles that hold infrastructure-provisioning power. Direct
+   access is limited to the reads `ampx` needs and the four Cognito actions used to create and
+   delete the throwaway smoke coordinator (ADR-0051).
 4. **CDK bootstrap** the account/region once (`npx ampx pipeline-deploy` relies on the CDK
    bootstrap stack).
+
+> **CRIS-35 upgrade:** accounts whose deploy-role stack predates ADR-0051 must rerun
+> `scripts/aws/30-deploy-role.sh` before enabling the smoke gate. The role template is bootstrap
+> infrastructure and is not updated by `ampx pipeline-deploy` itself.
 
 ### Configure GitHub (repo → Settings)
 
@@ -59,7 +64,7 @@ Also confirm Bedrock model access is enabled for `BEDROCK_MODEL_ID`
 - **Automatic:** merge to `main`; deployment begins only after that commit's CI run succeeds.
 - **Manual:** Actions → **Deploy** → _Run workflow_.
 
-Every deploy run ends with the **post-deploy smoke gate** (CRIS-35, ADR-0050): one synthetic
+Every deploy run ends with the **post-deploy smoke gate** (CRIS-35, ADR-0050/0051): one synthetic
 guest report must travel the whole classification pipeline in the environment that was just
 deployed. A red gate means the deploy is live but unverified — triage with
 [`incident-response.md`](incident-response.md#3-smoke-gate-failure-triage).

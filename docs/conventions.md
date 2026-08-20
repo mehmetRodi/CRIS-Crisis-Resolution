@@ -92,9 +92,10 @@ rationale in ADR-0011):
 - The post-deploy smoke suite (`npm run test:smoke`, guarded by
   `CRISISMAP_SMOKE_TARGET=deployed`) is the one deliberate exception to "never target a shared
   environment": `deploy.yml` runs it against the environment it just deployed (CRIS-35,
-  ADR-0050). It submits one marked synthetic guest report, requires the async pipeline to land
-  it in `AI_CLASSIFIED`, then rejects it and deletes its throwaway coordinator. Failure triage
-  lives in `docs/runbooks/incident-response.md`.
+  ADR-0050/0051). It submits one marked synthetic guest report, requires the async pipeline to
+  produce structured AI fields (`AI_CLASSIFIED` or a valid `NEEDS_VERIFICATION`), then rejects it
+  and deletes its throwaway coordinator. Failure triage lives in
+  `docs/runbooks/incident-response.md`.
 
 ## Accessibility (ADR-0036)
 

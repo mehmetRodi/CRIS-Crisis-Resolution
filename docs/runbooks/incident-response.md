@@ -1,12 +1,14 @@
 # Runbook: Incident response & system verification
 
-The full incident/system runbook (CRIS-35, [ADR-0050](../adr/0050-system-testing-alarms-runbook.md)).
+The full incident/system runbook (CRIS-35, [ADR-0050](../adr/0050-system-testing-alarms-runbook.md),
+[ADR-0051](../adr/0051-smoke-and-resolver-alarm-corrections.md)).
 Covers every alarm's first response, post-deploy smoke-gate triage, DLQ recovery, manual
 real-time verification, and the manual rollback procedure. Deploy mechanics (activation,
 credentials, KMS retention) stay in [`deploy.md`](deploy.md).
 
 - **Observability baseline:** [ADR-0015](../adr/0015-observability-xray-cloudwatch-alarms.md)
 - **Alarm completion + smoke gate:** [ADR-0050](../adr/0050-system-testing-alarms-runbook.md)
+- **Smoke/alarm correctness:** [ADR-0051](../adr/0051-smoke-and-resolver-alarm-corrections.md)
 - **Deploy pipeline:** [ADR-0016](../adr/0016-continuous-deployment-ampx-pipeline-oidc.md), [ADR-0018](../adr/0018-gate-deploy-on-ci-via-workflow-run.md)
 
 ---
@@ -32,6 +34,8 @@ credentials, KMS retention) stay in [`deploy.md`](deploy.md).
 
 Severity guide: **SEV-1** = reports may be lost or cannot be filed (never-lost, §5.4.4);
 **SEV-2** = triage/coordination degraded; **SEV-3** = a narrower feature is broken.
+Resolver alarms backed by `CrisisMap/Resolvers:UnexpectedErrors` exclude stable validation,
+authorization, legality, and optimistic-lock rejections; those remain normal API errors.
 
 | Alarm                         | Sev | Means                                                                             | First actions                                                                                                                                                  |
 | ----------------------------- | --- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -42,11 +46,11 @@ Severity guide: **SEV-1** = reports may be lost or cannot be filed (never-lost, 
 | `ClassificationBacklogAge`    | 2   | Oldest queued report > 30 s for 3 min — classification lagging                    | Check Bedrock throttling/quota in-region and `classify-report` logs/duration. Watch worker throttles.                                                          |
 | `ClassifyWorkerErrors`        | 2   | Worker raised _unhandled_ errors (not Bedrock/parse — those are handled)          | Read structured logs (`classify.record.error`). Repeated errors feed the DLQ.                                                                                  |
 | `ClassifyWorkerThrottles`     | 2   | Worker hitting the concurrency ceiling under load                                 | Review reserved concurrency vs the 1,000 writes/min target (§3.2); raise account concurrency if needed.                                                        |
-| `TransitionReportErrors`      | 2   | Coordinator status transitions failing                                            | Check `transition-report` logs — often a version conflict (`CONFLICT`) or an invalid transition.                                                               |
+| `TransitionReportErrors`      | 2   | Coordinator status transitions failing unexpectedly                               | Check `resolver.unexpected_error`, `transition-report` logs, DynamoDB, and AppSync; normal `CONFLICT`/illegal transitions are excluded.                        |
 | `PublishReportUpdateErrors`   | 2   | The internal publish resolver is failing; live clients may be stale               | Check `publish-report-update`, `publish.failed`, and `transition.publish.failed` logs, then AppSync real-time connection health.                               |
-| `AssignTeamErrors`            | 2   | Coordinators cannot dispatch response teams                                       | Check `assign-team` logs; separate optimistic-lock conflicts from infrastructure faults.                                                                       |
+| `AssignTeamErrors`            | 2   | Team assignment is failing unexpectedly                                           | Check `resolver.unexpected_error`, `assign-team` logs, DynamoDB, and AppSync; normal conflicts and domain rejections are excluded.                             |
 | `CitizenRoleAssignmentErrors` | 2   | Sign-up confirmation may be failing, or new accounts get no `CITIZEN` role        | Check the post-confirmation trigger logs for `cognito-idp` permission errors; affected users can be reconciled by their next sign-in (ADR-0041).               |
-| `MediaUploadUrlErrors`        | 3   | Citizens cannot attach photos to reports                                          | Check `create-media-upload-url` logs — usually the presign `AssumeRole` or the bucket policy. Report submission itself is unaffected.                          |
+| `MediaUploadUrlErrors`        | 3   | Media URL creation is failing unexpectedly                                        | Check `resolver.unexpected_error`, presign-role `AssumeRole`, and the bucket policy; invalid content types are excluded. Report submission is unaffected.      |
 | `VolunteerTasksErrors`        | 3   | The volunteer task board read path is failing                                     | Check `list-volunteer-tasks` logs and DynamoDB read health for Report/Assignment/Team.                                                                         |
 
 OK transitions notify the same topic, so recovery is visible without checking the console.
@@ -54,7 +58,7 @@ OK transitions notify the same topic, so recovery is visible without checking th
 ## 3. Smoke-gate failure triage
 
 The **Post-deploy smoke test** step in `deploy.yml` submits one guest report marked
-`[CRIS-35 SMOKE]`, requires the async pipeline to land it in `AI_CLASSIFIED`, logs a
+`[CRIS-35 SMOKE]`, requires the async pipeline to produce structured AI fields, logs a
 `smoke.measured` JSON line (`submitAckMs`, `classifiedMs`) for §3.2 latency tracking, then
 rejects the report and deletes its throwaway coordinator. The failure message names the
 report id. **The deploy is already live when this step runs** — a red gate is a verification
@@ -66,7 +70,7 @@ failure, not a rollback.
 | `AccessDenied` on `AdminCreateUser`                  | The deploy role lacks `cognito-idp` admin on the pool                                            | Fix the deploy-role policy (`infra/bootstrap/github-oidc-deploy-role.yaml`); the environment itself may be healthy.    |
 | Report `never picked up by the pipeline`             | Stream → Pipe → SQS hop is broken                                                                | Check the pipe's state and `ReportStreamPipeDlqNotEmpty`; see the `NotStabilized` note in [`deploy.md`](deploy.md).    |
 | Report `stuck in PROCESSING`                         | Worker consumed the message but never wrote back                                                 | Check `classify-report` logs (`classify.failed`, `classify.record.error`) and the classification DLQ.                  |
-| Report landed in `NEEDS_VERIFICATION`                | Pipeline works but **AI triage is degraded** — no alarm covers this case                         | Check Bedrock model access/quota for `BEDROCK_MODEL_ID` in-region, then `classify.failed` logs for the contract error. |
+| `NEEDS_VERIFICATION without structured AI fields`    | Pipeline ran but **AI triage is degraded** — no alarm covers this handled-failure path           | Check Bedrock model access/quota for `BEDROCK_MODEL_ID` in-region, then `classify.failed` logs for the contract error. |
 | Test passed but `classifiedMs` far above 15 000      | Working but slow (often cold start)                                                              | Compare with `ClassificationBacklogAge` and the dashboard before treating a single sample as a regression.             |
 
 If cleanup itself failed, the run leaves at most one report (search the coordinator queue

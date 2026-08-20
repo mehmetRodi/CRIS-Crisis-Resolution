@@ -65,4 +65,5 @@ behind the code — essential when refactoring or extending the system.
 | [0047](0047-deterministic-priority-scoring-v2.md)                    | Deterministic priority scoring v2 (CRIS-30)                          | Accepted                         |
 | [0048](0048-authenticated-subscriptions.md)                          | Authenticated subscriptions + snapshot reconciliation                | Accepted                         |
 | [0049](0049-guarded-team-assignment.md)                              | Guarded team assignment (CRIS-32)                                    | Accepted                         |
-| [0050](0050-system-testing-alarms-runbook.md)                        | Post-deploy smoke gate, alarm completion, incident runbook (CRIS-35) | Accepted                         |
+| [0050](0050-system-testing-alarms-runbook.md)                        | Post-deploy smoke gate, alarm completion, incident runbook (CRIS-35) | Refined by ADR-0051              |
+| [0051](0051-smoke-and-resolver-alarm-corrections.md)                 | Correct smoke classification and resolver-alarm semantics            | Accepted                         |

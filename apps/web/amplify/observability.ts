@@ -19,6 +19,12 @@ import { Topic } from 'aws-cdk-lib/aws-sns';
 import type { IQueue } from 'aws-cdk-lib/aws-sqs';
 import type { Construct } from 'constructs';
 import { configureEncryptedAlarmTopic } from './security/encryption';
+import {
+  RESOLVER_METRIC_NAMESPACE,
+  UNEXPECTED_ERROR_METRIC,
+  ResolverOperation,
+  type ResolverOperation as ResolverOperationT,
+} from './functions/resolver-metrics';
 
 /**
  * Observability baseline (design doc §3.1 "CloudWatch / X-Ray", §3.2 SLAs; CRIS-15,
@@ -214,18 +220,28 @@ export function addObservability(props: ObservabilityProps): Topic {
   );
 
   /* ---- Write-path / resolver availability (99.9%, §3.2) ------------------- */
-  // The submit path is the fast citizen ack (p95 < 800 ms); any error is a failed
-  // submission. transition/publish errors degrade the coordinator/real-time path.
+  // The submit path is the fast citizen ack (p95 < 800 ms). Public/guarded
+  // resolvers alarm on their explicit unexpected-error metric so normal client
+  // validation and state-machine rejections cannot page; the internal publish
+  // resolver has no expected error path and retains its Lambda Errors alarm.
   register(
-    lambdaErrorAlarm(scope, 'SubmitReportErrors', functions.submitReport, {
+    resolverUnexpectedErrorAlarm(scope, 'SubmitReportErrors', ResolverOperation.SUBMIT_REPORT, {
       description:
-        'submitReport resolver errors — citizens may be unable to file reports (99.9% availability, §3.2).',
+        'submitReport unexpected errors — citizens may be unable to file reports ' +
+        '(expected validation failures excluded; 99.9% availability, §3.2).',
     }),
   );
   register(
-    lambdaErrorAlarm(scope, 'TransitionReportErrors', functions.transitionReport, {
-      description: 'updateReportStatus resolver errors — coordinator state transitions failing.',
-    }),
+    resolverUnexpectedErrorAlarm(
+      scope,
+      'TransitionReportErrors',
+      ResolverOperation.UPDATE_REPORT_STATUS,
+      {
+        description:
+          'updateReportStatus unexpected errors — coordinator state transitions failing ' +
+          '(expected authorization, legality, and optimistic-lock rejections excluded).',
+      },
+    ),
   );
   register(
     lambdaErrorAlarm(scope, 'PublishReportUpdateErrors', functions.publishReportUpdate, {
@@ -235,14 +251,20 @@ export function addObservability(props: ObservabilityProps): Topic {
   );
 
   /* ---- Support resolvers + auth trigger (ADR-0050) ------------------------ */
-  // The remaining wired Lambdas. Same any-error-pages policy as the write path:
-  // each of these failing breaks a user-visible flow, just a narrower one.
+  // The remaining wired Lambdas. Public/guarded operations use the same
+  // expected-error-aware policy as the write path; pure read/trigger handlers
+  // with no client/domain rejection path retain Lambda Errors.
   register(
-    lambdaErrorAlarm(scope, 'MediaUploadUrlErrors', functions.createMediaUploadUrl, {
-      description:
-        'createMediaUploadUrl resolver errors — citizens cannot attach photos to reports ' +
-        '(CRIS-17; alarm deferred in ADR-0035, closed by ADR-0050).',
-    }),
+    resolverUnexpectedErrorAlarm(
+      scope,
+      'MediaUploadUrlErrors',
+      ResolverOperation.CREATE_MEDIA_UPLOAD_URL,
+      {
+        description:
+          'createMediaUploadUrl unexpected errors — citizens cannot attach photos to reports ' +
+          '(expected validation failures excluded; CRIS-17/ADR-0035).',
+      },
+    ),
   );
   register(
     lambdaErrorAlarm(scope, 'VolunteerTasksErrors', functions.listVolunteerTasks, {
@@ -251,9 +273,10 @@ export function addObservability(props: ObservabilityProps): Topic {
     }),
   );
   register(
-    lambdaErrorAlarm(scope, 'AssignTeamErrors', functions.assignTeam, {
+    resolverUnexpectedErrorAlarm(scope, 'AssignTeamErrors', ResolverOperation.ASSIGN_TEAM, {
       description:
-        'assignTeam resolver errors — coordinators cannot dispatch response teams (CRIS-32).',
+        'assignTeam unexpected errors — coordinators cannot dispatch response teams ' +
+        '(expected authorization, legality, and optimistic-lock rejections excluded; CRIS-32).',
     }),
   );
   register(
@@ -321,6 +344,29 @@ function lambdaErrorAlarm(
 ): Alarm {
   return new Alarm(scope, id, {
     metric: fn.metricErrors({ period: Duration.minutes(5), statistic: Stats.SUM }),
+    threshold: 1,
+    comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+    evaluationPeriods: 1,
+    treatMissingData: TreatMissingData.NOT_BREACHING,
+    alarmDescription: opts.description,
+  });
+}
+
+/** Pages on the PII-free EMF metric emitted only for unexpected resolver failures. */
+function resolverUnexpectedErrorAlarm(
+  scope: Construct,
+  id: string,
+  operation: ResolverOperationT,
+  opts: { description: string },
+): Alarm {
+  return new Alarm(scope, id, {
+    metric: new Metric({
+      namespace: RESOLVER_METRIC_NAMESPACE,
+      metricName: UNEXPECTED_ERROR_METRIC,
+      dimensionsMap: { Operation: operation },
+      period: Duration.minutes(5),
+      statistic: Stats.SUM,
+    }),
     threshold: 1,
     comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
     evaluationPeriods: 1,

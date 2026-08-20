@@ -99,9 +99,9 @@ jobs:
       # green. `pipeline-deploy` wrote this environment's `amplify_outputs.json`,
       # so the smoke suite targets exactly what was just deployed, reusing the
       # OIDC session for its one throwaway Cognito coordinator. It submits one
-      # marked synthetic guest report, requires the async pipeline to land it in
-      # AI_CLASSIFIED (NEEDS_VERIFICATION fails the gate — degraded Bedrock
-      # triage is invisible to every alarm), then rejects it. A red run here
+      # marked synthetic guest report, requires the async pipeline to produce a
+      # structured classification (AI_CLASSIFIED or a valid low-confidence
+      # NEEDS_VERIFICATION), then rejects it. A red run here
       # means the deploy is LIVE but unverified: triage with
       # docs/runbooks/incident-response.md, roll back manually if needed.
       - name: Post-deploy smoke test

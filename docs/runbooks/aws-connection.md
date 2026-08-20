@@ -131,17 +131,22 @@ environment subject rather than the ref subject. In GitHub, configure that Envir
 repo-scoped but not branch-scoped. Required reviewers are an additional optional gate. Never use a
 wildcard repo or environment in the `:sub` condition.
 
-**Permissions policy:** the deploy role holds **no direct provisioning power** — it only
-`sts:AssumeRole`s the CDK bootstrap roles (`cdk-<qualifier>-{deploy,file-publishing,image-publishing,lookup}-role-*`),
-which hold the real permissions. This is the least-privilege CDK pattern and is exactly what
+**Permissions policy:** infrastructure provisioning remains behind assumed CDK bootstrap roles
+(`cdk-<qualifier>-{deploy,file-publishing,image-publishing,lookup}-role-*`). This is the
+least-privilege CDK pattern and is exactly what
 [`infra/bootstrap/github-oidc-deploy-role.yaml`](../../infra/bootstrap/github-oidc-deploy-role.yaml)
 provisions (plus reading the bootstrap-version SSM parameter and a small set of read-only
 actions `ampx` itself calls directly — with the deploy role, not the assumed CDK role — to emit
 `amplify_outputs.json` after provisioning: `cloudformation:Describe*` / `GetTemplateSummary` to
 read the deployed stack, and `s3:GetObject`/`ListBucket` on `amplify-*` buckets to read the
-generated `model-schema.graphql` codegen artifact). The
+generated `model-schema.graphql` codegen artifact). ADR-0051 also grants only
+`AdminCreateUser`, `AdminSetUserPassword`, `AdminAddUserToGroup`, and `AdminDeleteUser` on
+deployment-region Cognito pools for the throwaway post-deploy coordinator. The
 _runtime_ Bedrock grant (inference profile + EU foundation-model ARNs) lives on the classifier
 Lambda's role, created during deploy (see `apps/web/amplify/backend.ts`), not on the deploy role.
+
+If this stack was created before ADR-0051, rerun `scripts/aws/30-deploy-role.sh` before the first
+CRIS-35 deploy. `ampx pipeline-deploy` does not update this bootstrap role.
 
 ### 5. Configure GitHub (repo → Settings)
 
