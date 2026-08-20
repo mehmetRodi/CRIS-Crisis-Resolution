@@ -139,7 +139,7 @@ export function addObservability(props: ObservabilityProps): Topic {
       treatMissingData: TreatMissingData.NOT_BREACHING,
       alarmDescription:
         'Classification DLQ is non-empty: a report exhausted its retries (poison message). ' +
-        'Inspect the message and redrive after fixing the cause. See docs/runbooks/deploy.md.',
+        'Inspect the message and redrive after fixing the cause. See docs/runbooks/incident-response.md.',
     }),
   );
 
@@ -161,7 +161,7 @@ export function addObservability(props: ObservabilityProps): Topic {
         'Stream→SQS pipe DLQ is non-empty: report stream records never reached the ' +
         'classification queue and were parked. These reports are unclassified and ' +
         'invisible to the queue DLQ. Do NOT redrive into ClassificationQueue — the ' +
-        'payloads are stream records, not worker messages. See docs/runbooks/deploy.md.',
+        'payloads are stream records, not worker messages. See docs/runbooks/incident-response.md.',
     }),
   );
 
