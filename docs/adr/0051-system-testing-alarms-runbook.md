@@ -1,4 +1,4 @@
-# ADR-0050: Post-deploy synthetic smoke gate, alarm-coverage completion, and incident runbook
+# ADR-0051: Post-deploy synthetic smoke gate, alarm-coverage completion, and incident runbook
 
 - **Status:** Accepted
 - **Date:** 2026-08-20

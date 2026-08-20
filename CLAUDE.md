@@ -25,7 +25,7 @@ MapLibre base maps, CI/CD, and observability.
 Important deferred seams are listed in [`docs/architecture.md`](docs/architecture.md): media
 quarantine/signed delivery (presigned upload itself landed in CRIS-17), Amazon Location map
 tiles, custom subscriptions (the worker-to-AppSync publish call is wired in CRIS-19, but
-nothing subscribes yet), citizen alerts, team-assignment and duplicate-merge coordinator
+nothing subscribes yet), push alerts, team-assignment and duplicate-merge coordinator
 actions, WAF, and reporter-contact/media hardening. Do not infer the state of a deployed
 environment from the source tree.
 

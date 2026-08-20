@@ -1,13 +1,13 @@
-# ADR-0051: Correct smoke classification and resolver-alarm semantics
+# ADR-0052: Correct smoke classification and resolver-alarm semantics
 
 - **Status:** Accepted
 - **Date:** 2026-08-20
 - **Deciders:** Team (CRIS-35 review)
-- **Refines:** ADR-0050 (post-deploy smoke gate and alarm completion)
+- **Refines:** ADR-0051 (post-deploy smoke gate and alarm completion)
 
 ## Context
 
-Review of ADR-0050's implementation found three correctness gaps:
+Review of ADR-0051's implementation found three correctness gaps:
 
 1. The smoke transaction used Cognito admin APIs, but the GitHub OIDC role had no direct
    Cognito permission, so verification would fail before reaching AppSync.

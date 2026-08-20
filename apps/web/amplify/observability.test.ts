@@ -14,13 +14,13 @@ import {
 } from './functions/resolver-metrics';
 
 /**
- * Synth-level contract for the observability module (CRIS-35, ADR-0050): every
+ * Synth-level contract for the observability module (CRIS-35, ADR-0051): every
  * alarm notifies the ops topic on both ALARM and OK, no alarm pages on missing
  * data, and the alarm set itself is pinned so dropping one is a visible diff —
  * the same `Template.fromStack` pattern as `security/encryption.test.ts`.
  */
 
-const EXPECTED_ALARMS = 13;
+const EXPECTED_ALARMS = 16;
 
 interface SynthesizedObservability {
   template: Template;
@@ -44,7 +44,7 @@ function synthesizeObservability(): SynthesizedObservability {
   const app = new App();
   const root = new Stack(app, 'ObservabilityRoot');
   // Alarms live in the data (pipeline) nested stack in backend.ts; mirror that,
-  // including the auth-stack trigger referenced across stacks (ADR-0050).
+  // including the auth-stack trigger referenced across stacks (ADR-0051).
   const data = new NestedStack(root, 'Data');
   const auth = new NestedStack(root, 'Auth');
   const encryptionKey = createDataKey(root);
@@ -54,6 +54,7 @@ function synthesizeObservability(): SynthesizedObservability {
     transitionReport: lambdaStub(data, 'TransitionReportFn'),
     publishReportUpdate: lambdaStub(data, 'PublishReportUpdateFn'),
     classifyReport: lambdaStub(data, 'ClassifyReportFn'),
+    alertDispatch: lambdaStub(data, 'AlertDispatchFn'),
     createMediaUploadUrl: lambdaStub(data, 'CreateMediaUploadUrlFn'),
     listVolunteerTasks: lambdaStub(data, 'ListVolunteerTasksFn'),
     assignTeam: lambdaStub(data, 'AssignTeamFn'),
@@ -65,12 +66,16 @@ function synthesizeObservability(): SynthesizedObservability {
     deadLetterQueue: { queue: classificationDlq, maxReceiveCount: 3 },
   });
   const pipeDlq = new Queue(data, 'ReportStreamPipeDlq');
+  const alertDlq = new Queue(data, 'AlertDlq');
+  const alertPipeDlq = new Queue(data, 'AlertStreamPipeDlq');
 
   addObservability({
     scope: data,
     functions,
     classificationQueue,
     classificationDlq,
+    alertDlq,
+    alertPipeDlq,
     pipeDlq,
     encryptionKey,
     graphqlApiId: 'testGraphqlApiId',
@@ -94,7 +99,7 @@ function alarmByLogicalIdPrefix(
   return match[1].Properties;
 }
 
-describe('observability baseline (ADR-0015, ADR-0050)', () => {
+describe('observability baseline (ADR-0015, ADR-0051)', () => {
   it('synthesizes the pinned alarm set, one encrypted ops topic, and the dashboard', () => {
     const { template, alarms } = synthesizeObservability();
 
@@ -120,7 +125,12 @@ describe('observability baseline (ADR-0015, ADR-0050)', () => {
   it('pages on a single message in either DLQ (§5.4.4 never-lost)', () => {
     const { alarms } = synthesizeObservability();
 
-    for (const prefix of ['ClassificationDlqNotEmpty', 'ReportStreamPipeDlqNotEmpty']) {
+    for (const prefix of [
+      'ClassificationDlqNotEmpty',
+      'AlertDlqNotEmpty',
+      'AlertStreamPipeDlqNotEmpty',
+      'ReportStreamPipeDlqNotEmpty',
+    ]) {
       expect(alarmByLogicalIdPrefix(alarms, prefix)).toMatchObject({
         MetricName: 'ApproximateNumberOfMessagesVisible',
         Namespace: 'AWS/SQS',
@@ -166,6 +176,7 @@ describe('observability baseline (ADR-0015, ADR-0050)', () => {
     for (const prefix of [
       'PublishReportUpdateErrors',
       'ClassifyWorkerErrors',
+      'AlertDispatchErrors',
       'VolunteerTasksErrors',
       'CitizenRoleAssignmentErrors',
     ]) {

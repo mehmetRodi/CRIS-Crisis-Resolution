@@ -47,12 +47,13 @@ import {
  * one account don't collide.
  */
 
-/** The alarmed backend Lambdas, keyed by role (ADR-0015; completed by ADR-0050). */
+/** The alarmed backend Lambdas, keyed by role (ADR-0015; completed by ADR-0051). */
 export interface BackendFunctions {
   submitReport: IFunction;
   transitionReport: IFunction;
   publishReportUpdate: IFunction;
   classifyReport: IFunction;
+  alertDispatch: IFunction;
   createMediaUploadUrl: IFunction;
   listVolunteerTasks: IFunction;
   assignTeam: IFunction;
@@ -68,6 +69,10 @@ export interface ObservabilityProps {
   classificationQueue: IQueue;
   /** Redrive DLQ for poison classification messages. */
   classificationDlq: IQueue;
+  /** Redrive DLQ for alert candidates that exhausted delivery retries. */
+  alertDlq: IQueue;
+  /** Failure sink for Report-stream records that never reached the alert queue. */
+  alertPipeDlq: IQueue;
   /**
    * Failure sink for the Stream→SQS pipe (CRIS-31). Distinct from
    * {@link ObservabilityProps.classificationDlq}: these messages are stream
@@ -82,7 +87,7 @@ export interface ObservabilityProps {
   encryptionKey: IKey;
   /**
    * GraphQL API id (`CfnGraphQLApi.attrApiId`) for the API-level 5XX alarm
-   * (ADR-0050) — failures AppSync serves itself never appear in any Lambda metric.
+   * (ADR-0051) — failures AppSync serves itself never appear in any Lambda metric.
    */
   graphqlApiId: string;
 }
@@ -98,14 +103,16 @@ export function addObservability(props: ObservabilityProps): Topic {
     functions,
     classificationQueue,
     classificationDlq,
+    alertDlq,
+    alertPipeDlq,
     pipeDlq,
     encryptionKey,
     graphqlApiId,
   } = props;
 
   /* ---- Ops alarm topic ---------------------------------------------------- */
-  // Dedicated to operational alarms, separate from the app's (future) proximity-
-  // alert SNS topic (CRIS-34). A human/Slack/PagerDuty subscription is added
+  // Dedicated to operational alarms, separate from direct citizen-alert
+  // SNS/SES delivery (CRIS-34). A human/Slack/PagerDuty subscription is added
   // post-deploy — see docs/runbooks/deploy.md — because the endpoint is
   // environment-specific and must not be committed.
   //
@@ -146,6 +153,40 @@ export function addObservability(props: ObservabilityProps): Topic {
       alarmDescription:
         'Classification DLQ is non-empty: a report exhausted its retries (poison message). ' +
         'Inspect the message and redrive after fixing the cause. See docs/runbooks/incident-response.md.',
+    }),
+  );
+
+  register(
+    new Alarm(scope, 'AlertDlqNotEmpty', {
+      metric: alertDlq.metricApproximateNumberOfMessagesVisible({
+        period: Duration.minutes(1),
+        statistic: Stats.MAXIMUM,
+      }),
+      threshold: 1,
+      comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      evaluationPeriods: 1,
+      treatMissingData: TreatMissingData.NOT_BREACHING,
+      alarmDescription:
+        'Alert DLQ is non-empty: a proximity alert exhausted Cognito/SNS/SES retries. ' +
+        'Fix the dependency or recipient issue, then redrive to AlertQueue. ' +
+        'See docs/runbooks/incident-response.md.',
+    }),
+  );
+
+  register(
+    new Alarm(scope, 'AlertStreamPipeDlqNotEmpty', {
+      metric: alertPipeDlq.metricApproximateNumberOfMessagesVisible({
+        period: Duration.minutes(1),
+        statistic: Stats.MAXIMUM,
+      }),
+      threshold: 1,
+      comparisonOperator: ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      evaluationPeriods: 1,
+      treatMissingData: TreatMissingData.NOT_BREACHING,
+      alarmDescription:
+        'Alert stream pipe DLQ is non-empty: classified P0/P1 stream records never reached ' +
+        'AlertQueue. Do NOT redrive raw stream records directly into AlertQueue. ' +
+        'See docs/runbooks/incident-response.md.',
     }),
   );
 
@@ -204,6 +245,13 @@ export function addObservability(props: ObservabilityProps): Topic {
     }),
   );
   register(
+    lambdaErrorAlarm(scope, 'AlertDispatchErrors', functions.alertDispatch, {
+      description:
+        'alert-dispatch raised retryable delivery errors. Repeated errors feed AlertDlq; ' +
+        'check Cognito, SNS, SES, and DynamoDB health.',
+    }),
+  );
+  register(
     new Alarm(scope, 'ClassifyWorkerThrottles', {
       metric: functions.classifyReport.metricThrottles({
         period: Duration.minutes(5),
@@ -250,7 +298,7 @@ export function addObservability(props: ObservabilityProps): Topic {
     }),
   );
 
-  /* ---- Support resolvers + auth trigger (ADR-0050) ------------------------ */
+  /* ---- Support resolvers + auth trigger (ADR-0051) ------------------------ */
   // The remaining wired Lambdas. Public/guarded operations use the same
   // expected-error-aware policy as the write path; pure read/trigger handlers
   // with no client/domain rejection path retain Lambda Errors.
@@ -287,7 +335,7 @@ export function addObservability(props: ObservabilityProps): Topic {
     }),
   );
 
-  /* ---- API surface (ADR-0050) --------------------------------------------- */
+  /* ---- API surface (ADR-0051) --------------------------------------------- */
   // 5XX from AppSync itself: request/response mapping faults, auth-plumbing
   // breakage, resolver invoke failures — none of which increment a Lambda Errors
   // metric. 4XX is deliberately NOT alarmed (dominated by client mistakes and

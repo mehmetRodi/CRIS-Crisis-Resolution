@@ -1,14 +1,14 @@
 # Runbook: Incident response & system verification
 
-The full incident/system runbook (CRIS-35, [ADR-0050](../adr/0050-system-testing-alarms-runbook.md),
-[ADR-0051](../adr/0051-smoke-and-resolver-alarm-corrections.md)).
+The full incident/system runbook (CRIS-35, [ADR-0051](../adr/0051-system-testing-alarms-runbook.md),
+[ADR-0052](../adr/0052-smoke-and-resolver-alarm-corrections.md)).
 Covers every alarm's first response, post-deploy smoke-gate triage, DLQ recovery, manual
 real-time verification, and the manual rollback procedure. Deploy mechanics (activation,
 credentials, KMS retention) stay in [`deploy.md`](deploy.md).
 
 - **Observability baseline:** [ADR-0015](../adr/0015-observability-xray-cloudwatch-alarms.md)
-- **Alarm completion + smoke gate:** [ADR-0050](../adr/0050-system-testing-alarms-runbook.md)
-- **Smoke/alarm correctness:** [ADR-0051](../adr/0051-smoke-and-resolver-alarm-corrections.md)
+- **Alarm completion + smoke gate:** [ADR-0051](../adr/0051-system-testing-alarms-runbook.md)
+- **Smoke/alarm correctness:** [ADR-0052](../adr/0052-smoke-and-resolver-alarm-corrections.md)
 - **Deploy pipeline:** [ADR-0016](../adr/0016-continuous-deployment-ampx-pipeline-oidc.md), [ADR-0018](../adr/0018-gate-deploy-on-ci-via-workflow-run.md)
 
 ---
@@ -40,11 +40,14 @@ authorization, legality, and optimistic-lock rejections; those remain normal API
 | Alarm                         | Sev | Means                                                                             | First actions                                                                                                                                                  |
 | ----------------------------- | --- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ClassificationDlqNotEmpty`   | 1   | A report exhausted retries (poison message) — "never-lost" at risk                | Inspect the DLQ message (IDs only, no PII). Fix root cause, then redrive DLQ → classification queue.                                                           |
+| `AlertDlqNotEmpty`            | 1   | A proximity alert exhausted Cognito/SNS/SES delivery retries                      | Inspect `AlertDelivery` attempts and `alert-dispatch` logs. Fix the dependency/recipient issue, then redrive DLQ → `AlertQueue`; `SENT` channels are skipped.  |
+| `AlertStreamPipeDlqNotEmpty`  | 1   | Classified P0/P1 stream records never reached `AlertQueue`                        | Treat these raw stream records as PII-bearing. **Do not redrive them directly into `AlertQueue`**; recover the `reportId` + `priorityBand` message shape.      |
 | `ReportStreamPipeDlqNotEmpty` | 1   | Stream records never reached the queue; the pipe parked them to unblock the shard | Treat these raw stream records as PII-bearing. **Do not redrive them into `ClassificationQueue`**; recover them with the canonical-message procedure in §4.    |
 | `SubmitReportErrors`          | 1   | Citizens may be unable to file reports (availability, §3.2)                       | Check `submit-report` logs, DynamoDB throttling/conditional-check failures, AppSync health.                                                                    |
 | `AppSyncServerErrors`         | 1   | The API itself returned 5XX — failures no Lambda metric can see                   | X-Ray the failing field; check AppSync service health and auth plumbing. Correlate with resolver alarms: if none fired, the fault is in AppSync, not a Lambda. |
 | `ClassificationBacklogAge`    | 2   | Oldest queued report > 30 s for 3 min — classification lagging                    | Check Bedrock throttling/quota in-region and `classify-report` logs/duration. Watch worker throttles.                                                          |
 | `ClassifyWorkerErrors`        | 2   | Worker raised _unhandled_ errors (not Bedrock/parse — those are handled)          | Read structured logs (`classify.record.error`). Repeated errors feed the DLQ.                                                                                  |
+| `AlertDispatchErrors`         | 2   | Alert delivery raised retryable dependency or persistence errors                  | Read `alert.delivery.failed` / `alert.record.error`; verify Cognito, SNS, SES, DynamoDB, and the SES sender identity.                                          |
 | `ClassifyWorkerThrottles`     | 2   | Worker hitting the concurrency ceiling under load                                 | Review reserved concurrency vs the 1,000 writes/min target (§3.2); raise account concurrency if needed.                                                        |
 | `TransitionReportErrors`      | 2   | Coordinator status transitions failing unexpectedly                               | Check `resolver.unexpected_error`, `transition-report` logs, DynamoDB, and AppSync; normal `CONFLICT`/illegal transitions are excluded.                        |
 | `PublishReportUpdateErrors`   | 2   | The internal publish resolver is failing; live clients may be stale               | Check `publish-report-update`, `publish.failed`, and `transition.publish.failed` logs, then AppSync real-time connection health.                               |
@@ -102,7 +105,7 @@ The pipe DLQ contains failed DynamoDB stream records, while `ClassificationQueue
 
 ## 5. Manual rollback
 
-There is deliberately no automated rollback (ADR-0050): an unattended re-deploy can compound
+There is deliberately no automated rollback (ADR-0051): an unattended re-deploy can compound
 schema/data mismatches. Rolling back is one revert away, but a human decides.
 
 1. **Identify the last good commit** — the newest **Deploy** run on `main` where both

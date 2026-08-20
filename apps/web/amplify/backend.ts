@@ -17,6 +17,7 @@ import { classifyReport } from './functions/classify-report/resource';
 import { createMediaUploadUrl } from './functions/create-media-upload-url/resource';
 import { listVolunteerTasks } from './functions/list-volunteer-tasks/resource';
 import { assignTeam } from './functions/assign-team/resource';
+import { alertDispatch } from './functions/alert-dispatch/resource';
 import { createDataKey } from './security/encryption';
 import { addObservability } from './observability';
 
@@ -43,8 +44,11 @@ import { addObservability } from './observability';
  * form a nested-stack cycle unless the worker lives in the data stack. So
  * `classify-report` is pinned to the `data` group (`resourceGroupName: 'data'`,
  * ADR-0031); every edge here is then intra-`data`-stack. CRIS-28's custom
- * subscriptions and all three publisher grants live in the data schema; SNS
- * proximity alerts remain a deferred seam.
+ * subscriptions and all three publisher grants live in the data schema.
+ * A second Report-stream pipe durably projects P0/P1 threshold crossings onto
+ * a queue for `alert-dispatch` (§2.7, CRIS-34/ADR-0053), which matches them
+ * against `AlertSubscription`s and delivers SMS (SNS)/email (SES) — PUSH is
+ * declarable but not yet delivered, pending device-token infrastructure.
  *
  * Run `npx ampx sandbox` from `apps/web` (with AWS credentials + Bedrock model
  * access) to stand up a personal dev environment. Source control does not
@@ -63,6 +67,7 @@ const backend = defineBackend({
   createMediaUploadUrl,
   listVolunteerTasks,
   assignTeam,
+  alertDispatch,
 });
 
 /* -------------------------------------------------------------------------- */
@@ -224,6 +229,7 @@ backend.assignTeam.addEnvironment('REPORT_EVENT_TABLE_NAME', tables['ReportEvent
 /* -------------------------------------------------------------------------- */
 
 const worker = backend.classifyReport.resources.lambda;
+const alertDispatchFn = backend.alertDispatch.resources.lambda;
 const cfnTables = backend.data.resources.cfnResources.amplifyDynamoDbTables;
 
 /* -------------------------------------------------------------------------- */
@@ -280,6 +286,16 @@ const classificationQueue = new Queue(pipelineStack, 'ClassificationQueue', {
   encryptionMasterKey: dataKey,
 });
 
+const alertDlq = new Queue(pipelineStack, 'AlertDlq', {
+  retentionPeriod: Duration.days(14),
+  encryptionMasterKey: dataKey,
+});
+const alertQueue = new Queue(pipelineStack, 'AlertQueue', {
+  visibilityTimeout: Duration.seconds(180),
+  deadLetterQueue: { queue: alertDlq, maxReceiveCount: 3 },
+  encryptionMasterKey: dataKey,
+});
+
 /* -------------------------------------------------------------------------- */
 /* EventBridge Pipe: Report stream → classification queue                      */
 /* -------------------------------------------------------------------------- */
@@ -295,6 +311,7 @@ const pipeRole = new Role(pipelineStack, 'StreamToSqsPipeRole', {
 });
 reportTable.grantStreamRead(pipeRole);
 classificationQueue.grantSendMessages(pipeRole);
+alertQueue.grantSendMessages(pipeRole);
 
 // Failure sink for the Stream→SQS hop (CRIS-31). `classificationDlq` covers only
 // SQS→Lambda; without this, a record that repeatedly fails to reach the queue is
@@ -312,6 +329,15 @@ const pipeDlq = new Queue(pipelineStack, 'ReportStreamPipeDlq', {
   encryptionMasterKey: dataKey,
 });
 pipeDlq.grantSendMessages(pipeRole);
+
+// Alert pipe failures contain the same raw, PII-bearing stream records but have
+// a different recovery target, so they must not share the classification pipe's
+// DLQ (ADR-0053).
+const alertPipeDlq = new Queue(pipelineStack, 'AlertStreamPipeDlq', {
+  retentionPeriod: Duration.days(14),
+  encryptionMasterKey: dataKey,
+});
+alertPipeDlq.grantSendMessages(pipeRole);
 
 const reportStreamPipe = new CfnPipe(pipelineStack, 'ReportStreamToClassificationQueue', {
   roleArn: pipeRole.roleArn,
@@ -366,6 +392,63 @@ const reportStreamPipe = new CfnPipe(pipelineStack, 'ReportStreamToClassificatio
 // stack. Depending on the role construct pulls in its DefaultPolicy subtree, so
 // permissions are always in place before the pipe is touched.
 reportStreamPipe.node.addDependency(pipeRole);
+
+// A separate filtered consumer projects only durable P0/P1 threshold crossings
+// to the alert queue. The worker re-reads PII-free matching fields from Report,
+// so this hop carries no report text or reporter data (ADR-0053).
+const alertStreamPipe = new CfnPipe(pipelineStack, 'ReportStreamToAlertQueue', {
+  roleArn: pipeRole.roleArn,
+  source: streamArn,
+  target: alertQueue.queueArn,
+  sourceParameters: {
+    dynamoDbStreamParameters: {
+      startingPosition: 'LATEST',
+      batchSize: 10,
+      maximumBatchingWindowInSeconds: 1,
+      maximumRetryAttempts: 5,
+      maximumRecordAgeInSeconds: 3600,
+      onPartialBatchItemFailure: 'AUTOMATIC_BISECT',
+      deadLetterConfig: { arn: alertPipeDlq.queueArn },
+    },
+    filterCriteria: {
+      filters: [
+        // Initial PROCESSING → AI_CLASSIFIED threshold crossing.
+        {
+          pattern: JSON.stringify({
+            eventName: ['MODIFY'],
+            dynamodb: {
+              NewImage: {
+                status: { S: ['AI_CLASSIFIED'] },
+                priorityBand: { S: ['P0', 'P1'] },
+              },
+              OldImage: { status: { S: [{ 'anything-but': ['AI_CLASSIFIED'] }] } },
+            },
+          }),
+        },
+        // A later deterministic rescore that newly crosses into P0/P1.
+        {
+          pattern: JSON.stringify({
+            eventName: ['MODIFY'],
+            dynamodb: {
+              NewImage: {
+                status: { S: ['AI_CLASSIFIED'] },
+                priorityBand: { S: ['P0', 'P1'] },
+              },
+              OldImage: { priorityBand: { S: [{ 'anything-but': ['P0', 'P1'] }] } },
+            },
+          }),
+        },
+      ],
+    },
+  },
+  targetParameters: {
+    inputTemplate: JSON.stringify({
+      reportId: '<$.dynamodb.Keys.id.S>',
+      priorityBand: '<$.dynamodb.NewImage.priorityBand.S>',
+    }),
+  },
+});
+alertStreamPipe.node.addDependency(pipeRole);
 
 /* -------------------------------------------------------------------------- */
 /* Lambda wiring — SQS event source, IAM, environment                          */
@@ -456,6 +539,82 @@ backend.classifyReport.addEnvironment(
 );
 
 /* -------------------------------------------------------------------------- */
+/* alert-dispatch pipeline (CRIS-34) — SQS queue → alert-dispatch Lambda       */
+/* -------------------------------------------------------------------------- */
+
+alertDispatchFn.addEventSource(
+  new SqsEventSource(alertQueue, {
+    batchSize: 5,
+    reportBatchItemFailures: true, // pairs with the handler's SQSBatchResponse
+  }),
+);
+alertQueue.grantConsumeMessages(alertDispatchFn);
+
+tables['AlertSubscription'].grantReadData(alertDispatchFn);
+tables['AlertDelivery'].grantReadWriteData(alertDispatchFn);
+reportTable.grantReadData(alertDispatchFn);
+
+// SMS: SNS `Publish` to a phone number has no ARN to scope to — the same
+// class of grant as `geo-places:Geocode` above. Email: the SES FROM identity
+// is verified outside CDK (an account-level, DNS-based setup step, like
+// enabling Bedrock model access) — there is likewise no identity resource
+// this stack manages to scope an ARN to.
+alertDispatchFn.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['sns:Publish'],
+    resources: ['*'],
+  }),
+);
+alertDispatchFn.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['ses:SendEmail', 'ses:SendRawEmail'],
+    resources: ['*'],
+  }),
+);
+
+// Recipient contact info is read from Cognito at dispatch time — §2.7's
+// `AlertSubscription` only carries `userId`, deliberately not a denormalized
+// (and staleness-prone) copy of contact info. Reuses the exact
+// account/region-wildcard-userpool ARN already built for
+// `citizenRoleAssignment` above.
+alertDispatchFn.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['cognito-idp:AdminGetUser'],
+    resources: [cognitoPoolsInDeploymentScope],
+  }),
+);
+
+backend.alertDispatch.addEnvironment(
+  'ALERT_SUBSCRIPTION_TABLE_NAME',
+  tables['AlertSubscription'].tableName,
+);
+backend.alertDispatch.addEnvironment(
+  'ALERT_DELIVERY_TABLE_NAME',
+  tables['AlertDelivery'].tableName,
+);
+backend.alertDispatch.addEnvironment('REPORT_TABLE_NAME', reportTable.tableName);
+// Physical name of the AlertSubscription.regionId GSI — same derivation
+// caveat as REPORT_GEO_INDEX_NAME above: best-effort from the transformer's
+// naming rule, not verified against a deployed schema (ADR-0011).
+backend.alertDispatch.addEnvironment(
+  'ALERT_SUBSCRIPTION_REGION_INDEX_NAME',
+  'alertSubscriptionsByRegionId',
+);
+// Physical name of the AlertSubscription.centerGeohashPrefix GSI — same
+// derivation caveat as above, the other of the two independent
+// candidate-discovery paths (CRIS-34, ADR-0050).
+backend.alertDispatch.addEnvironment(
+  'ALERT_SUBSCRIPTION_GEOHASH_PREFIX_INDEX_NAME',
+  'alertSubscriptionsByCenterGeohashPrefix',
+);
+backend.alertDispatch.addEnvironment('USER_POOL_ID', backend.auth.resources.userPool.userPoolId);
+const alertFromEmail = process.env.ALERT_FROM_EMAIL;
+if (!alertFromEmail) {
+  throw new Error('ALERT_FROM_EMAIL must name an SES-verified sender identity');
+}
+backend.alertDispatch.addEnvironment('ALERT_FROM_EMAIL', alertFromEmail);
+
+/* -------------------------------------------------------------------------- */
 /* Observability (CRIS-15, ADR-0015) — X-Ray tracing + CloudWatch alarms       */
 /* -------------------------------------------------------------------------- */
 
@@ -470,6 +629,7 @@ const tracedFunctions = [
   backend.classifyReport,
   backend.createMediaUploadUrl,
   backend.assignTeam,
+  backend.alertDispatch,
 ];
 for (const fn of tracedFunctions) {
   fn.resources.cfnResources.cfnFunction.tracingConfig = { mode: 'Active' };
@@ -492,15 +652,18 @@ addObservability({
     transitionReport: transitionFn,
     publishReportUpdate: backend.publishReportUpdate.resources.lambda,
     classifyReport: worker,
+    alertDispatch: alertDispatchFn,
     createMediaUploadUrl: mediaUploadFn,
     listVolunteerTasks: volunteerTasksFn,
     assignTeam: assignTeamFn,
     // Lives in the auth stack; alarming it from here adds a data→auth metric
-    // reference, the dependency direction that already exists (ADR-0050).
+    // reference, the dependency direction that already exists (ADR-0051).
     citizenRoleAssignment: citizenRoleFn,
   },
   classificationQueue,
   classificationDlq,
+  alertDlq,
+  alertPipeDlq,
   pipeDlq,
   encryptionKey: dataKey,
   graphqlApiId: backend.data.resources.cfnResources.cfnGraphqlApi.attrApiId,

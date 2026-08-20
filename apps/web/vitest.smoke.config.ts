@@ -1,7 +1,7 @@
 import { defineConfig } from 'vitest/config';
 
 /**
- * Post-deploy smoke suite (CRIS-35, ADR-0050). Runs against the environment
+ * Post-deploy smoke suite (CRIS-35, ADR-0051). Runs against the environment
  * `amplify_outputs.json` points at — normally invoked by `deploy.yml` right
  * after `ampx pipeline-deploy`. Opt-in via CRISISMAP_SMOKE_TARGET=deployed;
  * `npm test` never picks these up (vite.config.ts excludes `*.smoke.test.ts`).

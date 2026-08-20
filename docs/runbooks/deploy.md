@@ -3,13 +3,13 @@
 Deploy mechanics for the CrisisMap AI backend (CRIS-14/15): activating the CD pipeline,
 credentials, deploy-time failure modes, and KMS retention. Alarm first response, smoke-gate
 triage, DLQ recovery, and rollback live in the incident runbook,
-[`incident-response.md`](incident-response.md) (CRIS-35, ADR-0050).
+[`incident-response.md`](incident-response.md) (CRIS-35, ADR-0051).
 
 - **Deploy pipeline:** [ADR-0016](../adr/0016-continuous-deployment-ampx-pipeline-oidc.md)
 - **CI success gate:** [ADR-0018](../adr/0018-gate-deploy-on-ci-via-workflow-run.md)
 - **Observability:** [ADR-0015](../adr/0015-observability-xray-cloudwatch-alarms.md)
 - **Triage encryption:** [ADR-0043](../adr/0043-customer-managed-key-for-triage-data-plane.md)
-- **Smoke gate + incident runbook:** [ADR-0050](../adr/0050-system-testing-alarms-runbook.md)
+- **Smoke gate + incident runbook:** [ADR-0051](../adr/0051-system-testing-alarms-runbook.md)
 
 ---
 
@@ -33,11 +33,11 @@ in** — the job is skipped (green) unless `AWS_DEPLOY_ENABLED` is `true`.
    ```
    The role assumes the CDK bootstrap roles that hold infrastructure-provisioning power. Direct
    access is limited to the reads `ampx` needs and the four Cognito actions used to create and
-   delete the throwaway smoke coordinator (ADR-0051).
+   delete the throwaway smoke coordinator (ADR-0052).
 4. **CDK bootstrap** the account/region once (`npx ampx pipeline-deploy` relies on the CDK
    bootstrap stack).
 
-> **CRIS-35 upgrade:** accounts whose deploy-role stack predates ADR-0051 must rerun
+> **CRIS-35 upgrade:** accounts whose deploy-role stack predates ADR-0052 must rerun
 > `scripts/aws/30-deploy-role.sh` before enabling the smoke gate. The role template is bootstrap
 > infrastructure and is not updated by `ampx pipeline-deploy` itself.
 
@@ -49,6 +49,7 @@ in** — the job is skipped (green) unless `AWS_DEPLOY_ENABLED` is `true`.
 | Variable    | `AWS_REGION`          | `eu-central-1` (must have Bedrock model access)                   |
 | Secret      | `AWS_DEPLOY_ROLE_ARN` | ARN of the deploy role from step 3                                |
 | Secret      | `AMPLIFY_APP_ID`      | App ID from step 1                                                |
+| Secret      | `ALERT_FROM_EMAIL`    | SES-verified sender address for citizen alert emails              |
 | Environment | `production`          | Required by `deploy.yml`; restrict to `main` (reviewers optional) |
 
 The workflow's environment-gated OIDC token contains the `production` Environment subject, not a
@@ -58,13 +59,14 @@ only; the IAM trust alone cannot recover the branch name from that subject.
 Also confirm Bedrock model access is enabled for `BEDROCK_MODEL_ID`
 (`eu.anthropic.claude-haiku-4-5-20251001-v1:0` by default, via the EU inference profile) in
 `AWS_REGION`. See [ADR-0017](../adr/0017-aws-account-identity-and-region-topology.md).
+Verify the `ALERT_FROM_EMAIL` address or domain in SES in the same region before deploying.
 
 ### Deploy
 
 - **Automatic:** merge to `main`; deployment begins only after that commit's CI run succeeds.
 - **Manual:** Actions → **Deploy** → _Run workflow_.
 
-Every deploy run ends with the **post-deploy smoke gate** (CRIS-35, ADR-0050/0051): one synthetic
+Every deploy run ends with the **post-deploy smoke gate** (CRIS-35, ADR-0051/0052): one synthetic
 guest report must travel the whole classification pipeline in the environment that was just
 deployed. A red gate means the deploy is live but unverified — triage with
 [`incident-response.md`](incident-response.md#3-smoke-gate-failure-triage).
@@ -91,7 +93,7 @@ to `pipeRole`. Recovery is just re-running the deploy — the stack rolls back c
 
 ### Rollback
 
-Rollback is deliberately manual (ADR-0050) and is a **revert to `main`**, never a
+Rollback is deliberately manual (ADR-0051) and is a **revert to `main`**, never a
 `workflow_dispatch` of an older ref — `ampx pipeline-deploy` keys the stack by branch name, so
 deploying another ref creates a different backend. The step-by-step procedure, including the
 deploy freeze switch, is in

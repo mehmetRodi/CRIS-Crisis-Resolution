@@ -1,5 +1,5 @@
 /**
- * Post-deploy synthetic smoke transaction (CRIS-35, ADR-0050).
+ * Post-deploy synthetic smoke transaction (CRIS-35, ADR-0051).
  *
  * Proves the deployed environment works end to end — the one thing neither CI
  * (no AWS, ADR-0012) nor the sandbox-only live suite (ADR-0046) can: a guest
