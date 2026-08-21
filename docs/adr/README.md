@@ -69,3 +69,4 @@ behind the code — essential when refactoring or extending the system.
 | [0051](0051-system-testing-alarms-runbook.md)                        | Post-deploy smoke gate, alarm completion, incident runbook (CRIS-35) | Refined by ADR-0052              |
 | [0052](0052-smoke-and-resolver-alarm-corrections.md)                 | Correct smoke classification and resolver-alarm semantics            | Accepted                         |
 | [0053](0053-durable-proximity-alert-delivery.md)                     | Durable proximity-alert handoff and retry-safe delivery              | Accepted                         |
+| [0054](0054-password-reset.md)                                       | Password reset (web + mobile)                                        | Accepted                         |

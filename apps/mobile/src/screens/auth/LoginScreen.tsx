@@ -80,6 +80,10 @@ export function LoginScreen() {
             />
           </View>
 
+          <Pressable onPress={() => navigation.navigate('ForgotPassword')} hitSlop={8}>
+            <Text style={s.link}>Forgot password?</Text>
+          </Pressable>
+
           {error ? (
             <View style={s.errorBox}>
               <Text style={s.errorText}>{error}</Text>

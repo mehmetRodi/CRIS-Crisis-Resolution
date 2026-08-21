@@ -10,6 +10,8 @@ import { MapPage } from './screens/MapPage';
 import LoginPage from './LoginPage';
 import SignupPage from './SignupPage';
 import ConfirmSignupPage from './ConfirmSignupPage';
+import ForgotPasswordPage from './ForgotPasswordPage';
+import ResetPasswordPage from './ResetPasswordPage';
 import { CoordinatorDashboard } from './surfaces/coordinator/CoordinatorDashboard';
 import { useLiveReports } from './surfaces/coordinator/useLiveReports';
 import { useReportTransition } from './surfaces/coordinator/useReportTransition';
@@ -120,6 +122,8 @@ export function Router() {
             <Route path="/login" element={<LoginPage />} />
             <Route path="/signup" element={<SignupPage />} />
             <Route path="/confirm-signup" element={<ConfirmSignupPage />} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/reset-password" element={<ResetPasswordPage />} />
             <Route path="/report" element={<ReportPage />} />
             <Route path="/map" element={<MapPage />} />
             <Route
