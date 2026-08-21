@@ -5,12 +5,16 @@ import { ReportScreen } from '../screens/ReportScreen';
 import { LoginScreen } from '../screens/auth/LoginScreen';
 import { SignupScreen } from '../screens/auth/SignupScreen';
 import { ConfirmSignupScreen } from '../screens/auth/ConfirmSignupScreen';
+import { ForgotPasswordScreen } from '../screens/auth/ForgotPasswordScreen';
+import { ResetPasswordScreen } from '../screens/auth/ResetPasswordScreen';
 
 export type RootStackParamList = {
   Report: undefined;
   Login: undefined;
   Signup: undefined;
   ConfirmSignup: { email: string };
+  ForgotPassword: undefined;
+  ResetPassword: { email: string };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -30,6 +34,8 @@ export function RootNavigator() {
         <Stack.Screen name="Login" component={LoginScreen} />
         <Stack.Screen name="Signup" component={SignupScreen} />
         <Stack.Screen name="ConfirmSignup" component={ConfirmSignupScreen} />
+        <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
+        <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

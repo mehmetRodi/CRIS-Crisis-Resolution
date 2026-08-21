@@ -2,10 +2,18 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider, useAuth } from './AuthContext';
 
-const { getCurrentUserMock, fetchUserAttributesMock, fetchAuthSessionMock } = vi.hoisted(() => ({
+const {
+  getCurrentUserMock,
+  fetchUserAttributesMock,
+  fetchAuthSessionMock,
+  resetPasswordMock,
+  confirmResetPasswordMock,
+} = vi.hoisted(() => ({
   getCurrentUserMock: vi.fn(),
   fetchUserAttributesMock: vi.fn(),
   fetchAuthSessionMock: vi.fn(),
+  resetPasswordMock: vi.fn(),
+  confirmResetPasswordMock: vi.fn(),
 }));
 
 vi.mock('aws-amplify/auth', () => ({
@@ -17,6 +25,8 @@ vi.mock('aws-amplify/auth', () => ({
   signOut: vi.fn(),
   confirmSignUp: vi.fn(),
   resendSignUpCode: vi.fn(),
+  resetPassword: resetPasswordMock,
+  confirmResetPassword: confirmResetPasswordMock,
 }));
 
 function AuthProbe() {
@@ -30,12 +40,28 @@ function AuthProbe() {
   );
 }
 
+function ResetProbe() {
+  const { resetPassword, confirmResetPassword } = useAuth();
+  return (
+    <div>
+      <button onClick={() => void resetPassword('citizen@example.com')}>request</button>
+      <button
+        onClick={() => void confirmResetPassword('citizen@example.com', '123456', 'NewPassw0rd')}
+      >
+        confirm
+      </button>
+    </div>
+  );
+}
+
 describe('AuthContext', () => {
   beforeEach(() => {
     getCurrentUserMock.mockReset();
     fetchUserAttributesMock.mockReset();
     fetchAuthSessionMock.mockReset();
     fetchAuthSessionMock.mockResolvedValue({ tokens: undefined });
+    resetPasswordMock.mockReset();
+    confirmResetPasswordMock.mockReset();
   });
 
   it('throws when useAuth is used outside an AuthProvider', () => {
@@ -95,5 +121,39 @@ describe('AuthContext', () => {
     );
     expect(await screen.findByText('in:citizen@example.com')).toBeInTheDocument();
     expect(screen.getByTestId('highest-role')).toHaveTextContent('none');
+  });
+
+  it('resetPassword delegates to Cognito with the given username', async () => {
+    getCurrentUserMock.mockRejectedValue(new Error('not signed in'));
+    fetchUserAttributesMock.mockResolvedValue({});
+    resetPasswordMock.mockResolvedValue(undefined);
+    render(
+      <AuthProvider>
+        <ResetProbe />
+      </AuthProvider>,
+    );
+    screen.getByText('request').click();
+    await waitFor(() =>
+      expect(resetPasswordMock).toHaveBeenCalledWith({ username: 'citizen@example.com' }),
+    );
+  });
+
+  it('confirmResetPassword delegates to Cognito with the code and new password', async () => {
+    getCurrentUserMock.mockRejectedValue(new Error('not signed in'));
+    fetchUserAttributesMock.mockResolvedValue({});
+    confirmResetPasswordMock.mockResolvedValue(undefined);
+    render(
+      <AuthProvider>
+        <ResetProbe />
+      </AuthProvider>,
+    );
+    screen.getByText('confirm').click();
+    await waitFor(() =>
+      expect(confirmResetPasswordMock).toHaveBeenCalledWith({
+        username: 'citizen@example.com',
+        confirmationCode: '123456',
+        newPassword: 'NewPassw0rd',
+      }),
+    );
   });
 });

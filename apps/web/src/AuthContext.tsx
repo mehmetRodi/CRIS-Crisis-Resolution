@@ -8,6 +8,8 @@ import {
   signOut,
   confirmSignUp,
   resendSignUpCode,
+  resetPassword,
+  confirmResetPassword,
 } from 'aws-amplify/auth';
 import type { AuthUser, SignInOutput } from 'aws-amplify/auth';
 import { highestRole as resolveHighestRole, UserRole } from '@crisismap/shared';
@@ -25,6 +27,8 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   confirmSignUp: (email: string, code: string) => Promise<void>;
   resendSignUpCode: (email: string) => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
+  confirmResetPassword: (email: string, code: string, newPassword: string) => Promise<void>;
   isAuthenticated: boolean;
 }
 
@@ -105,6 +109,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await resendSignUpCode({ username: userEmail });
   };
 
+  const resetPasswordHandler = async (userEmail: string) => {
+    await resetPassword({ username: userEmail });
+  };
+
+  const confirmResetPasswordHandler = async (
+    userEmail: string,
+    code: string,
+    newPassword: string,
+  ) => {
+    await confirmResetPassword({ username: userEmail, confirmationCode: code, newPassword });
+  };
+
   const value: AuthContextType = {
     user,
     email,
@@ -116,6 +132,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     signOut: signOutHandler,
     confirmSignUp: confirmSignUpHandler,
     resendSignUpCode: resendCodeHandler,
+    resetPassword: resetPasswordHandler,
+    confirmResetPassword: confirmResetPasswordHandler,
     isAuthenticated: !!user,
   };
 

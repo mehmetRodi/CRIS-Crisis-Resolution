@@ -1,10 +1,12 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
+  confirmResetPassword,
   confirmSignUp,
   fetchUserAttributes,
   getCurrentUser,
   resendSignUpCode,
+  resetPassword,
   signIn,
   signOut,
   signUp,
@@ -20,6 +22,8 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   confirmSignUp: (email: string, code: string) => Promise<void>;
   resendSignUpCode: (email: string) => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
+  confirmResetPassword: (email: string, code: string, newPassword: string) => Promise<void>;
   isAuthenticated: boolean;
 }
 
@@ -87,6 +91,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await resendSignUpCode({ username: userEmail });
   };
 
+  const resetPasswordHandler = async (userEmail: string) => {
+    await resetPassword({ username: userEmail });
+  };
+
+  const confirmResetPasswordHandler = async (
+    userEmail: string,
+    code: string,
+    newPassword: string,
+  ) => {
+    await confirmResetPassword({ username: userEmail, confirmationCode: code, newPassword });
+  };
+
   const value: AuthContextType = {
     user,
     email,
@@ -96,6 +112,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     signOut: signOutHandler,
     confirmSignUp: confirmSignUpHandler,
     resendSignUpCode: resendCodeHandler,
+    resetPassword: resetPasswordHandler,
+    confirmResetPassword: confirmResetPasswordHandler,
     isAuthenticated: !!user,
   };
 
