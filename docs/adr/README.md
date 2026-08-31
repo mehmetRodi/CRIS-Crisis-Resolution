@@ -74,3 +74,4 @@ behind the code — essential when refactoring or extending the system.
 | [0056](0056-public-incident-read-path.md)                            | Unauthenticated public incident read path (CRIS-54)                  | Accepted                         |
 | [0057](0057-shared-design-package-and-mobile-migration.md)           | Shared design package + Expo migration (CRIS-57)                     | Accepted                         |
 | [0058](0058-cris-visible-product-name.md)                            | CRIS as the visible product name                                     | Accepted                         |
+| [0059](0059-amplify-hosting-from-gated-deploy-workflow.md)           | Amplify Hosting from the gated deploy workflow                       | Accepted                         |

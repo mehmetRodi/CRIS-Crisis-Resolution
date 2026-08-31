@@ -1,6 +1,7 @@
 name: Deploy
 
-# CRIS-14 — Continuous deployment of the Amplify Gen 2 backend (ADR-0016, ADR-0018).
+# CRIS-14 — Continuous deployment of the Amplify Gen 2 backend and Vite SPA
+# (ADR-0016, ADR-0018, ADR-0059).
 #
 # Dormant until AWS is wired. The job is gated on the `AWS_DEPLOY_ENABLED` repo
 # variable, which is unset on forks and un-configured repos — so this workflow
@@ -8,8 +9,10 @@ name: Deploy
 # setting the variable + secrets. See docs/runbooks/deploy.md for the OIDC trust
 # setup and the exact variables/secrets required.
 #
-# This deploys the BACKEND only (`ampx pipeline-deploy`), which generates the real
-# `amplify_outputs.json` for the environment. Frontend hosting is out of scope here.
+# `ampx pipeline-deploy` generates the environment's real `amplify_outputs.json`.
+# After the backend smoke gate, the exact same checked-out commit is built with
+# those outputs and atomically published to Amplify Hosting. Amplify is kept in
+# manual-deploy mode so a second source-connected build cannot race this workflow.
 #
 # TRIGGER (ADR-0018): this runs *after* CI, not in parallel with it. It fires on
 # CI's `workflow_run` completion (filtered to the `main` branch) and the job only
@@ -36,20 +39,22 @@ permissions:
 
 jobs:
   deploy:
-    name: Amplify pipeline-deploy (backend)
-    # Two gates, both must hold:
+    name: Amplify backend + frontend
+    # Three gates must hold:
     #  1. `vars.AWS_DEPLOY_ENABLED` is empty unless explicitly set, so this
     #     evaluates to false and the job is skipped rather than failing on
     #     missing secrets (dormant-until-wired, ADR-0016).
-    #  2. On a `workflow_run` trigger, only deploy if the CI run concluded
+    #  2. A manual dispatch must target `main`; production never deploys a
+    #     backend or frontend from an older/feature ref (ADR-0059).
+    #  3. On a `workflow_run` trigger, only deploy if the CI run concluded
     #     `success`. `workflow_dispatch` bypasses this (there is no upstream CI
     #     run) so operators can still manually deploy/bootstrap (ADR-0018).
     if: >
       vars.AWS_DEPLOY_ENABLED == 'true' &&
+      (github.event_name != 'workflow_dispatch' || github.ref_name == 'main') &&
       (github.event_name == 'workflow_dispatch' ||
        github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
-    environment: production
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -111,3 +116,20 @@ jobs:
         env:
           CRISISMAP_SMOKE_TARGET: deployed
         run: npm run test:smoke
+
+      # Build only after the backend and its end-to-end smoke transaction pass.
+      # Vite statically bundles the generated Cognito/AppSync/S3 identifiers, so
+      # this ordering guarantees that the hosted SPA targets the backend deployed
+      # and verified above. CI already typechecked this exact commit.
+      - name: Build production frontend
+        working-directory: apps/web
+        run: npm run build:ci
+
+      # Manual Amplify Hosting deployments are atomic and do not require a Git
+      # provider connection. The helper also reconciles the SPA rewrite, waits
+      # for the Hosting job, and probes both / and a deep client-side route.
+      - name: Deploy frontend to Amplify Hosting
+        env:
+          AMPLIFY_APP_ID: ${{ secrets.AMPLIFY_APP_ID }}
+          AMPLIFY_BRANCH: main
+        run: scripts/aws/deploy-frontend.sh

@@ -25,7 +25,9 @@ credentials, KMS retention) stay in [`deploy.md`](deploy.md).
   screen, including the support resolvers and AppSync API health.
 - **Deploy smoke gate.** Every deploy run ends with the synthetic smoke transaction (§3).
   A red **Deploy** run after a green `ampx pipeline-deploy` step means the new code is
-  **live but unverified** — start at §3, not at rollback.
+  **live but unverified** — start at §3, not at rollback. The frontend publishes only after this
+  gate; a later Hosting failure leaves the backend verified and normally leaves the previous
+  atomic frontend release active (see the Hosting failure section in [`deploy.md`](deploy.md)).
 - **Traces.** X-Ray is active on AppSync and six Lambdas (submit, transition, publish,
   classify, media-upload, assign-team). The volunteer-task resolver and the Cognito
   role-assignment trigger are known tracing gaps (they are alarmed, not traced).
@@ -108,15 +110,16 @@ The pipe DLQ contains failed DynamoDB stream records, while `ClassificationQueue
 There is deliberately no automated rollback (ADR-0051): an unattended re-deploy can compound
 schema/data mismatches. Rolling back is one revert away, but a human decides.
 
-1. **Identify the last good commit** — the newest **Deploy** run on `main` where both
-   `ampx pipeline-deploy` _and_ the smoke gate were green. Note its commit SHA.
+1. **Identify the last good commit** — the newest **Deploy** run on `main` where the backend
+   deploy, smoke gate, and Amplify Hosting route probe were all green. Note its commit SHA.
 2. **Revert `main` to it.** `git revert` the offending commit(s) (or revert the merge commit
    with `-m 1`) and merge to `main` through the normal PR flow. Do **not** `workflow_dispatch`
    the Deploy workflow from an older branch or tag: `ampx pipeline-deploy` keys the backend
    stack by _branch name_, so deploying any ref other than `main` creates a different backend
    instead of rolling this one back.
 3. **Let CI gate it.** The revert commit runs through CI, deploys automatically, and must pass
-   the same smoke gate. That green gate is the rollback confirmation.
+   the same backend smoke gate plus the frontend Hosting probe. That green run confirms both
+   layers of the rollback.
 4. **Check for non-reversible resources.** If the bad deploy replaced stateful resources
    (table stream changes — ADR-0013 — or a KMS key: see the retention procedure in
    [`deploy.md`](deploy.md)), read that deploy run's CloudFormation output before assuming the

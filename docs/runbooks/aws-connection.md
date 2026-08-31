@@ -22,10 +22,10 @@ per-developer setup lives in [`team-onboarding.md`](team-onboarding.md).
 1. **No long-lived credentials in CI.** CI authenticates via **GitHub OIDC** and assumes a
    role for a short-lived token. Never add `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` to
    GitHub secrets.
-2. **Least privilege, repo/environment-scoped.** The deploy role trusts only this repository's
-   exact `main` ref and `production` Environment subjects. Because GitHub replaces the ref subject
-   with an environment subject for environment-gated jobs, the `production` Environment must also
-   restrict deployment branches to `main`. The role holds only the permissions the backend needs.
+2. **Least privilege, repo/branch-scoped.** The deploy role trusts only this repository's exact
+   `refs/heads/main` subject. The job deliberately does not declare a GitHub Environment, because
+   an environment OIDC subject does not encode the branch and private-repository plans do not all
+   support Environment branch rules. The role holds only the permissions the deployment needs.
 3. **Never commit environment data.** `amplify_outputs.json` (Cognito/AppSync/S3 identifiers)
    is git-ignored and generated per environment — see [ADR-0012](../adr/0012-amplify-outputs-in-ci.md).
    Don't un-ignore or paste it anywhere.
@@ -93,11 +93,10 @@ In IAM → Identity providers, add (if not already present):
 - Provider URL: `https://token.actions.githubusercontent.com`
 - Audience: `sts.amazonaws.com`
 
-### 4. Create the deploy role (repo/environment-scoped trust)
+### 4. Create the deploy role (repo/branch-scoped trust)
 
 Use [`infra/bootstrap/github-oidc-deploy-role.yaml`](../../infra/bootstrap/github-oidc-deploy-role.yaml),
-which trusts the two exact subjects the repository uses: the `main` ref and the `production`
-Environment. Its trust-policy shape is:
+which trusts the exact `main` ref subject. Its trust-policy shape is:
 
 ```json
 {
@@ -111,13 +110,8 @@ Environment. Its trust-policy shape is:
       "Action": "sts:AssumeRoleWithWebIdentity",
       "Condition": {
         "StringEquals": {
-          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com"
-        },
-        "StringLike": {
-          "token.actions.githubusercontent.com:sub": [
-            "repo:mehmetRodi/CRIS-Crisis-Resolution:ref:refs/heads/main",
-            "repo:mehmetRodi/CRIS-Crisis-Resolution:environment:production"
-          ]
+          "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+          "token.actions.githubusercontent.com:sub": "repo:mehmetRodi/CRIS-Crisis-Resolution:ref:refs/heads/main"
         }
       }
     }
@@ -125,11 +119,10 @@ Environment. Its trust-policy shape is:
 }
 ```
 
-The Deploy workflow always declares `environment: production`, so its OIDC token uses the
-environment subject rather than the ref subject. In GitHub, configure that Environment's
-**deployment branches and tags** rule for `main` only; otherwise an exact environment subject is
-repo-scoped but not branch-scoped. Required reviewers are an additional optional gate. Never use a
-wildcard repo or environment in the `:sub` condition.
+The Deploy workflow deliberately has no `environment:` key, so GitHub keeps the ref-based OIDC
+subject and IAM can enforce `main` directly. Do not replace this with an environment subject
+without a new branch-enforcement design. Never use a wildcard repository or branch in the `:sub`
+condition.
 
 **Permissions policy:** infrastructure provisioning remains behind assumed CDK bootstrap roles
 (`cdk-<qualifier>-{deploy,file-publishing,image-publishing,lookup}-role-*`). This is the
@@ -141,23 +134,24 @@ actions `ampx` itself calls directly — with the deploy role, not the assumed C
 read the deployed stack, and `s3:GetObject`/`ListBucket` on `amplify-*` buckets to read the
 generated `model-schema.graphql` codegen artifact). ADR-0052 also grants only
 `AdminCreateUser`, `AdminSetUserPassword`, `AdminAddUserToGroup`, and `AdminDeleteUser` on
-deployment-region Cognito pools for the throwaway post-deploy coordinator. The
+deployment-region Cognito pools for the throwaway post-deploy coordinator. ADR-0059 adds only
+`GetApp`/`UpdateApp` plus branch-scoped Hosting configuration, deployment, and job-read actions for
+the configured Amplify app and `main` branch. The
 _runtime_ Bedrock grant (inference profile + EU foundation-model ARNs) lives on the classifier
 Lambda's role, created during deploy (see `apps/web/amplify/backend.ts`), not on the deploy role.
 
-If this stack was created before ADR-0052, rerun `scripts/aws/30-deploy-role.sh` before the first
-CRIS-35 deploy. `ampx pipeline-deploy` does not update this bootstrap role.
+If this stack was created before ADR-0059, rerun `scripts/aws/30-deploy-role.sh` before the first
+frontend deploy. `ampx pipeline-deploy` does not update this bootstrap role.
 
 ### 5. Configure GitHub (repo → Settings)
 
-| Kind        | Name                  | Value                                                             |
-| ----------- | --------------------- | ----------------------------------------------------------------- |
-| Variable    | `AWS_DEPLOY_ENABLED`  | `true` to activate the Deploy workflow                            |
-| Variable    | `AWS_REGION`          | `eu-central-1` (must have Bedrock model access)                   |
-| Secret      | `AWS_DEPLOY_ROLE_ARN` | ARN of the role from step 4                                       |
-| Secret      | `AMPLIFY_APP_ID`      | App ID from step 2                                                |
-| Secret      | `ALERT_FROM_EMAIL`    | SES-verified sender address for citizen alert emails              |
-| Environment | `production`          | Required by `deploy.yml`; restrict to `main` (reviewers optional) |
+| Kind     | Name                  | Value                                                |
+| -------- | --------------------- | ---------------------------------------------------- |
+| Variable | `AWS_DEPLOY_ENABLED`  | `true` to activate the Deploy workflow               |
+| Variable | `AWS_REGION`          | `eu-central-1` (must have Bedrock model access)      |
+| Secret   | `AWS_DEPLOY_ROLE_ARN` | ARN of the role from step 4                          |
+| Secret   | `AMPLIFY_APP_ID`      | App ID from step 2                                   |
+| Secret   | `ALERT_FROM_EMAIL`    | SES-verified sender address for citizen alert emails |
 
 Until `AWS_DEPLOY_ENABLED == 'true'`, the Deploy workflow is a skipped no-op (green).
 
@@ -166,7 +160,8 @@ Until `AWS_DEPLOY_ENABLED == 'true'`, the Deploy workflow is a skipped no-op (gr
 Trigger manually to validate wiring before enabling on-push:
 
 - GitHub → Actions → **Deploy** → _Run workflow_ (`workflow_dispatch`).
-- Watch the run assume the role and run `ampx pipeline-deploy`.
+- Watch the run deploy and smoke-test the backend, build the SPA with the generated production
+  outputs, then publish and probe the Amplify Hosting URL.
 - Thereafter, merges to `main` deploy automatically.
 
 ### 7. Post-deploy: subscribe the ops alarm topic
@@ -189,8 +184,8 @@ aws sns subscribe \
 
 - [ ] `aws sts get-caller-identity` shows the intended account (locally).
 - [ ] CDK bootstrap stack exists in `<ACCOUNT_ID>/<REGION>`.
-- [ ] Deploy role trust lists only the exact `main` ref and `production` Environment subjects.
-- [ ] The `production` Environment allows deployments from `main` only.
+- [ ] Deploy role trust lists only the exact `refs/heads/main` subject.
+- [ ] The Deploy workflow has no `environment:` key that would replace the ref-based OIDC subject.
 - [ ] No static AWS keys in GitHub secrets — only deployment identifiers/configuration.
 - [ ] `ALERT_FROM_EMAIL` is verified in SES in `AWS_REGION`.
 - [ ] `AWS_REGION` has Bedrock access for `BEDROCK_MODEL_ID`.

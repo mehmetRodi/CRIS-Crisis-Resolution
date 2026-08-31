@@ -46,7 +46,7 @@ packages/shared/     @crisismap/shared — domain enums/types shared across laye
 docs/                architecture, conventions, runbooks, and ADRs
 scripts/aws/         one-time AWS account/team wiring helpers
 infra/bootstrap/     GitHub OIDC deploy-role template
-.github/workflows/   CI and gated backend deployment
+.github/workflows/   CI and gated backend + Amplify Hosting deployment
 ```
 
 ## Prerequisites
@@ -85,7 +85,7 @@ npx ampx sandbox     # provisions a personal dev backend + writes amplify_output
 ```
 
 `amplify_outputs.json` and `.amplify/` are generated and git-ignored.
-Production deployment is separately gated through `.github/workflows/deploy.yml`; see the
+Production backend and web Hosting deployment is gated through `.github/workflows/deploy.yml`; see the
 [deploy runbook](docs/runbooks/deploy.md). Source control alone does not establish whether a
 shared environment is currently active.
 

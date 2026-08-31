@@ -1,7 +1,8 @@
 # `scripts/aws/` — one-time AWS wiring
 
 Idempotent scripts that take this repo from **dormant** (no cloud resources) to a
-live backend deployed by CI, plus a 5-developer team on IAM Identity Center. They
+live backend and Amplify-hosted web frontend deployed by CI, plus a 5-developer team on IAM
+Identity Center. They
 implement [`docs/runbooks/aws-connection.md`](../../docs/runbooks/aws-connection.md)
 and the decisions in [ADR-0017](../../docs/adr/0017-aws-account-identity-and-region-topology.md).
 
@@ -23,10 +24,14 @@ and the decisions in [ADR-0017](../../docs/adr/0017-aws-account-identity-and-reg
 | 0    | `00-preflight.sh`        | Verify tooling, identity (not root), region + Bedrock access                  | read-only  |
 | 1    | `10-identity-center.sh`  | Org → Identity Center → `CrisisMapDeveloper` permission set → group → 5 users | ✅         |
 | 2    | `20-bootstrap.sh`        | `cdk bootstrap` + create the Amplify app                                      | ✅         |
-| 3    | `30-deploy-role.sh`      | Deploy the OIDC provider + repo/environment-scoped role (CloudFormation)      | ✅         |
+| 3    | `30-deploy-role.sh`      | Deploy the OIDC provider + repo/branch-scoped role (CloudFormation)           | ✅         |
 | 4    | `40-configure-github.sh` | Set the repo variables + secrets the Deploy workflow needs                    | ✅         |
-| 5    | `50-first-deploy.sh`     | Manually dispatch + watch the first backend deploy                            | n/a        |
+| 5    | `50-first-deploy.sh`     | Manually dispatch + watch the first backend and frontend deploy               | n/a        |
 | 6    | `60-subscribe-alarms.sh` | Subscribe an endpoint to the ops alarm SNS topic                              | ✅         |
+
+`deploy-frontend.sh` is a CI helper, not a separate bootstrap step. After the backend smoke gate,
+the Deploy workflow passes it the built `apps/web/dist` directory; it atomically publishes that
+artifact to the existing Amplify app's production branch and probes the hosted SPA.
 
 Steps 1 (team) and 2–6 (CD path) are independent — do them in either order.
 
@@ -36,10 +41,11 @@ Enabling the **IAM Identity Center instance** is console-only (AWS exposes no
 create-instance API for the org-level directory). `10-identity-center.sh` detects
 this, prints the exact console click-path, and exits so you can re-run it after.
 
-The Deploy workflow always uses the GitHub `production` Environment. After step 4, configure that
-Environment's deployment-branch rule to allow `main` only. The role trusts the exact Environment
-subject, but an environment subject does not itself encode a branch. Required reviewers are
-optional.
+The Deploy workflow deliberately does not use a GitHub Environment: on private repositories whose
+plan does not support Environment branch rules, its OIDC subject would not encode `main`. The IAM
+role instead trusts only the exact `refs/heads/main` subject, so AWS enforces the production branch
+boundary. Keep `ALERT_FROM_EMAIL` as a repository Actions secret and do not add an `environment:`
+key to the deploy job without replacing this trust design.
 
 ## Team roster
 

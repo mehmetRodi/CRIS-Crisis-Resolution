@@ -1,8 +1,8 @@
 # Runbook: Deploy
 
-Deploy mechanics for the CRIS backend (CRIS-14/15): activating the CD pipeline,
-credentials, deploy-time failure modes, and KMS retention. Alarm first response, smoke-gate
-triage, DLQ recovery, and rollback live in the incident runbook,
+Deploy mechanics for the CRIS backend and web frontend (CRIS-14/15): activating the CD pipeline,
+credentials, Amplify Hosting, deploy-time failure modes, and KMS retention. Alarm first response,
+smoke-gate triage, DLQ recovery, and rollback live in the incident runbook,
 [`incident-response.md`](incident-response.md) (CRIS-35, ADR-0051).
 
 - **Deploy pipeline:** [ADR-0016](../adr/0016-continuous-deployment-ampx-pipeline-oidc.md)
@@ -10,51 +10,61 @@ triage, DLQ recovery, and rollback live in the incident runbook,
 - **Observability:** [ADR-0015](../adr/0015-observability-xray-cloudwatch-alarms.md)
 - **Triage encryption:** [ADR-0043](../adr/0043-customer-managed-key-for-triage-data-plane.md)
 - **Smoke gate + incident runbook:** [ADR-0051](../adr/0051-system-testing-alarms-runbook.md)
+- **Amplify Hosting:** [ADR-0059](../adr/0059-amplify-hosting-from-gated-deploy-workflow.md)
 
 ---
 
 ## 1. Continuous deployment
 
-The backend deploys via `.github/workflows/deploy.yml` (`ampx pipeline-deploy`) after the CI
-workflow succeeds for `main`, or on manual dispatch. **It is dormant until an operator opts
-in** — the job is skipped (green) unless `AWS_DEPLOY_ENABLED` is `true`.
+The backend and Vite SPA deploy through `.github/workflows/deploy.yml` after the CI workflow
+succeeds for `main`, or on a `main` manual dispatch. **It is dormant until an operator opts in** —
+the job is skipped (green) unless `AWS_DEPLOY_ENABLED` is `true`.
+
+The workflow is intentionally ordered: deploy the backend with `ampx pipeline-deploy`, verify it
+with the post-deploy smoke transaction, build the exact same checked-out commit with the generated
+production `amplify_outputs.json`, then atomically upload `apps/web/dist` to Amplify Hosting. The
+Amplify app remains disconnected from a source repository; do not enable Amplify auto-builds or
+add a second `pipeline-deploy` path (ADR-0059).
 
 ### One-time AWS setup
 
-1. **Create an Amplify Gen 2 app** in the target account and note its **App ID**.
+1. **Create an Amplify Gen 2 app** in the target account and note its **App ID**. Keep it in
+   manual-deploy mode: do not connect a Git repository. The same app/`main` branch owns the Gen 2
+   backend stack and the static Hosting release.
 2. **Create a GitHub OIDC identity provider** in IAM (`token.actions.githubusercontent.com`) if
    the account doesn't already have one.
 3. **Create the deploy IAM role** from
    [`infra/bootstrap/github-oidc-deploy-role.yaml`](../../infra/bootstrap/github-oidc-deploy-role.yaml).
-   It trusts two exact OIDC subjects:
+   It trusts one exact OIDC subject:
    ```
    repo:mehmetRodi/CRIS-Crisis-Resolution:ref:refs/heads/main
-   repo:mehmetRodi/CRIS-Crisis-Resolution:environment:production
    ```
    The role assumes the CDK bootstrap roles that hold infrastructure-provisioning power. Direct
-   access is limited to the reads `ampx` needs and the four Cognito actions used to create and
-   delete the throwaway smoke coordinator (ADR-0052).
+   access is limited to the reads `ampx` needs, the four Cognito actions used to create and delete
+   the throwaway smoke coordinator (ADR-0052), and Hosting configuration/deployment actions scoped
+   to the named Amplify app's `main` branch (ADR-0059).
 4. **CDK bootstrap** the account/region once (`npx ampx pipeline-deploy` relies on the CDK
    bootstrap stack).
 
-> **CRIS-35 upgrade:** accounts whose deploy-role stack predates ADR-0052 must rerun
-> `scripts/aws/30-deploy-role.sh` before enabling the smoke gate. The role template is bootstrap
-> infrastructure and is not updated by `ampx pipeline-deploy` itself.
+> **Existing-account upgrade:** accounts whose deploy-role stack predates ADR-0059 must rerun
+> `scripts/aws/30-deploy-role.sh` before the first frontend release. The role template is bootstrap
+> infrastructure and is not updated by `ampx pipeline-deploy` itself. The script discovers the
+> Amplify app by `AMPLIFY_APP_NAME`; set `AMPLIFY_APP_ID` explicitly if names are ambiguous.
 
 ### Configure GitHub (repo → Settings)
 
-| Kind        | Name                  | Value                                                             |
-| ----------- | --------------------- | ----------------------------------------------------------------- |
-| Variable    | `AWS_DEPLOY_ENABLED`  | `true` to activate the workflow                                   |
-| Variable    | `AWS_REGION`          | `eu-central-1` (must have Bedrock model access)                   |
-| Secret      | `AWS_DEPLOY_ROLE_ARN` | ARN of the deploy role from step 3                                |
-| Secret      | `AMPLIFY_APP_ID`      | App ID from step 1                                                |
-| Secret      | `ALERT_FROM_EMAIL`    | SES-verified sender address for citizen alert emails              |
-| Environment | `production`          | Required by `deploy.yml`; restrict to `main` (reviewers optional) |
+| Kind     | Name                  | Value                                                |
+| -------- | --------------------- | ---------------------------------------------------- |
+| Variable | `AWS_DEPLOY_ENABLED`  | `true` to activate the workflow                      |
+| Variable | `AWS_REGION`          | `eu-central-1` (must have Bedrock model access)      |
+| Secret   | `AWS_DEPLOY_ROLE_ARN` | ARN of the deploy role from step 3                   |
+| Secret   | `AMPLIFY_APP_ID`      | App ID from step 1                                   |
+| Secret   | `ALERT_FROM_EMAIL`    | SES-verified sender address for citizen alert emails |
 
-The workflow's environment-gated OIDC token contains the `production` Environment subject, not a
-branch-ref subject. Configure the Environment's **deployment branches and tags** rule for `main`
-only; the IAM trust alone cannot recover the branch name from that subject.
+The deploy job deliberately has no GitHub `environment:` key, so its OIDC subject remains the
+exact `main` ref enforced by IAM. Do not add an Environment without revisiting the trust policy:
+environment subjects do not encode the branch, and branch restrictions are unavailable on some
+private-repository billing plans.
 
 Also confirm Bedrock model access is enabled for `BEDROCK_MODEL_ID`
 (`eu.anthropic.claude-haiku-4-5-20251001-v1:0` by default, via the EU inference profile) in
@@ -64,12 +74,25 @@ Verify the `ALERT_FROM_EMAIL` address or domain in SES in the same region before
 ### Deploy
 
 - **Automatic:** merge to `main`; deployment begins only after that commit's CI run succeeds.
-- **Manual:** Actions → **Deploy** → _Run workflow_.
+- **Manual:** Actions → **Deploy** → _Run workflow_ from `main`. Dispatches from other refs are
+  skipped so they cannot create or publish a production branch environment.
 
-Every deploy run ends with the **post-deploy smoke gate** (CRIS-35, ADR-0051/0052): one synthetic
+The backend phase includes the **post-deploy smoke gate** (CRIS-35, ADR-0051/0052): one synthetic
 guest report must travel the whole classification pipeline in the environment that was just
-deployed. A red gate means the deploy is live but unverified — triage with
+deployed. A red gate means the backend is live but unverified and the previous frontend remains
+served — triage with
 [`incident-response.md`](incident-response.md#3-smoke-gate-failure-triage).
+
+Only after that gate passes does the workflow build and publish the SPA. The Hosting helper:
+
+1. refuses a source-connected app or any branch other than `main`;
+2. configures the branch as `PRODUCTION` with auto-build disabled;
+3. installs the extension-aware 200 rewrite required by React Router deep links;
+4. uploads a zip containing the _contents_ of `dist/`, waits for the atomic release, and fails on
+   any non-success Hosting job; and
+5. requests both `https://main.<app-id>.amplifyapp.com/` and `/report`, requiring the SPA shell.
+
+The successful run writes the exact Hosting URL and job ID to the GitHub step summary.
 
 > First deploy note (ADR-0013): enabling the Report DynamoDB stream changes the table's
 > custom-resource update path. If migrating an existing sandbox, deploy on a fresh environment
@@ -91,12 +114,25 @@ in the same changeset with it). `backend.ts` pins the ordering with
 to `pipeRole`. Recovery is just re-running the deploy — the stack rolls back cleanly to
 `UPDATE_ROLLBACK_COMPLETE`, no manual cleanup needed.
 
+### Frontend Hosting failure
+
+- **`AccessDeniedException` on an Amplify action:** rerun `scripts/aws/30-deploy-role.sh` from the
+  repository version containing ADR-0059, then rerun the Deploy workflow from `main`.
+- **"app is source-connected":** disconnect the repository/disable the competing Amplify build
+  path before retrying. Do not work around the guard; it prevents two deployment authorities.
+- **`CreateDeployment`/upload/start/job failure:** the backend is already verified, but Amplify's
+  previous atomic frontend release remains active. Inspect the Hosting job in the Amplify console
+  and rerun the workflow after correcting the cause.
+- **Hosting job succeeded but the route probe failed:** the new frontend may be live. Check the
+  app's rewrite list, fetch `/` and `/report` directly, and treat a broken public route as a
+  rollback candidate.
+
 ### Rollback
 
-Rollback is deliberately manual (ADR-0051) and is a **revert to `main`**, never a
+Rollback is deliberately manual (ADR-0051/0059) and is a **revert to `main`**, never a
 `workflow_dispatch` of an older ref — `ampx pipeline-deploy` keys the stack by branch name, so
-deploying another ref creates a different backend. The step-by-step procedure, including the
-deploy freeze switch, is in
+deploying another ref creates a different backend. The revert workflow republishes both the
+backend and matching frontend. The step-by-step procedure, including the deploy freeze switch, is in
 [`incident-response.md`](incident-response.md#5-manual-rollback).
 
 ### Retained KMS keys after sandbox deletion

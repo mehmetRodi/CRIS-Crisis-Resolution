@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 30 — Deploy the GitHub OIDC provider + repo/environment-scoped deploy role via
+# 30 — Deploy the GitHub OIDC provider + repo/branch-scoped deploy role via
 # CloudFormation (infra/bootstrap/github-oidc-deploy-role.yaml). Idempotent:
 # `deploy` updates the stack in place. Detects a pre-existing OIDC provider and
 # reuses it (only one per account is allowed).
@@ -9,7 +9,17 @@ refuse_root
 TEMPLATE="$REPO_ROOT/infra/bootstrap/github-oidc-deploy-role.yaml"
 [[ -f "$TEMPLATE" ]] || die "Template missing: $TEMPLATE"
 
-PARAMS=(GitHubOrg="$GH_OWNER" GitHubRepo="$GH_REPO_NAME" GitHubBranch="$GH_BRANCH" CdkQualifier="$CDK_QUALIFIER")
+APP_ID="${AMPLIFY_APP_ID:-$(aws amplify list-apps --region "$AWS_REGION" \
+  --query "apps[?name=='$AMPLIFY_APP_NAME'].appId | [0]" --output text 2>/dev/null || true)}"
+[[ -n "$APP_ID" && "$APP_ID" != "None" ]] || die "No Amplify app id. Run ./20-bootstrap.sh first (or set AMPLIFY_APP_ID)."
+
+PARAMS=(
+  GitHubOrg="$GH_OWNER"
+  GitHubRepo="$GH_REPO_NAME"
+  GitHubBranch="$GH_BRANCH"
+  CdkQualifier="$CDK_QUALIFIER"
+  AmplifyAppId="$APP_ID"
+)
 
 # Idempotency: if THIS stack already exists, keep its provider decision. Re-deciding
 # from scratch on a re-run is a trap — if the stack itself created the provider, a
