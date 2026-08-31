@@ -23,7 +23,7 @@ import { createDataKey } from './security/encryption';
 import { addObservability } from './observability';
 
 /**
- * CrisisMap AI backend (Amplify Gen 2).
+ * CRIS backend (Amplify Gen 2).
  *
  * Wires the managed auth/data/storage resources, the custom resolvers that back
  * the E2 API surface (CRIS-9/18/19), and the custom asynchronous AI-triage

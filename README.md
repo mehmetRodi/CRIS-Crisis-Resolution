@@ -1,6 +1,6 @@
-# CrisisMap AI
+# CRIS
 
-Real-time serverless disaster intelligence and emergency coordination platform. CrisisMap AI
+Real-time serverless disaster intelligence and emergency coordination platform. CRIS
 turns free-text emergency reports from citizens and field personnel into structured,
 geolocated, priority-ranked incidents on a live map, and routes targeted alerts to response
 teams — while staying available even when individual AI, geocoding, or notification

@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: >
-  CrisisMap AI — GitHub Actions OIDC identity provider + repo/environment-scoped
+  CRIS — GitHub Actions OIDC identity provider + repo/environment-scoped
   CDK deploy role for `ampx pipeline-deploy` (CRIS-14, ADR-0016, ADR-0017). No long-lived
   AWS keys: GitHub mints a short-lived OIDC token that assumes DeployRole, which
   in turn assumes the CDK bootstrap roles for infrastructure provisioning and
@@ -92,8 +92,8 @@ Resources:
     Properties:
       RoleName: crisismap-github-deploy
       Description: >
-        Assumed by GitHub Actions for the configured CrisisMap repo ref or
-        production Environment to deploy and smoke-test CrisisMap. Provisioning
+        Assumed by GitHub Actions for the configured CRIS repo ref or
+        production Environment to deploy and smoke-test CRIS. Provisioning
         stays behind the CDK bootstrap roles; direct access is limited to the
         throwaway Cognito smoke-user lifecycle.
       MaxSessionDuration: 3600

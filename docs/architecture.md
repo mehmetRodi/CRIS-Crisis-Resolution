@@ -1,4 +1,4 @@
-# CrisisMap AI — Architecture Overview
+# CRIS — Architecture Overview
 
 A living, code-adjacent reference for the versioned repository. A local `crisismap.pdf`, when
 supplied, provides product-design context but is not currently tracked. Accepted decisions are
@@ -7,7 +7,7 @@ today.
 
 ## 1. Target system shape (design doc §3)
 
-CrisisMap AI is designed as a **serverless AWS application**. Clients talk to a single AppSync
+CRIS is designed as a **serverless AWS application**. Clients talk to a single AppSync
 GraphQL API backed by DynamoDB. Expensive AI work is pushed onto an asynchronous queue so the
 write path stays fast and resilient. The diagram is the end-state design; consult the current
 implementation matrix below before assuming a component is operational.

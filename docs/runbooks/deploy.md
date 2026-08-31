@@ -1,6 +1,6 @@
 # Runbook: Deploy
 
-Deploy mechanics for the CrisisMap AI backend (CRIS-14/15): activating the CD pipeline,
+Deploy mechanics for the CRIS backend (CRIS-14/15): activating the CD pipeline,
 credentials, deploy-time failure modes, and KMS retention. Alarm first response, smoke-gate
 triage, DLQ recovery, and rollback live in the incident runbook,
 [`incident-response.md`](incident-response.md) (CRIS-35, ADR-0051).
@@ -135,7 +135,7 @@ CloudFormation cannot recover ciphertext after the waiting window closes.
 - **Traces:** X-Ray is active on AppSync and six Lambdas: submit, transition, publish,
   classification, media-upload URL creation, and team assignment. The volunteer-task resolver
   and Cognito role-assignment trigger are known tracing gaps (they are alarmed, not traced).
-- **Dashboard:** CloudWatch → Dashboards → `CrisisMap-<stackName>`. One screen for the §3.2
+- **Dashboard:** CloudWatch → Dashboards → `CRIS-<stackName>`. One screen for the §3.2
   service targets (submission p95 < 800 ms, classification p95 < 15 s, real-time p95 < 2 s,
   99.9%), including the support resolvers and AppSync API health. The smoke gate's
   `smoke.measured` log line in each deploy run adds a per-deploy submit→classified sample.

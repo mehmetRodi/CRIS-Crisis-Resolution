@@ -129,7 +129,7 @@ export function addObservability(props: ObservabilityProps): Topic {
   // a Slack workspace) is attached to this system, so it gets the same key and
   // KMS audit surface as the triage queues.
   const alarmTopic = new Topic(scope, 'OpsAlarmTopic', {
-    displayName: 'CrisisMap ops alarms',
+    displayName: 'CRIS ops alarms',
     masterKey: encryptionKey,
   });
   configureEncryptedAlarmTopic(encryptionKey, alarmTopic);
@@ -444,7 +444,7 @@ function buildDashboard(
   const dashboard = new Dashboard(scope, 'ObservabilityDashboard', {
     // Auto-name would be an opaque hash; scope by stack so branches don't collide
     // yet the name stays greppable in the CloudWatch console.
-    dashboardName: `CrisisMap-${Stack.of(scope).stackName}`,
+    dashboardName: `CRIS-${Stack.of(scope).stackName}`,
   });
 
   const invocations = (fn: IFunction): IMetric =>
@@ -457,7 +457,7 @@ function buildDashboard(
   dashboard.addWidgets(
     new TextWidget({
       markdown: [
-        '# CrisisMap AI — Observability',
+        '# CRIS — Observability',
         '',
         'SLA targets (design doc §3.2): submission **p95 < 800 ms** · classification **p95 < 15 s** ·',
         'real-time propagation **p95 < 2 s** · availability **99.9%** · never-lost under degraded deps.',

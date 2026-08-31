@@ -37,7 +37,7 @@ export function AppShell({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex h-dvh flex-col overflow-hidden bg-bg">
+    <div className="flex h-dvh flex-col overflow-hidden bg-transparent">
       {/* Skip link. First focusable element on the page, visually hidden until
           focused — without it, keyboard users traverse the entire nav on every
           route change before reaching the incident queue (CRIS-27). */}
@@ -53,7 +53,7 @@ export function AppShell({
       </a>
 
       <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border bg-surface px-3 sm:px-4">
-        <Link to="/" className="rounded" aria-label="CrisisMap AI home">
+        <Link to="/" className="rounded" aria-label="CRIS home">
           <Logo className="shrink-0" />
         </Link>
 

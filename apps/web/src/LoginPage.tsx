@@ -19,7 +19,7 @@ import { Label } from './components/ui/label';
 export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { signIn } = useAuth();
+  const { signIn, signOut } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -27,27 +27,60 @@ export default function LoginPage() {
 
   const from = (location.state as { from?: string } | null)?.from;
 
+  const attemptSignIn = async () => {
+    const result = await signIn(email, password);
+    if (result.isSignedIn) {
+      navigate(from ?? '/workspace', { replace: true });
+    } else if (result.nextStep.signInStep === 'CONFIRM_SIGN_UP') {
+      // The account exists but was never verified. Take them to confirmation
+      // rather than reporting a credentials failure they cannot act on.
+      navigate('/confirm-signup', { state: { email } });
+    } else {
+      setError('Additional verification is required to finish signing in.');
+    }
+  };
+
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setError('');
     setLoading(true);
 
     try {
-      const result = await signIn(email, password);
-      if (result.isSignedIn) {
-        navigate(from ?? '/workspace', { replace: true });
-      } else if (result.nextStep.signInStep === 'CONFIRM_SIGN_UP') {
-        // The account exists but was never verified. Take them to confirmation
-        // rather than reporting a credentials failure they cannot act on.
-        navigate('/confirm-signup', { state: { email } });
-      } else {
-        setError('Additional verification is required to finish signing in.');
-      }
+      await attemptSignIn();
     } catch (err) {
-      if (err instanceof Error && err.name === 'UserNotConfirmedException') {
+      const name = err instanceof Error ? err.name : '';
+
+      // Not every failure is a bad password, and reporting them all as one used
+      // to send people to reset a password that was never wrong. Each branch
+      // below is a distinct problem with a distinct remedy.
+      if (name === 'UserNotConfirmedException') {
         navigate('/confirm-signup', { state: { email } });
-      } else {
+      } else if (name === 'UserAlreadyAuthenticatedException') {
+        // A stale session is still in local storage — typically tokens left by a
+        // backend that has since been torn down and redeployed. Amplify refuses
+        // to sign in over it rather than replacing it, so clear it and retry
+        // once. Doing this silently is correct: the user asked to sign in as
+        // this account, and the session in the way is not one they can see.
+        try {
+          await signOut();
+          await attemptSignIn();
+        } catch {
+          setError('A previous session could not be cleared. Reload the page and try again.');
+        }
+      } else if (name === 'NetworkError') {
+        setError('Could not reach the sign-in service. Check your connection and try again.');
+      } else if (name === 'NotAuthorizedException' || name === 'UserNotFoundException') {
+        // Cognito deliberately conflates these two so an attacker cannot probe
+        // which addresses have accounts. Keep them conflated here too.
         setError('Invalid email or password.');
+      } else {
+        // Anything else is a configuration or service fault, not a credentials
+        // problem. Surfacing the real name is what makes it diagnosable at all.
+        setError(
+          err instanceof Error && err.message
+            ? `Sign-in failed: ${err.message}`
+            : 'Sign-in failed for an unexpected reason.',
+        );
       }
     } finally {
       setLoading(false);

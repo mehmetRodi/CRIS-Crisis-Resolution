@@ -34,7 +34,7 @@ export function LandingPage() {
   }
 
   return (
-    <div className="min-h-dvh bg-bg">
+    <div className="min-h-dvh bg-transparent">
       <header className="mx-auto flex h-16 w-full max-w-5xl items-center justify-between px-5">
         <Logo />
         <Button variant="ghost" size="sm" asChild>

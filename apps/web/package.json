@@ -2,7 +2,7 @@
   "name": "@crisismap/web",
   "version": "0.1.0",
   "private": true,
-  "description": "CrisisMap AI web client (Vite + React SPA). Citizen form + coordinator/volunteer/map surfaces.",
+  "description": "CRIS web client (Vite + React SPA). Citizen form + coordinator/volunteer/map surfaces.",
   "type": "module",
   "scripts": {
     "dev": "vite",

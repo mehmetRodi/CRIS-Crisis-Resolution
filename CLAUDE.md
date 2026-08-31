@@ -4,7 +4,7 @@ Guidance for AI agents **and** humans working in this repository. Read this firs
 
 ## What this project is
 
-**CrisisMap AI** — a real-time, serverless AWS platform that turns free-text emergency
+**CRIS** — a real-time, serverless AWS platform that turns free-text emergency
 reports from citizens and field personnel into structured, geolocated, priority-ranked
 incidents on a live map, and routes targeted alerts to response teams. It stays available
 even when individual AI/geocoding/notification dependencies are degraded.

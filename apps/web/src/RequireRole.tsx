@@ -45,7 +45,7 @@ export function RequireRole({
       // and a page with no heading leaves a screen-reader user with nothing to
       // navigate to and no announcement of why the route they followed did not
       // open. `role="alert"` announces the denial immediately on arrival.
-      <main className="flex min-h-dvh items-center justify-center bg-bg px-6">
+      <main className="flex min-h-dvh items-center justify-center bg-transparent px-6">
         <div
           role="alert"
           className="flex max-w-md flex-col items-center gap-3 rounded-lg border border-border bg-surface px-6 py-10 text-center"

@@ -1,7 +1,7 @@
 import { cn } from '../../lib/cn';
 
 /**
- * The CrisisMap mark (CRIS-54).
+ * The CRIS mark (CRIS-54).
  *
  * A map pin with two signal arcs radiating from it — the product in one glyph:
  * a located incident, broadcasting. Drawn as inline SVG rather than an image
@@ -43,7 +43,7 @@ export function LogoMark({ className }: { className?: string }) {
 /**
  * Mark + wordmark lockup.
  *
- * The whole lockup carries ONE accessible name ("CrisisMap AI") via the text
+ * The whole lockup carries ONE accessible name ("CRIS") via the text
  * node; the mark stays `aria-hidden` so the product name is not announced twice
  * in a row on every page.
  */
@@ -60,11 +60,9 @@ export function Logo({
         <LogoMark />
       </span>
       {showWordmark ? (
-        <span className="text-[15px] font-semibold tracking-tight text-fg">
-          CrisisMap<span className="text-accent"> AI</span>
-        </span>
+        <span className="text-[15px] font-semibold tracking-tight text-fg">CRIS</span>
       ) : (
-        <span className="sr-only">CrisisMap AI</span>
+        <span className="sr-only">CRIS</span>
       )}
     </span>
   );

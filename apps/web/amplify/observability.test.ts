@@ -108,8 +108,13 @@ describe('observability baseline (ADR-0015, ADR-0051)', () => {
     template.resourceCountIs('AWS::SNS::Topic', 1);
     template.resourceCountIs('AWS::CloudWatch::Dashboard', 1);
     template.hasResourceProperties('AWS::SNS::Topic', {
+      DisplayName: 'CRIS ops alarms',
       KmsMasterKeyId: Match.anyValue(),
     });
+    const dashboards = template.findResources('AWS::CloudWatch::Dashboard');
+    const dashboard = Object.values(dashboards)[0] as CfnResource;
+    expect(JSON.stringify(dashboard.Properties.DashboardName)).toContain('CRIS-');
+    expect(JSON.stringify(dashboard.Properties.DashboardBody)).toContain('CRIS — Observability');
   });
 
   it('routes every alarm to the ops topic on ALARM and OK and never pages on missing data', () => {

@@ -93,12 +93,12 @@ async function dispatchChannel(
     if (channel === AlertChannel.SMS && contact?.phoneNumber) {
       await deps.deliver.deliverSms(
         contact.phoneNumber,
-        `CrisisMap alert: a ${candidate.priorityBand} incident was reported near you.`,
+        `CRIS alert: a ${candidate.priorityBand} incident was reported near you.`,
       );
     } else if (channel === AlertChannel.EMAIL && contact?.email) {
       await deps.deliver.deliverEmail(
         contact.email,
-        'CrisisMap AI proximity alert',
+        'CRIS proximity alert',
         `A ${candidate.priorityBand} incident (${candidate.category ?? 'uncategorized'}) was reported near your subscribed area.`,
       );
     } else {

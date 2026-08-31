@@ -40,8 +40,7 @@ export function createDataKey(scope: Construct): Key {
   const stack = Stack.of(scope);
 
   return new Key(scope, 'CrisisMapDataKey', {
-    description:
-      'CrisisMap AI — encryption at rest for triage queues and operational alarms (CRIS-25).',
+    description: 'CRIS — encryption at rest for triage queues and operational alarms (CRIS-25).',
     // Annual rotation. Rotation re-keys new writes only; KMS keeps prior key
     // material so existing ciphertext stays readable with no re-encrypt step.
     enableKeyRotation: true,

@@ -2,7 +2,7 @@
   "name": "@crisismap/mobile",
   "version": "0.1.0",
   "private": true,
-  "description": "CrisisMap AI mobile client (Expo + React Native). Citizen emergency reporting (CRIS-6).",
+  "description": "CRIS mobile client (Expo + React Native). Citizen emergency reporting (CRIS-6).",
   "main": "index.ts",
   "scripts": {
     "start": "expo start --dev-client",

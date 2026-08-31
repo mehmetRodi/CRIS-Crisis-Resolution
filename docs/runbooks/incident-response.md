@@ -20,7 +20,7 @@ credentials, KMS retention) stay in [`deploy.md`](deploy.md).
   (`scripts/aws/60-subscribe-alarms.sh` or the command in [`deploy.md`](deploy.md#2-observability));
   until then alarms fire into a topic no one hears. All alarms use
   `treatMissingData: NOT_BREACHING`, so an idle environment never pages.
-- **Dashboard.** CloudWatch → Dashboards → `CrisisMap-<stackName>`: the §3.2 targets
+- **Dashboard.** CloudWatch → Dashboards → `CRIS-<stackName>`: the §3.2 targets
   (submission p95 < 800 ms, classification p95 < 15 s, real-time p95 < 2 s, 99.9%) on one
   screen, including the support resolvers and AppSync API health.
 - **Deploy smoke gate.** Every deploy run ends with the synthetic smoke transaction (§3).

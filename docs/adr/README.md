@@ -73,3 +73,4 @@ behind the code — essential when refactoring or extending the system.
 | [0055](0055-map-first-role-adaptive-workspace.md)                    | Map-first, role-adaptive workspace (CRIS-54)                         | Accepted                         |
 | [0056](0056-public-incident-read-path.md)                            | Unauthenticated public incident read path (CRIS-54)                  | Accepted                         |
 | [0057](0057-shared-design-package-and-mobile-migration.md)           | Shared design package + Expo migration (CRIS-57)                     | Accepted                         |
+| [0058](0058-cris-visible-product-name.md)                            | CRIS as the visible product name                                     | Accepted                         |

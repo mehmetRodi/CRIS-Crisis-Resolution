@@ -4,7 +4,7 @@ import Svg, { Circle, Path } from 'react-native-svg';
 import { colors, radii, space } from '../../theme';
 
 /**
- * The CrisisMap mark (CRIS-57). Same geometry as
+ * The CRIS mark (CRIS-57). Same geometry as
  * `apps/web/src/components/brand/Logo.tsx`, redrawn with `react-native-svg`.
  *
  * A map pin with two signal arcs radiating from it — the product in one glyph:
@@ -53,20 +53,16 @@ export function LogoMark({
  * Mark + wordmark lockup.
  *
  * Grouped into ONE accessibility element naming the product, so the mark and
- * the two text runs are announced as "CrisisMap AI" rather than as three
+ * the mark and wordmark are announced together as "CRIS" rather than as two
  * separate nodes.
  */
 export function Logo({ showWordmark = true }: { showWordmark?: boolean }) {
   return (
-    <View style={styles.lockup} accessible accessibilityLabel="CrisisMap AI">
+    <View style={styles.lockup} accessible accessibilityLabel="CRIS">
       <View style={styles.tile}>
         <LogoMark />
       </View>
-      {showWordmark ? (
-        <Text style={styles.wordmark}>
-          CrisisMap<Text style={styles.wordmarkAccent}> AI</Text>
-        </Text>
-      ) : null}
+      {showWordmark ? <Text style={styles.wordmark}>CRIS</Text> : null}
     </View>
   );
 }
@@ -90,8 +86,5 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: -0.2,
     color: colors.fg,
-  },
-  wordmarkAccent: {
-    color: colors.accent,
   },
 });

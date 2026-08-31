@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared config + helpers for the CrisisMap AWS wiring scripts.
+# Shared config + helpers for the CRIS AWS wiring scripts.
 # Sourced by every 00-..70- script; never run directly.
 #
 # Override any value inline, e.g.:

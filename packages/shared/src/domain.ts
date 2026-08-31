@@ -1,5 +1,5 @@
 /**
- * CrisisMap AI — shared domain model.
+ * CRIS — shared domain model.
  *
  * These constants are the single source of truth for the report lifecycle, user
  * roles, priority bands, and classification enums. They are consumed by the

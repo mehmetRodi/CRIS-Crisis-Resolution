@@ -1,6 +1,6 @@
 # Conventions
 
-Shared conventions for CrisisMap AI. Keep this current; it is the reference for reviews.
+Shared conventions for CRIS. Keep this current; it is the reference for reviews.
 
 ## Language & style
 

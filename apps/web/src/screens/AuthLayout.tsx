@@ -26,9 +26,9 @@ export function AuthLayout({
   footer?: React.ReactNode;
 }) {
   return (
-    <div className="flex min-h-dvh flex-col bg-bg">
+    <div className="flex min-h-dvh flex-col bg-transparent">
       <header className="flex h-16 shrink-0 items-center justify-center px-5">
-        <Link to="/" className="rounded" aria-label="CrisisMap AI home">
+        <Link to="/" className="rounded" aria-label="CRIS home">
           <Logo />
         </Link>
       </header>

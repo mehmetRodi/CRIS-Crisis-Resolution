@@ -1,5 +1,5 @@
 /**
- * CrisisMap AI — design tokens (CRIS-54, ADR-0054).
+ * CRIS — design tokens (CRIS-54, ADR-0054).
  *
  * Every colour in the product resolves through a semantic token declared here.
  * Components never name a raw palette step (`slate-200`, `blue-600`): they name

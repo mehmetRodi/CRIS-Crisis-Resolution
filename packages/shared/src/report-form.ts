@@ -1,5 +1,5 @@
 /**
- * CrisisMap AI — citizen report form core (CRIS-6).
+ * CRIS — citizen report form core (CRIS-6).
  *
  * Platform-agnostic draft shape, limits, and validation for the citizen
  * emergency-report form. The React Native mobile app (`apps/mobile`) is the

@@ -13,7 +13,7 @@ import { Button } from '../components/ui/button';
  */
 export function NotFoundPage() {
   return (
-    <main className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-bg px-6 text-center">
+    <main className="flex min-h-dvh flex-col items-center justify-center gap-6 bg-transparent px-6 text-center">
       <Logo />
       <div>
         <h1 className="text-xl font-semibold tracking-tight text-fg">Page not found</h1>
