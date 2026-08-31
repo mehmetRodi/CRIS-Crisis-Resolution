@@ -57,6 +57,7 @@ function synthesizeObservability(): SynthesizedObservability {
     alertDispatch: lambdaStub(data, 'AlertDispatchFn'),
     createMediaUploadUrl: lambdaStub(data, 'CreateMediaUploadUrlFn'),
     listVolunteerTasks: lambdaStub(data, 'ListVolunteerTasksFn'),
+    listPublicReports: lambdaStub(data, 'ListPublicReportsFn'),
     assignTeam: lambdaStub(data, 'AssignTeamFn'),
     citizenRoleAssignment: lambdaStub(auth, 'CitizenRoleAssignmentFn'),
   };

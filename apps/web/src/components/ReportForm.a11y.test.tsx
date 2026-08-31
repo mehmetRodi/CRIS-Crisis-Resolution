@@ -44,7 +44,7 @@ import { ReportForm } from './ReportForm';
 
 const VALID_TEXT = 'A gas leak is filling the stairwell on Elm Street.';
 
-/** The first chip inside a named `fieldset` group (Category, Urgency). */
+/** The first chip inside a named `fieldset` group (type of emergency, urgency). */
 function firstOptionIn(groupName: RegExp) {
   return screen.getByRole('group', { name: groupName }).querySelector('button');
 }
@@ -57,7 +57,9 @@ function pickPhoto(name = 'stairwell.png') {
 
 /** Fills the three required fields, leaving the form submittable. */
 function fillRequired() {
-  fireEvent.change(screen.getByLabelText(/description/i), { target: { value: VALID_TEXT } });
+  fireEvent.change(screen.getByLabelText(/describe the situation/i), {
+    target: { value: VALID_TEXT },
+  });
   fireEvent.click(screen.getByRole('button', { name: /medical/i }));
   fireEvent.click(screen.getByRole('button', { name: /^critical$/i }));
 }
@@ -87,26 +89,27 @@ describe('ReportForm accessibility', () => {
     render(<ReportForm />);
 
     // The visible "*" is aria-hidden; the accessible name carries the word.
-    expect(screen.getByLabelText(/description/i)).toHaveAccessibleName(/\(required\)/i);
-    expect(screen.getByLabelText(/description/i)).toHaveAttribute('aria-required', 'true');
+    expect(screen.getByLabelText(/describe the situation/i)).toHaveAccessibleName(/\(required\)/i);
+    expect(screen.getByLabelText(/describe the situation/i)).toHaveAttribute(
+      'aria-required',
+      'true',
+    );
   });
 
   it('associates the character counter with the description field', () => {
     render(<ReportForm />);
 
-    const description = screen.getByLabelText(/description/i);
-    expect(description).toHaveAccessibleDescription(/0\/\d+ characters/i);
+    const description = screen.getByLabelText(/describe the situation/i);
+    expect(description).toHaveAccessibleDescription(/0 \/ \d+/i);
 
     fireEvent.change(description, { target: { value: VALID_TEXT } });
-    expect(description).toHaveAccessibleDescription(
-      new RegExp(`${VALID_TEXT.length}/\\d+ characters`, 'i'),
-    );
+    expect(description).toHaveAccessibleDescription(new RegExp(`${VALID_TEXT.length} / \\d+`, 'i'));
   });
 
   it('explains why submit is unavailable while the form is incomplete', () => {
     render(<ReportForm />);
 
-    const submit = screen.getByRole('button', { name: /submit report/i });
+    const submit = screen.getByRole('button', { name: /send report/i });
     expect(submit).toHaveAttribute('aria-disabled', 'true');
     // Sourced from the shared validator, so it names every outstanding field
     // rather than restating a fixed sentence that could drift from the gate.
@@ -121,7 +124,7 @@ describe('ReportForm accessibility', () => {
     // The whole point of aria-disabled over disabled (ADR-0037): a `disabled`
     // button leaves the tab order, and a description on a control that cannot
     // be focused is never announced to the person it was written for.
-    const submit = screen.getByRole('button', { name: /submit report/i });
+    const submit = screen.getByRole('button', { name: /send report/i });
     expect(submit).not.toBeDisabled();
 
     submit.focus();
@@ -130,29 +133,31 @@ describe('ReportForm accessibility', () => {
 
   it('sends focus to the first outstanding field when a gated submit is pressed', () => {
     render(<ReportForm />);
-    const submit = screen.getByRole('button', { name: /submit report/i });
+    const submit = screen.getByRole('button', { name: /send report/i });
 
     // Nothing filled in: the description is what is missing.
     fireEvent.click(submit);
-    expect(screen.getByLabelText(/description/i)).toHaveFocus();
+    expect(screen.getByLabelText(/describe the situation/i)).toHaveFocus();
 
-    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: VALID_TEXT } });
+    fireEvent.change(screen.getByLabelText(/describe the situation/i), {
+      target: { value: VALID_TEXT },
+    });
     fireEvent.click(submit);
     // Category and urgency are chip groups, so focus enters the group at its
     // first option. Queried through the group rather than by chip name, so the
     // assertion does not encode the order of the Category enum.
-    expect(firstOptionIn(/category/i)).toHaveFocus();
+    expect(firstOptionIn(/type of emergency/i)).toHaveFocus();
 
     fireEvent.click(screen.getByRole('button', { name: /medical/i }));
     fireEvent.click(submit);
-    expect(firstOptionIn(/urgency/i)).toHaveFocus();
+    expect(firstOptionIn(/how urgent/i)).toHaveFocus();
   });
 
   it('drops the blocked-submit explanation once the form is complete', () => {
     render(<ReportForm />);
     fillRequired();
 
-    const submit = screen.getByRole('button', { name: /submit report/i });
+    const submit = screen.getByRole('button', { name: /send report/i });
     expect(submit).toHaveAttribute('aria-disabled', 'false');
     expect(submit).toHaveAccessibleDescription('');
   });
@@ -225,7 +230,7 @@ describe('ReportForm accessibility', () => {
   it('announces the confirmation and moves focus to it after submitting', async () => {
     render(<ReportForm />);
     fillRequired();
-    fireEvent.click(screen.getByRole('button', { name: /submit report/i }));
+    fireEvent.click(screen.getByRole('button', { name: /send report/i }));
 
     await waitFor(() => expect(submitReport).toHaveBeenCalledTimes(1));
 
@@ -235,9 +240,9 @@ describe('ReportForm accessibility', () => {
     // (CRIS-26, always mounted, empty text while there is nothing queued) and
     // the confirmation — so this is scoped by name to the unnamed one.
     const confirmation = await screen.findByRole('status', { name: '' });
-    expect(confirmation).toHaveTextContent(/report submitted/i);
+    expect(confirmation).toHaveTextContent(/report sent/i);
 
-    const heading = screen.getByRole('heading', { name: /report submitted/i });
+    const heading = screen.getByRole('heading', { name: /report sent/i });
     await waitFor(() => expect(heading).toHaveFocus());
   });
 

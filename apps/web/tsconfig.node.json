@@ -4,5 +4,8 @@
     "lib": ["ES2022"],
     "noEmit": true
   },
-  "include": ["vite.config.ts", "vitest.setup.ts"]
+  // Build-time config only. `vitest.setup.ts` moved to `tsconfig.json` (CRIS-54)
+  // because it polyfills DOM globals — `ResizeObserver`, `Element.prototype`,
+  // `Storage` — for jsdom, and needs the DOM lib this Node project omits.
+  "include": ["vite.config.ts"]
 }

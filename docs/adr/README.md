@@ -69,3 +69,7 @@ behind the code — essential when refactoring or extending the system.
 | [0051](0051-system-testing-alarms-runbook.md)                        | Post-deploy smoke gate, alarm completion, incident runbook (CRIS-35) | Refined by ADR-0052              |
 | [0052](0052-smoke-and-resolver-alarm-corrections.md)                 | Correct smoke classification and resolver-alarm semantics            | Accepted                         |
 | [0053](0053-durable-proximity-alert-delivery.md)                     | Durable proximity-alert handoff and retry-safe delivery              | Accepted                         |
+| [0054](0054-token-driven-design-system.md)                           | Token-driven design system on Tailwind + Radix (CRIS-54)             | Accepted                         |
+| [0055](0055-map-first-role-adaptive-workspace.md)                    | Map-first, role-adaptive workspace (CRIS-54)                         | Accepted                         |
+| [0056](0056-public-incident-read-path.md)                            | Unauthenticated public incident read path (CRIS-54)                  | Accepted                         |
+| [0057](0057-shared-design-package-and-mobile-migration.md)           | Shared design package + Expo migration (CRIS-57)                     | Accepted                         |

@@ -8,7 +8,11 @@ import type { ReportLocation } from '@crisismap/shared';
 vi.mock('maplibre-gl');
 
 import { Map as MapClass, Marker as MarkerClass } from 'maplibre-gl';
-import { LocationPicker } from './LocationPicker';
+// Imported directly rather than through the `React.lazy` boundary in
+// `LocationPicker.tsx` (CRIS-54): these tests assert the picker's own
+// behaviour, and going through Suspense would make every one of them async
+// for no added coverage. The boundary has its own test.
+import LocationPicker from './LocationPickerMap';
 
 /**
  * `vi.mock` swaps in `__mocks__/maplibre-gl.ts` at runtime, but TypeScript still

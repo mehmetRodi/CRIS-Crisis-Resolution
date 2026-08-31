@@ -22,25 +22,55 @@ and anonymous guest access, the DynamoDB data model, guarded submit/status mutat
 Streams → SQS → Lambda → Bedrock triage pipeline, deterministic scoring, dashboard reads,
 MapLibre base maps, CI/CD, and observability.
 
+The web client's UI was rebuilt in CRIS-54: a token-driven design system (ADR-0054) and a
+map-first, role-adaptive workspace (ADR-0055), plus the first unauthenticated read path so the
+public citizen map has real data (ADR-0056). CRIS-57 extracted the palette and the domain wording
+into `packages/design` and migrated the Expo app onto it (ADR-0057), so both clients now share one
+visual vocabulary.
+
+> **Mobile needs a dev-client rebuild.** CRIS-57 added `react-native-svg`, a native module. Run
+> `eas build --profile development` (or `npx expo run:ios|run:android`) and reinstall before the
+> app will start; a JS-only reload fails with an unresolved native module.
+
 Important deferred seams are listed in [`docs/architecture.md`](docs/architecture.md): media
 quarantine/signed delivery (presigned upload itself landed in CRIS-17), Amazon Location map
-tiles, custom subscriptions (the worker-to-AppSync publish call is wired in CRIS-19, but
-nothing subscribes yet), push alerts, team-assignment and duplicate-merge coordinator
-actions, WAF, and reporter-contact/media hardening. Do not infer the state of a deployed
-environment from the source tree.
+TILES (the incident overlay itself landed in CRIS-54), anonymous map _streaming_ (the polled
+public query landed in CRIS-54; guest auth is still unsupported on the custom subscription
+handlers), push alerts, duplicate-merge coordinator actions, **WAF rate limiting — which
+`listPublicReports` now needs, since it is unauthenticated (ADR-0056)** — and
+reporter-contact/media hardening. The Expo app has no mobile equivalent of the public incident
+map, and no automated test harness at all. Do not infer the state of a deployed environment from
+the source tree.
 
 ## Repository map
 
 ```
 .
 ├── apps/
-│   ├── mobile/              # @crisismap/mobile — Expo + React Native (citizen reporting, CRIS-6)
-│   │   └── src/             # report form screen/components
-│   └── web/                 # @crisismap/web — Vite + React SPA (coordinator/responder/volunteer UI)
-│       ├── src/             # React routes, auth, reporting, dashboard, and map
+│   ├── mobile/              # @crisismap/mobile — Expo + React Native (citizen reporting)
+│   │   └── src/
+│   │       ├── theme/       # colours/scales derived from @crisismap/design
+│   │       ├── components/  # ui/ primitives, brand/ logo, report form + picker
+│   │       └── screens/     # report screen + auth flow
+│   └── web/                 # @crisismap/web — Vite + React SPA (operational + citizen UI)
+│       ├── src/
+│       │   ├── styles/      # tokens.css — every colour in the product (ADR-0054)
+│       │   ├── components/
+│       │   │   ├── ui/      # Radix-backed primitives (button, dialog, select, …)
+│       │   │   ├── domain/  # domain-aware display (PriorityBadge, ScoreBreakdown, …)
+│       │   │   └── brand/   # logo/wordmark
+│       │   ├── shell/       # AppShell (operational) + CitizenShell (public)
+│       │   ├── screens/     # landing, auth layout, report page, 404
+│       │   ├── surfaces/
+│       │   │   ├── workspace/   # map-first role-adaptive workspace (ADR-0055)
+│       │   │   ├── coordinator/ # incident read-model + guarded-action hooks
+│       │   │   ├── volunteer/   # redacted task projection
+│       │   │   └── map/         # MapLibre incident overlay + public map
+│       │   └── lib/         # capabilities, domain-display, format, cn, data access
 │       └── amplify/         # Amplify Gen 2 backend definition (shared by both clients)
 ├── packages/
-│   └── shared/              # @crisismap/shared — domain enums/types (source-only pkg)
+│   ├── shared/              # @crisismap/shared — domain enums/types (source-only pkg)
+│   └── design/              # @crisismap/design — colour tokens + domain labels (ADR-0057)
 ├── docs/
 │   ├── architecture.md      # living system overview
 │   ├── conventions.md       # coding/logging/testing conventions
@@ -57,11 +87,14 @@ environment from the source tree.
 ## Tech stack (see design doc §4, ADR 0003, ADR 0020)
 
 **Cross-platform clients:** React Native (Expo) mobile app for citizen reporting ·
-Vite + React SPA for the coordinator/responder/volunteer web UI · TypeScript everywhere ·
+Vite + React SPA for the operational and citizen web UI · TypeScript everywhere ·
+Tailwind with a semantic token layer + vendored Radix primitives (shadcn-style) and
+`lucide-react` icons on web (ADR-0054) ·
 AWS Amplify Gen 2 (Cognito, AppSync GraphQL, DynamoDB, S3) with CDK escape hatches for the
 async pipeline · Bedrock (Claude) for classification · SQS + DynamoDB Streams · Lambda · SNS
-· MapLibre · Amazon Location Places geocoding (Location map tiles are deferred). Custom AppSync
-subscriptions are not currently enabled.
+· MapLibre · Amazon Location Places geocoding (Location map TILES are deferred; the incident
+overlay itself landed in CRIS-54). Three authenticated custom AppSync subscriptions are wired
+(CRIS-28, ADR-0048); guest/anonymous subscription auth is not.
 
 ## Commands
 
@@ -109,12 +142,26 @@ npx ampx sandbox        # stand up a personal dev backend
   (`verbatimModuleSyntax` is enabled).
 - **Shared vocabulary lives in `@crisismap/shared`.** Report statuses, roles, priority
   bands, and classification enums are defined there once. If you add a status/role/category,
-  update `packages/shared/src/domain.ts` and the Amplify `data` schema together.
+  update `packages/shared/src/domain.ts` and the Amplify `data` schema together — and give it a
+  label in `packages/design/src/domain-display.ts`, or the build fails.
+- **Shared LOOK lives in `@crisismap/design`.** Colours and human labels for both clients.
+  `shared` owns what the domain IS; `design` owns how it looks and reads. Nothing in `design` may
+  change behaviour, and nothing in it may be framework-specific — no Tailwind classes, no icons.
 - **Never log or send PII to prompts.** Reporter identity/contact is protected (design doc
   §5.4.1, §5.6). Classification jobs carry IDs + trace metadata only.
 - **Custom domain mutations are version-checked and audited where applicable** (design doc
   §5.1). Don't add status transitions outside `STATUS_TRANSITIONS`. Generated model mutations
   still exist under coarse model authorization and are not a substitute for guarded resolvers.
+- **Never name a raw palette step or hex value in either client.** Web's default Tailwind colour
+  scale is replaced by semantic tokens, so `bg-slate-50` is a build error; mobile reads
+  `src/theme`. New colours go in `packages/design/src/tokens.ts` first, then `tokens.css` — a
+  drift test fails if the two disagree.
+  Colour means severity and only severity; the teal accent exists so a button can never read as
+  a critical incident (ADR-0054). Format domain enums through `lib/domain-display.ts` and derive
+  role capability from `lib/capabilities.ts` — never inline either. Full list in
+  [`docs/conventions.md`](docs/conventions.md) → _UI & design system_.
+- **Keep `maplibre-gl` behind a `React.lazy` boundary.** It is ~285 kB gzipped, and a single
+  eager import anywhere pulls it back into the entry chunk for every citizen on `/report`.
 - **Document decisions as ADRs.** New decision → new numbered file in `docs/adr/`. Never edit
   a decided ADR; supersede it with a new one.
 
@@ -150,3 +197,15 @@ Keep new work in its owning ticket. This table records ownership, not completion
 | E3 AI Triage & Prioritization   | CRIS-30 (deterministic priority scoring), CRIS-31 (duplicate detection, DLQ and idempotency)   |
 | E4 Coordinator & Volunteer UI   | CRIS-32 (guarded coordinator actions), CRIS-33 (volunteer task board and UI integration tests) |
 | E5 Infra, Security, Alerts & QA | CRIS-34 (proximity-alert pipeline), CRIS-35 (system testing, alarms and runbook)               |
+
+## Ticket ownership (Sprint 4)
+
+| Epic                | Tickets                                                                                                                                                                                          |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Cross-cutting UI/UX | CRIS-54 (design system, map-first role-adaptive workspace, citizen flow, public incident read path — ADR-0054/0055/0056). Mobile is deliberately NOT migrated; it remains on the old `theme.ts`. |
+
+## Ticket ownership (Sprint 5)
+
+| Epic                | Tickets                                                                                                                                                                                         |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cross-cutting UI/UX | CRIS-57 (`@crisismap/design` extraction, Expo app migrated onto it, mobile brought up to the ADR-0037 accessibility bar — ADR-0057). Adds `react-native-svg`: a dev-client rebuild is required. |

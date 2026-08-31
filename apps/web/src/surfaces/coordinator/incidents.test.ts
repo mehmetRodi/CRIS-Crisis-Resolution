@@ -20,6 +20,9 @@ import {
   regionOptions,
   sortByPriority,
   sortTimeline,
+  searchIncidents,
+  sortByRecency,
+  sortIncidents,
   toggleValue,
   toTimelineEvent,
   type IncidentFilters,
@@ -337,5 +340,125 @@ describe('sortTimeline', () => {
       'v2',
       'v1',
     ]);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* Queue search, ordering, and the band facet (CRIS-54)                        */
+/* -------------------------------------------------------------------------- */
+
+describe('searchIncidents', () => {
+  const feed = [
+    incident({ reportId: 'a', summary: 'Gas leak in the stairwell', regionId: 'kadikoy' }),
+    incident({ reportId: 'b', summary: 'Bridge collapse', category: Category.STRUCTURAL_DAMAGE }),
+  ];
+
+  it('returns everything for a blank or whitespace-only query', () => {
+    expect(searchIncidents(feed, '')).toHaveLength(2);
+    expect(searchIncidents(feed, '   ')).toHaveLength(2);
+  });
+
+  it('matches the AI summary case-insensitively', () => {
+    expect(searchIncidents(feed, 'GAS').map((i) => i.reportId)).toEqual(['a']);
+  });
+
+  it('matches region, category, status, and id as well as summary', () => {
+    expect(searchIncidents(feed, 'kadikoy').map((i) => i.reportId)).toEqual(['a']);
+    expect(searchIncidents(feed, 'structural').map((i) => i.reportId)).toEqual(['b']);
+    expect(searchIncidents(feed, 'ai_classified')).toHaveLength(2);
+  });
+
+  it('tolerates an incident with nothing to match against', () => {
+    expect(searchIncidents([incident({ reportId: 'c' })], 'anything')).toEqual([]);
+  });
+
+  it('does not mutate its input', () => {
+    const original = [...feed];
+    searchIncidents(feed, 'gas');
+    expect(feed).toEqual(original);
+  });
+});
+
+describe('sortByRecency', () => {
+  it('puts the newest report first', () => {
+    const sorted = sortByRecency([
+      incident({ reportId: 'old', createdAt: '2026-08-01T00:00:00.000Z' }),
+      incident({ reportId: 'new', createdAt: '2026-08-31T00:00:00.000Z' }),
+    ]);
+    expect(sorted.map((i) => i.reportId)).toEqual(['new', 'old']);
+  });
+
+  it('sorts a report with no usable timestamp last, not first', () => {
+    // A missing date parses to NaN. Left unhandled, comparator NaNs make the
+    // order arbitrary — and an undated report floating to the top of a "newest"
+    // list would read as the most recent thing that happened.
+    const sorted = sortByRecency([
+      incident({ reportId: 'undated', createdAt: null }),
+      incident({ reportId: 'bad', createdAt: 'not a date' }),
+      incident({ reportId: 'dated', createdAt: '2026-08-31T00:00:00.000Z' }),
+    ]);
+    expect(sorted[0]?.reportId).toBe('dated');
+    expect(
+      sorted
+        .slice(1)
+        .map((i) => i.reportId)
+        .sort(),
+    ).toEqual(['bad', 'undated']);
+  });
+});
+
+describe('sortIncidents', () => {
+  const feed = [
+    incident({ reportId: 'low-recent', priorityScore: 1, createdAt: '2026-08-31T00:00:00.000Z' }),
+    incident({ reportId: 'high-old', priorityScore: 9, createdAt: '2026-08-01T00:00:00.000Z' }),
+  ];
+
+  it('ranks by priority by default', () => {
+    expect(sortIncidents(feed, 'priority').map((i) => i.reportId)).toEqual([
+      'high-old',
+      'low-recent',
+    ]);
+  });
+
+  it('surfaces what just arrived when sorting by recency', () => {
+    // A priority sort actively hides a newly-arrived low-priority report at the
+    // bottom of a long queue, which is the wrong view while a situation is
+    // still unfolding.
+    expect(sortIncidents(feed, 'recent').map((i) => i.reportId)).toEqual([
+      'low-recent',
+      'high-old',
+    ]);
+  });
+});
+
+describe('priority band facet', () => {
+  it('counts as active and narrows to the selected bands', () => {
+    const filters: IncidentFilters = { ...EMPTY_FILTERS, priorityBands: [PriorityBand.P0] };
+    expect(filtersActive(filters)).toBe(true);
+    expect(matchesFilters(incident({ priorityBand: PriorityBand.P0 }), filters)).toBe(true);
+    expect(matchesFilters(incident({ priorityBand: PriorityBand.P1 }), filters)).toBe(false);
+  });
+
+  it('matches the DISPLAYED band, so a scored record with no stored band counts', () => {
+    const filters: IncidentFilters = { ...EMPTY_FILTERS, priorityBands: [PriorityBand.P0] };
+    // The queue already renders this as P0 via `bandOf`; the facet must agree,
+    // or filtering would hide a row the user can see is a P0.
+    expect(matchesFilters(incident({ priorityBand: null, priorityScore: 9 }), filters)).toBe(true);
+  });
+
+  it('excludes an unscored report from every band facet', () => {
+    const filters: IncidentFilters = { ...EMPTY_FILTERS, priorityBands: [PriorityBand.P3] };
+    // "Not yet assessed" is not the same claim as "ranks lowest".
+    expect(matchesFilters(incident({ priorityBand: null, priorityScore: null }), filters)).toBe(
+      false,
+    );
+  });
+
+  it('treats an absent priorityBands field as no constraint', () => {
+    // Filter objects written before this facet existed must still mean
+    // "unfiltered" rather than "match nothing".
+    const legacy = { categories: [], statuses: [], regionIds: [] } as IncidentFilters;
+    expect(filtersActive(legacy)).toBe(false);
+    expect(matchesFilters(incident(), legacy)).toBe(true);
   });
 });

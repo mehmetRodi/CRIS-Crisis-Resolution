@@ -47,7 +47,12 @@ describe('RequireRole', () => {
       highestRole: UserRole.CITIZEN,
     });
     renderGuarded();
-    expect(screen.getByText(/not authorized/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { level: 1, name: /don.t have access/i }),
+    ).toBeInTheDocument();
+    // The denial names the caller's own role and the roles that would work, so
+    // the message is actionable rather than a dead end.
+    expect(screen.getByText(/signed in as citizen/i)).toBeInTheDocument();
     expect(screen.queryByText('coordinator dashboard')).not.toBeInTheDocument();
   });
 

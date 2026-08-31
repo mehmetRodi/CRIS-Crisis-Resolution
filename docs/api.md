@@ -13,7 +13,7 @@ The default authorization mode is Cognito User Pools. Custom operations use thes
 | ------------------------------------ | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Cognito User Pool                    | Signed-in users with the operation's required group | The default mode for staff operations.                                                                                                                                              |
 | Cognito Identity Pool, authenticated | Signed-in web/mobile reporting clients              | Clients explicitly pass `authMode: 'identityPool'` for submission and media upload.                                                                                                 |
-| Cognito Identity Pool, guest         | Anonymous reporting clients                         | Allowed only on submission and media upload.                                                                                                                                        |
+| Cognito Identity Pool, guest         | Anonymous reporting clients and the public map      | Report submission, media upload, and `listPublicReports` — the only unauthenticated READ in the API (ADR-0056).                                                                     |
 | IAM resource access                  | Direct report-writer Lambdas                        | Used by `classify-report`, `transition-report`, and `assign-team` for `publishReportUpdate`. The schema-level grant covers mutation operations, not arbitrary external IAM callers. |
 
 Authorization failures rejected by AppSync before Lambda invocation use AppSync's standard
@@ -133,6 +133,38 @@ assignments, and teams inside the resolver.
 The response has no fields for raw report text, reporter identity/contact, media, internal notes,
 or precise coordinates/geohashes. The resolver scans at most 250 rows from each backing table and
 does not paginate; this is an explicit MVP bound.
+
+### `listPublicReports` query
+
+Backs the unauthenticated public incident map (`/map`). **This is the only operation in the API
+that an unauthenticated caller can read from**, so its contract is a security boundary rather than
+a convenience (ADR-0056).
+
+**Authorization:** `allow.guest()` (Identity Pool unauthenticated role) **and**
+`allow.authenticated()`. Both are required: a signed-in caller presents a user-pool token and
+would not otherwise match the guest rule. Clients pass `authMode: 'identityPool'` when signed out
+and `'userPool'` when signed in.
+
+**Arguments:** `limit` (optional `Int`). Clamped server-side to `[1, 250]` — it arrives from an
+unauthenticated caller, so an unclamped value would be a free denial-of-wallet lever.
+
+**Returns:** `[PublicReport!]!`.
+
+Two independent redactions are enforced in the resolver, neither of which a model-level rule can
+express:
+
+- **Fields** — only the `PublicReport` allow-list. The DynamoDB `ProjectionExpression` never reads
+  `text`, `reporterId`, `reporterContact`, `notes`, or `mediaKeys`, and `toPublicReport` rebuilds
+  each record from the shared allow-list rather than deleting keys.
+- **Incidents** — only `PUBLICLY_VISIBLE_STATUSES`: `VERIFIED`, `IN_PROGRESS`, `RESOLVED`.
+  `NEW`, `PROCESSING`, `AI_CLASSIFIED`, `NEEDS_VERIFICATION`, and `REJECTED` are withheld. A
+  redacted but unverified report is still an unconfirmed claim, and a `REJECTED` one is a claim
+  already known to be untrue; publishing either on a public map during a disaster broadcasts
+  possibly-false information to everyone in the area.
+
+The resolver scans at most 250 rows and does not paginate — the same explicit MVP bound as
+`listVolunteerTasks`. **The endpoint is not rate-limited beyond AppSync defaults; WAF (CRIS-25)
+is still open.**
 
 ### `publishReportUpdate` mutation
 

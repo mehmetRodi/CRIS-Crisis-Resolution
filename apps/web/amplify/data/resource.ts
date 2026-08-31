@@ -5,6 +5,7 @@ import { transitionReport as transitionReportFn } from '../functions/transition-
 import { publishReportUpdate as publishReportUpdateFn } from '../functions/publish-report-update/resource';
 import { classifyReport as classifyReportFn } from '../functions/classify-report/resource';
 import { listVolunteerTasks as listVolunteerTasksFn } from '../functions/list-volunteer-tasks/resource';
+import { listPublicReports as listPublicReportsFn } from '../functions/list-public-reports/resource';
 import { assignTeam as assignTeamFn } from '../functions/assign-team/resource';
 
 /**
@@ -582,6 +583,45 @@ const schema = a
       createdAt: a.datetime(),
       updatedAt: a.datetime(),
     }),
+
+    /**
+     * The public incident read (CRIS-54, ADR-0056).
+     *
+     * The FIRST unauthenticated data path in the product, added so the citizen
+     * `/map` route can show what is already known nearby — which reduces
+     * duplicate reports during a surge and gives people in the area something
+     * actionable without an account.
+     *
+     * Two independent redactions are enforced server-side by the handler, and
+     * neither can be expressed as a model-level rule, which is why this is a
+     * Lambda resolver rather than a generated list:
+     *
+     *   1. FIELDS  — only the `PublicReport` allow-list is returned. Reporter
+     *      identity, contact, internal notes, media keys, and the untrusted raw
+     *      report body are never read out of DynamoDB in the first place.
+     *   2. INCIDENTS — only `PUBLICLY_VISIBLE_STATUSES` (VERIFIED, IN_PROGRESS,
+     *      RESOLVED). An unverified report is an unconfirmed claim; publishing
+     *      one on a public map during a disaster broadcasts possibly-false
+     *      information to everyone in the area, and a REJECTED one is a claim
+     *      already known to be untrue.
+     *
+     * AUTH: `allow.guest()` grants the Cognito identity pool's unauthenticated
+     * role, which is what makes the map work with no account. `allow.authenticated()`
+     * is listed alongside it because a signed-in caller's requests carry a user-pool
+     * token and would otherwise NOT match the guest rule.
+     *
+     * OPEN RISK, deliberately accepted and tracked: this endpoint is
+     * unauthenticated and therefore un-throttled beyond AppSync defaults. Rate
+     * limiting belongs to CRIS-25 (WAF), which is still open — see ADR-0056.
+     * The `limit` argument is clamped server-side (`store.ts`) so a caller
+     * cannot ask for an unbounded scan.
+     */
+    listPublicReports: a
+      .query()
+      .arguments({ limit: a.integer() })
+      .returns(a.ref('PublicReport').array().required())
+      .handler(a.handler.function(listPublicReportsFn))
+      .authorization((allow) => [allow.guest(), allow.authenticated()]),
 
     /**
      * Internal fan-out mutation for driving subscriptions (§5.3, ADR-0009,

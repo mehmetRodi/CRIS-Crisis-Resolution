@@ -54,7 +54,9 @@ function pickFile(file: File) {
 
 /** Fills the three required fields, leaving the form submittable. */
 function fillRequired(category = /medical/i, urgency = /^critical$/i) {
-  fireEvent.change(screen.getByLabelText(/description/i), { target: { value: VALID_TEXT } });
+  fireEvent.change(screen.getByLabelText(/describe the situation/i), {
+    target: { value: VALID_TEXT },
+  });
   fireEvent.click(screen.getByRole('button', { name: category }));
   fireEvent.click(screen.getByRole('button', { name: urgency }));
 }
@@ -81,10 +83,12 @@ describe('web ReportForm', () => {
 
     // `aria-disabled`, not `disabled` — the button stays focusable so its reason
     // is reachable; `handleSubmit` holds the actual gate (ADR-0037).
-    const submit = screen.getByRole('button', { name: /submit report/i });
+    const submit = screen.getByRole('button', { name: /send report/i });
     expect(submit).toHaveAttribute('aria-disabled', 'true');
 
-    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: VALID_TEXT } });
+    fireEvent.change(screen.getByLabelText(/describe the situation/i), {
+      target: { value: VALID_TEXT },
+    });
     fireEvent.click(screen.getByRole('button', { name: /medical/i }));
     fireEvent.click(screen.getByRole('button', { name: /^critical$/i }));
 
@@ -94,7 +98,7 @@ describe('web ReportForm', () => {
   it('does not submit an incomplete draft when the gated button is pressed', () => {
     render(<ReportForm />);
 
-    fireEvent.click(screen.getByRole('button', { name: /submit report/i }));
+    fireEvent.click(screen.getByRole('button', { name: /send report/i }));
 
     expect(submitReport).not.toHaveBeenCalled();
   });
@@ -102,13 +106,15 @@ describe('web ReportForm', () => {
   it('submits and shows the confirmation view', async () => {
     render(<ReportForm />);
 
-    fireEvent.change(screen.getByLabelText(/description/i), { target: { value: VALID_TEXT } });
+    fireEvent.change(screen.getByLabelText(/describe the situation/i), {
+      target: { value: VALID_TEXT },
+    });
     fireEvent.click(screen.getByRole('button', { name: /fire/i }));
     fireEvent.click(screen.getByRole('button', { name: /^high$/i }));
-    fireEvent.click(screen.getByRole('button', { name: /submit report/i }));
+    fireEvent.click(screen.getByRole('button', { name: /send report/i }));
 
     await waitFor(() => expect(submitReport).toHaveBeenCalledTimes(1));
-    expect(await screen.findByText(/report submitted/i)).toBeInTheDocument();
+    expect(await screen.findByText(/report sent/i)).toBeInTheDocument();
 
     const call = submitReport.mock.calls[0] ?? [];
     const [submission, requestId] = call;
@@ -126,7 +132,7 @@ describe('web ReportForm', () => {
     expect(within(photoControl()).getByText(/scene\.jpg/i)).toBeInTheDocument();
 
     fillRequired();
-    fireEvent.click(screen.getByRole('button', { name: /submit report/i }));
+    fireEvent.click(screen.getByRole('button', { name: /send report/i }));
 
     await waitFor(() => expect(submitReport).toHaveBeenCalledTimes(1));
     const [submission] = submitReport.mock.calls[0] ?? [];
@@ -146,7 +152,7 @@ describe('web ReportForm', () => {
     );
 
     fillRequired();
-    fireEvent.click(screen.getByRole('button', { name: /submit report/i }));
+    fireEvent.click(screen.getByRole('button', { name: /send report/i }));
 
     await waitFor(() => expect(submitReport).toHaveBeenCalledTimes(1));
     const [submission] = submitReport.mock.calls[0] ?? [];
@@ -204,7 +210,7 @@ describe('web ReportForm', () => {
     render(<ReportForm />);
 
     fillRequired();
-    fireEvent.click(screen.getByRole('button', { name: /submit report/i }));
+    fireEvent.click(screen.getByRole('button', { name: /send report/i }));
     await waitFor(() => expect(submitReport).toHaveBeenCalledTimes(1));
 
     pickFile(new File(['x'], 'stale.jpg', { type: 'image/jpeg' }));
@@ -212,7 +218,7 @@ describe('web ReportForm', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /submit another report/i }));
     fillRequired(/fire/i, /^high$/i);
-    fireEvent.click(screen.getByRole('button', { name: /submit report/i }));
+    fireEvent.click(screen.getByRole('button', { name: /send report/i }));
 
     await waitFor(() => expect(submitReport).toHaveBeenCalledTimes(2));
     const [second] = submitReport.mock.calls[1] ?? [];
@@ -229,7 +235,7 @@ describe('web ReportForm', () => {
     );
 
     fillRequired();
-    fireEvent.click(screen.getByRole('button', { name: /submit report/i }));
+    fireEvent.click(screen.getByRole('button', { name: /send report/i }));
 
     // An unqualified "Report Submitted" would let the user believe the photo
     // went with it.
@@ -247,7 +253,7 @@ describe('web ReportForm', () => {
       render(<ReportForm />);
 
       fillRequired(/fire/i, /^high$/i);
-      fireEvent.click(screen.getByRole('button', { name: /submit report/i }));
+      fireEvent.click(screen.getByRole('button', { name: /send report/i }));
 
       await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
       expect(submitReport).not.toHaveBeenCalled();
@@ -269,11 +275,11 @@ describe('web ReportForm', () => {
       render(<ReportForm />);
 
       fillRequired();
-      fireEvent.click(screen.getByRole('button', { name: /submit report/i }));
+      fireEvent.click(screen.getByRole('button', { name: /send report/i }));
 
       expect(await screen.findByText(/could not be saved on this device/i)).toBeInTheDocument();
       expect(screen.getByRole('form', { name: /emergency report/i })).toBeInTheDocument();
-      expect(screen.getByLabelText(/description/i)).toHaveValue(VALID_TEXT);
+      expect(screen.getByLabelText(/describe the situation/i)).toHaveValue(VALID_TEXT);
       expect(screen.queryByText(/report saved/i)).not.toBeInTheDocument();
     });
 
@@ -287,12 +293,12 @@ describe('web ReportForm', () => {
       render(<ReportForm />);
 
       fillRequired();
-      fireEvent.change(screen.getByLabelText(/contact info/i), {
+      fireEvent.change(screen.getByLabelText(/contact details/i), {
         target: { value: 'citizen@example.com' },
       });
-      fireEvent.click(screen.getByRole('button', { name: /submit report/i }));
+      fireEvent.click(screen.getByRole('button', { name: /send report/i }));
 
-      expect(await screen.findByText(/contact information was not stored/i)).toBeInTheDocument();
+      expect(await screen.findByText(/contact details are not stored/i)).toBeInTheDocument();
     });
 
     it('queues the report for retry when submission fails as retryable', async () => {
@@ -300,7 +306,7 @@ describe('web ReportForm', () => {
       render(<ReportForm />);
 
       fillRequired();
-      fireEvent.click(screen.getByRole('button', { name: /submit report/i }));
+      fireEvent.click(screen.getByRole('button', { name: /send report/i }));
 
       await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
       expect(await screen.findByText(/report saved/i)).toBeInTheDocument();
@@ -313,7 +319,7 @@ describe('web ReportForm', () => {
       render(<ReportForm />);
 
       fillRequired();
-      fireEvent.click(screen.getByRole('button', { name: /submit report/i }));
+      fireEvent.click(screen.getByRole('button', { name: /send report/i }));
 
       expect(await screen.findByText(/report text failed validation/i)).toBeInTheDocument();
       expect(enqueue).not.toHaveBeenCalled();

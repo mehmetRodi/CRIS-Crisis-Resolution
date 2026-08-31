@@ -1,3 +1,5 @@
+import { CloudOff } from 'lucide-react';
+
 import { useOfflineQueue } from '../OfflineQueueContext';
 
 /**
@@ -28,9 +30,10 @@ export function OfflineQueueBanner() {
     <div
       role="status"
       aria-label="Offline queue status"
-      className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-900"
+      className="mb-6 flex items-start gap-2.5 rounded-lg border border-warning-border bg-warning-subtle px-4 py-3 text-sm text-fg"
     >
-      {message}
+      <CloudOff aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-warning" />
+      <span>{message}</span>
     </div>
   );
 }

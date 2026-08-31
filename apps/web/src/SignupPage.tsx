@@ -1,8 +1,22 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { Loader2 } from 'lucide-react';
 import { PASSWORD_RULE_HINT, isPasswordValid } from '@crisismap/shared';
-import { useAuth } from './AuthContext';
 
+import { useAuth } from './AuthContext';
+import { AuthError, AuthLayout } from './screens/AuthLayout';
+import { Button } from './components/ui/button';
+import { Input } from './components/ui/input';
+import { FieldHint, Label } from './components/ui/label';
+
+/**
+ * Account creation (CRIS-7, ADR-0024).
+ *
+ * A new account carries no operational Cognito group — an administrator grants
+ * that separately (CRIS-24). The copy says so up front, because signing up and
+ * then finding an empty workspace with no explanation is the worst version of
+ * this flow.
+ */
 export default function SignupPage() {
   const navigate = useNavigate();
   const { signUp } = useAuth();
@@ -12,127 +26,93 @@ export default function SignupPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
     setError('');
 
     if (password !== confirmPassword) {
-      setError('Passwords do not match');
+      setError('Passwords do not match.');
       return;
     }
-
     if (!isPasswordValid(password)) {
       setError(PASSWORD_RULE_HINT);
       return;
     }
 
     setLoading(true);
-
     try {
       await signUp(email, password);
       navigate('/confirm-signup', { state: { email } });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong');
+      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8 bg-white p-8 rounded-2xl shadow-lg">
-        <div>
-          <h2 className="text-3xl font-bold text-slate-900 text-center">Create Account</h2>
-          <p className="mt-2 text-sm text-slate-600 text-center">
-            Sign up to submit emergency reports
-          </p>
+    <AuthLayout
+      title="Create an account"
+      description="Accounts are for response staff. An administrator assigns your role after sign-up."
+      footer={
+        <>
+          Already have an account?{' '}
+          <Link to="/login" className="font-medium text-accent underline-offset-4 hover:underline">
+            Sign in
+          </Link>
+        </>
+      }
+    >
+      <form className="space-y-4" onSubmit={handleSubmit}>
+        <div className="space-y-1.5">
+          <Label htmlFor="signup-email">Email</Label>
+          <Input
+            id="signup-email"
+            type="email"
+            autoComplete="email"
+            required
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            placeholder="you@example.org"
+          />
         </div>
 
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          <div className="space-y-4">
-            <div>
-              <label htmlFor="signup-email" className="block text-sm font-medium text-slate-700">
-                Email
-              </label>
-              <input
-                id="signup-email"
-                type="email"
-                autoComplete="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                className="mt-1 w-full rounded-lg border border-slate-300 px-4 py-2.5 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Enter your email"
-              />
-            </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="signup-password">Password</Label>
+          <Input
+            id="signup-password"
+            type="password"
+            autoComplete="new-password"
+            required
+            // The rule is the field's DESCRIPTION, not loose prose beside it, so
+            // it is announced with the field — the constraint is known before a
+            // failed submit rather than after (CRIS-27).
+            aria-describedby="signup-password-hint"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+          />
+          <FieldHint id="signup-password-hint">{PASSWORD_RULE_HINT}</FieldHint>
+        </div>
 
-            <div>
-              <label htmlFor="signup-password" className="block text-sm font-medium text-slate-700">
-                Password
-              </label>
-              <input
-                id="signup-password"
-                type="password"
-                autoComplete="new-password"
-                // The rule hint is the field's description, not loose prose — screen
-                // readers announce it with the field so the constraint is known
-                // *before* a failed submit (CRIS-27).
-                aria-describedby="signup-password-hint"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                className="mt-1 w-full rounded-lg border border-slate-300 px-4 py-2.5 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Minimum 8 characters"
-              />
-              <p id="signup-password-hint" className="mt-1 text-xs text-slate-500">
-                {PASSWORD_RULE_HINT}
-              </p>
-            </div>
-            <div>
-              <label
-                htmlFor="signup-confirm-password"
-                className="block text-sm font-medium text-slate-700"
-              >
-                Confirm Password
-              </label>
-              <input
-                id="signup-confirm-password"
-                type="password"
-                autoComplete="new-password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                required
-                className="mt-1 w-full rounded-lg border border-slate-300 px-4 py-2.5 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Confirm your password"
-              />
-            </div>
-          </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="signup-confirm-password">Confirm password</Label>
+          <Input
+            id="signup-confirm-password"
+            type="password"
+            autoComplete="new-password"
+            required
+            value={confirmPassword}
+            onChange={(event) => setConfirmPassword(event.target.value)}
+          />
+        </div>
 
-          {error && (
-            <div
-              role="alert"
-              className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700"
-            >
-              {error}
-            </div>
-          )}
+        {error ? <AuthError message={error} /> : null}
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-lg bg-blue-600 px-4 py-3 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 transition-colors"
-          >
-            {loading ? 'Creating account...' : 'Create Account'}
-          </button>
-
-          <p className="text-center text-sm text-slate-600">
-            Already have an account?{' '}
-            <Link to="/login" className="font-medium text-blue-600 hover:text-blue-500">
-              Sign in
-            </Link>
-          </p>
-        </form>
-      </div>
-    </div>
+        <Button type="submit" variant="primary" size="lg" disabled={loading} className="w-full">
+          {loading ? <Loader2 aria-hidden="true" className="animate-spin" /> : null}
+          {loading ? 'Creating account…' : 'Create account'}
+        </Button>
+      </form>
+    </AuthLayout>
   );
 }

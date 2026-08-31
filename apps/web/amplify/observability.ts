@@ -56,6 +56,14 @@ export interface BackendFunctions {
   alertDispatch: IFunction;
   createMediaUploadUrl: IFunction;
   listVolunteerTasks: IFunction;
+  /**
+   * The unauthenticated public-map read (CRIS-54, ADR-0056). Alarmed like the
+   * other resolvers, and worth watching more closely than most: it is the only
+   * function a caller with no credentials can invoke, so its error and
+   * invocation curves are the first place an abuse pattern would show up while
+   * WAF rate limiting is still open (CRIS-25).
+   */
+  listPublicReports: IFunction;
   assignTeam: IFunction;
   /** Cognito post-confirmation trigger — lives in the auth stack, alarmed from here. */
   citizenRoleAssignment: IFunction;

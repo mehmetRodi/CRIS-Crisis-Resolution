@@ -198,6 +198,17 @@ export interface IncidentFilters {
   statuses: readonly ReportStatus[];
   /** Region ids are data-driven (see `regionOptions`), not a fixed enum. */
   regionIds: readonly string[];
+  /**
+   * Priority bands (CRIS-54). OPTIONAL so that filter objects written before
+   * this facet existed still type-check and still mean "no band constraint" —
+   * a required field would have silently changed the meaning of every existing
+   * literal from "unfiltered" to "invalid".
+   *
+   * A not-yet-scored incident has no band, so it is excluded while this facet
+   * is active. That is the honest behaviour: an unscored report is not a P3 and
+   * must not appear under one (see `UNSCORED_META` in `lib/domain-display`).
+   */
+  priorityBands?: readonly PriorityBand[];
 }
 
 /** The no-op filter: every facet empty, so nothing is narrowed. */
@@ -205,12 +216,16 @@ export const EMPTY_FILTERS: IncidentFilters = {
   categories: [],
   statuses: [],
   regionIds: [],
+  priorityBands: [],
 };
 
 /** True when at least one facet constrains the queue (drives the "clear" affordance). */
 export function filtersActive(filters: IncidentFilters): boolean {
   return (
-    filters.categories.length > 0 || filters.statuses.length > 0 || filters.regionIds.length > 0
+    filters.categories.length > 0 ||
+    filters.statuses.length > 0 ||
+    filters.regionIds.length > 0 ||
+    (filters.priorityBands?.length ?? 0) > 0
   );
 }
 
@@ -235,6 +250,13 @@ export function matchesFilters(incident: PublicReport, filters: IncidentFilters)
     !(incident.regionId != null && filters.regionIds.includes(incident.regionId))
   ) {
     return false;
+  }
+  if (filters.priorityBands && filters.priorityBands.length > 0) {
+    // Compared against the DISPLAYED band (`bandOf`), not the raw stored field,
+    // so filtering by P1 catches older records that carry a score but no
+    // persisted band — exactly the rows the queue is already showing as P1.
+    const band = bandOf(incident);
+    if (!band || !filters.priorityBands.includes(band)) return false;
   }
   return true;
 }
@@ -381,4 +403,70 @@ export function sortTimeline(events: readonly TimelineEvent[]): TimelineEvent[] 
     if (timeB !== timeA) return timeB - timeA;
     return (b.version ?? 0) - (a.version ?? 0);
   });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Queue search and ordering (CRIS-54)                                         */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Free-text narrowing of the loaded queue (CRIS-54).
+ *
+ * Deliberately kept OUT of `IncidentFilters`. The facets are a structured,
+ * shareable description of a working set; a search box is transient typing.
+ * Folding them together would mean every facet consumer had to carry a query
+ * string it does not use, and would make the filter object a poor thing to
+ * persist or put in a URL later.
+ *
+ * Searches only redacted fields — summary, category, region, status, and id.
+ * The untrusted raw report body is not on `PublicReport` at all and must never
+ * become searchable here (§5.6).
+ */
+export function searchIncidents<T extends PublicReport>(
+  incidents: readonly T[],
+  query: string,
+): T[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return [...incidents];
+  return incidents.filter((incident) =>
+    [
+      incident.summary,
+      incident.category,
+      incident.regionId,
+      incident.status,
+      incident.reportId,
+    ].some((field) => field?.toLowerCase().includes(needle)),
+  );
+}
+
+/**
+ * How the queue is ordered.
+ *
+ * `priority` is the default and the one the design doc's ranking exists to
+ * serve. `recent` is offered because a coordinator watching an unfolding
+ * situation sometimes needs "what just came in", which a priority sort actively
+ * hides — a new P3 lands at the bottom of a long queue.
+ */
+export type IncidentSort = 'priority' | 'recent';
+
+/** Newest first. Reports with no timestamp sort last rather than to the top. */
+export function sortByRecency<T extends PublicReport>(incidents: readonly T[]): T[] {
+  return [...incidents].sort((a, b) => {
+    const left = a.createdAt ? Date.parse(a.createdAt) : Number.NaN;
+    const right = b.createdAt ? Date.parse(b.createdAt) : Number.NaN;
+    const leftValid = !Number.isNaN(left);
+    const rightValid = !Number.isNaN(right);
+    if (!leftValid && !rightValid) return 0;
+    if (!leftValid) return 1;
+    if (!rightValid) return -1;
+    return right - left;
+  });
+}
+
+/** Apply the selected ordering. */
+export function sortIncidents<T extends PublicReport>(
+  incidents: readonly T[],
+  sort: IncidentSort,
+): T[] {
+  return sort === 'recent' ? sortByRecency(incidents) : sortByPriority(incidents);
 }

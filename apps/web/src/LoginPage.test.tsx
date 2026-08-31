@@ -52,10 +52,14 @@ describe('LoginPage', () => {
     signInMock.mockReset();
   });
 
-  it('navigates home after a completed sign-in', async () => {
+  it('sends a completed sign-in to the workspace, not the public home page', async () => {
     signInMock.mockResolvedValue({ isSignedIn: true, nextStep: { signInStep: 'DONE' } });
     renderLogin();
-    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/'));
+    // `/workspace` then routes on to the pane this role actually works from
+    // (ADR-0055). Landing on `/` would put a public homepage between a
+    // responder and the incident they were paged about. `replace` keeps Back
+    // from returning to the sign-in form they just completed.
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/workspace', { replace: true }));
   });
 
   it('sends an unverified account to confirmation via the CONFIRM_SIGN_UP next step', async () => {

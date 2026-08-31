@@ -1,0 +1,20 @@
+{
+  "name": "@crisismap/design",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared visual vocabulary for CrisisMap AI: colour tokens and domain display labels, consumed by both the web SPA and the Expo app.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@crisismap/shared": "*"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.4"
+  }
+}
