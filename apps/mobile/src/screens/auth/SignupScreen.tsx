@@ -1,17 +1,20 @@
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-
 import { PASSWORD_RULE_HINT, isPasswordValid } from '@crisismap/shared';
+import { TriangleAlert } from 'lucide-react-native';
 
 import { useAuth } from '../../lib/AuthContext';
-import { colors } from '../../theme';
-import { authStyles as s } from './authStyles';
+import { Button } from '../../components/ui/Button';
+import { Callout } from '../../components/ui/Callout';
+import { Field, FieldHint, FieldLabel } from '../../components/ui/Field';
+import { Input } from '../../components/ui/Input';
+import { AuthFooterLink, AuthScreen } from './AuthScreen';
+import { space } from '../../theme';
 import type { RootStackParamList } from '../../navigation/RootNavigator';
 
-/** Mobile twin of apps/web/src/SignupPage.tsx (CRIS-7, ADR-0024). */
+/** Mobile twin of `apps/web/src/SignupPage.tsx` (CRIS-7, ADR-0024). */
 export function SignupScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const { signUp } = useAuth();
@@ -25,7 +28,7 @@ export function SignupScreen() {
     setError('');
 
     if (password !== confirmPassword) {
-      setError('Passwords do not match');
+      setError('Passwords do not match.');
       return;
     }
     if (!isPasswordValid(password)) {
@@ -38,89 +41,79 @@ export function SignupScreen() {
       await signUp(email, password);
       navigation.navigate('ConfirmSignup', { email });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong');
+      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <SafeAreaView style={s.screen} edges={['top', 'bottom']}>
-      <ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled">
-        <View style={s.card}>
-          <Pressable onPress={() => navigation.goBack()} hitSlop={8} style={s.back}>
-            <Text style={s.backText}>← Back</Text>
-          </Pressable>
+    <AuthScreen
+      title="Create an account"
+      description="An account lets you track your own reports. It is never required to submit one."
+      onBack={() => navigation.goBack()}
+      onSkipToReport={() => navigation.navigate('Report')}
+      footer={
+        <AuthFooterLink
+          prompt="Already have an account?"
+          action="Sign in"
+          onPress={() => navigation.navigate('Login')}
+        />
+      }
+    >
+      <View style={styles.fields}>
+        <Field>
+          <FieldLabel>Email</FieldLabel>
+          <Input
+            value={email}
+            onChangeText={setEmail}
+            placeholder="you@example.org"
+            autoCapitalize="none"
+            autoComplete="email"
+            keyboardType="email-address"
+            accessibilityLabel="Email"
+          />
+        </Field>
 
-          <Text style={s.title}>Create Account</Text>
-          <Text style={s.subtitle}>Sign up to submit emergency reports</Text>
+        <Field>
+          <FieldLabel>Password</FieldLabel>
+          <Input
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry
+            autoComplete="new-password"
+            // The rule is announced WITH the field, so the constraint is known
+            // before a failed submit rather than after it.
+            accessibilityLabel="Password"
+            accessibilityHint={PASSWORD_RULE_HINT}
+          />
+          <FieldHint>{PASSWORD_RULE_HINT}</FieldHint>
+        </Field>
 
-          <View style={s.field}>
-            <Text style={s.label}>Email</Text>
-            <TextInput
-              style={s.input}
-              value={email}
-              onChangeText={setEmail}
-              placeholder="Enter your email"
-              placeholderTextColor={colors.textMuted}
-              autoCapitalize="none"
-              keyboardType="email-address"
-            />
-          </View>
+        <Field>
+          <FieldLabel>Confirm password</FieldLabel>
+          <Input
+            value={confirmPassword}
+            onChangeText={setConfirmPassword}
+            secureTextEntry
+            autoComplete="new-password"
+            accessibilityLabel="Confirm password"
+          />
+        </Field>
+      </View>
 
-          <View style={s.field}>
-            <Text style={s.label}>Password</Text>
-            <TextInput
-              style={s.input}
-              value={password}
-              onChangeText={setPassword}
-              placeholder="Minimum 8 characters"
-              placeholderTextColor={colors.textMuted}
-              secureTextEntry
-            />
-            <Text style={s.hint}>{PASSWORD_RULE_HINT}</Text>
-          </View>
+      {error ? <Callout tone="danger" message={error} icon={TriangleAlert} assertive /> : null}
 
-          <View style={s.field}>
-            <Text style={s.label}>Confirm Password</Text>
-            <TextInput
-              style={s.input}
-              value={confirmPassword}
-              onChangeText={setConfirmPassword}
-              placeholder="Confirm your password"
-              placeholderTextColor={colors.textMuted}
-              secureTextEntry
-            />
-          </View>
-
-          {error ? (
-            <View style={s.errorBox}>
-              <Text style={s.errorText}>{error}</Text>
-            </View>
-          ) : null}
-
-          <Pressable
-            onPress={handleSubmit}
-            disabled={loading}
-            style={({ pressed }) => [
-              s.submit,
-              pressed && s.submitPressed,
-              loading && s.submitDisabled,
-            ]}
-            accessibilityRole="button"
-          >
-            {loading ? (
-              <ActivityIndicator color={colors.onPrimary} />
-            ) : (
-              <Text style={s.submitText}>Create Account</Text>
-            )}
-          </Pressable>
-
-          <Pressable onPress={() => navigation.navigate('Login')} hitSlop={8}>
-            <Text style={s.link}>Already have an account? Sign in</Text>
-          </Pressable>
-        </View>
-      </ScrollView>
-    </SafeAreaView>
+      <Button
+        label={loading ? 'Creating account…' : 'Create account'}
+        onPress={handleSubmit}
+        variant="primary"
+        size="lg"
+        loading={loading}
+        blocked={loading}
+      />
+    </AuthScreen>
   );
 }
+
+const styles = { fields: { gap: space.xl } } as const;

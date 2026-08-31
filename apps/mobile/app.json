@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "CrisisMap AI",
+    "name": "CRIS",
     "slug": "crisismap-mobile",
     "version": "0.1.0",
     "orientation": "portrait",
@@ -32,7 +32,7 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "CrisisMap AI uses your location to attach it to emergency reports you submit."
+          "locationWhenInUsePermission": "CRIS uses your location to attach it to emergency reports you submit."
         }
       ]
     ]

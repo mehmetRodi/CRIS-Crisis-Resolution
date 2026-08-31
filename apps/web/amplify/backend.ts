@@ -16,13 +16,14 @@ import { publishReportUpdate } from './functions/publish-report-update/resource'
 import { classifyReport } from './functions/classify-report/resource';
 import { createMediaUploadUrl } from './functions/create-media-upload-url/resource';
 import { listVolunteerTasks } from './functions/list-volunteer-tasks/resource';
+import { listPublicReports } from './functions/list-public-reports/resource';
 import { assignTeam } from './functions/assign-team/resource';
 import { alertDispatch } from './functions/alert-dispatch/resource';
 import { createDataKey } from './security/encryption';
 import { addObservability } from './observability';
 
 /**
- * CrisisMap AI backend (Amplify Gen 2).
+ * CRIS backend (Amplify Gen 2).
  *
  * Wires the managed auth/data/storage resources, the custom resolvers that back
  * the E2 API surface (CRIS-9/18/19), and the custom asynchronous AI-triage
@@ -66,6 +67,7 @@ const backend = defineBackend({
   classifyReport,
   createMediaUploadUrl,
   listVolunteerTasks,
+  listPublicReports,
   assignTeam,
   alertDispatch,
 });
@@ -205,6 +207,19 @@ tables['Team'].grantReadData(volunteerTasksFn);
 backend.listVolunteerTasks.addEnvironment('REPORT_TABLE_NAME', tables['Report'].tableName);
 backend.listVolunteerTasks.addEnvironment('ASSIGNMENT_TABLE_NAME', tables['Assignment'].tableName);
 backend.listVolunteerTasks.addEnvironment('TEAM_TABLE_NAME', tables['Team'].tableName);
+
+/* -------------------------------------------------------------------------- */
+/* listPublicReports (CRIS-54, ADR-0056) — the unauthenticated map read       */
+/* -------------------------------------------------------------------------- */
+
+// The only guest-reachable data path in the product. It is granted READ ONLY on
+// `Report` and on nothing else — the handler's projection and status filter are
+// the redaction, and this grant is the blast radius if either were wrong.
+const publicReportsFn = backend.listPublicReports.resources.lambda;
+
+tables['Report'].grantReadData(publicReportsFn);
+
+backend.listPublicReports.addEnvironment('REPORT_TABLE_NAME', tables['Report'].tableName);
 
 /* -------------------------------------------------------------------------- */
 /* assignTeam (CRIS-32) — grant table access + inject table names             */
@@ -655,6 +670,9 @@ addObservability({
     alertDispatch: alertDispatchFn,
     createMediaUploadUrl: mediaUploadFn,
     listVolunteerTasks: volunteerTasksFn,
+    // Alarmed like every other resolver, and more consequential than most: it is
+    // the one function an unauthenticated caller can invoke (ADR-0056).
+    listPublicReports: publicReportsFn,
     assignTeam: assignTeamFn,
     // Lives in the auth stack; alarming it from here adds a data→auth metric
     // reference, the dependency direction that already exists (ADR-0051).

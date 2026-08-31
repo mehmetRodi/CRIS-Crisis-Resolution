@@ -1,116 +1,118 @@
-import { useState, useEffect } from 'react';
-import { useNavigate, useLocation, Link } from 'react-router-dom';
-import { useAuth } from './AuthContext';
+import { useEffect, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Loader2 } from 'lucide-react';
 
+import { useAuth } from './AuthContext';
+import { AuthError, AuthLayout } from './screens/AuthLayout';
+import { Button } from './components/ui/button';
+import { Input } from './components/ui/input';
+import { Label } from './components/ui/label';
+
+/**
+ * Email verification (CRIS-7). Reached from sign-up, and from sign-in when
+ * Cognito reports an unconfirmed account.
+ */
 export default function ConfirmSignupPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { confirmSignUp, resendSignUpCode } = useAuth();
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(false);
   const [resending, setResending] = useState(false);
-  const email = location.state?.email || '';
+  const email = (location.state as { email?: string } | null)?.email ?? '';
 
+  // There is no code to verify without knowing whose account it belongs to.
   useEffect(() => {
-    if (!email) {
-      navigate('/signup');
-    }
+    if (!email) navigate('/signup', { replace: true });
   }, [email, navigate]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
     setError('');
     setLoading(true);
-
     try {
       await confirmSignUp(email, code);
       navigate('/login');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Invalid verification code');
+      setError(err instanceof Error ? err.message : 'That code was not accepted.');
     } finally {
       setLoading(false);
     }
   };
 
   const handleResend = async () => {
+    setError('');
+    setNotice('');
     setResending(true);
     try {
       await resendSignUpCode(email);
+      // Confirm the resend explicitly. Without it, the only feedback is the
+      // button briefly changing label, and the user re-clicks it repeatedly.
+      setNotice('A new code is on its way.');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to resend code');
+      setError(err instanceof Error ? err.message : 'Could not resend the code.');
     } finally {
       setResending(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8 bg-white p-8 rounded-2xl shadow-lg">
-        <div>
-          <h2 className="text-3xl font-bold text-slate-900 text-center">Verify Your Account</h2>
-          <p className="mt-2 text-sm text-slate-600 text-center">
-            We sent a verification code to your email
-          </p>
+    <AuthLayout
+      title="Verify your email"
+      description={
+        email ? `We sent a six-digit code to ${email}.` : 'We sent you a six-digit code.'
+      }
+      footer={
+        <Link to="/login" className="font-medium text-accent underline-offset-4 hover:underline">
+          Back to sign in
+        </Link>
+      }
+    >
+      <form className="space-y-4" onSubmit={handleSubmit}>
+        <div className="space-y-1.5">
+          <Label htmlFor="confirm-code">Verification code</Label>
+          <Input
+            id="confirm-code"
+            type="text"
+            // `one-time-code` plus a numeric keypad lets password managers and
+            // mobile keyboards handle the emailed code correctly (CRIS-27).
+            autoComplete="one-time-code"
+            inputMode="numeric"
+            maxLength={6}
+            required
+            value={code}
+            onChange={(event) => setCode(event.target.value)}
+            placeholder="000000"
+            className="tabular text-center text-lg tracking-[0.4em]"
+          />
         </div>
 
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          <div>
-            <label htmlFor="confirm-code" className="block text-sm font-medium text-slate-700">
-              Verification Code
-            </label>
-            <input
-              id="confirm-code"
-              type="text"
-              // `one-time-code` + numeric keypad lets password managers and mobile
-              // keyboards do the right thing with the emailed code (CRIS-27).
-              autoComplete="one-time-code"
-              inputMode="numeric"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              required
-              className="mt-1 w-full rounded-lg border border-slate-300 px-4 py-2.5 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="Enter 6-digit code"
-              maxLength={6}
-            />
-          </div>
+        {error ? <AuthError message={error} /> : null}
+        {notice ? (
+          <p role="status" className="text-sm text-success">
+            {notice}
+          </p>
+        ) : null}
 
-          {error && (
-            <div
-              role="alert"
-              className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700"
-            >
-              {error}
-            </div>
-          )}
+        <Button type="submit" variant="primary" size="lg" disabled={loading} className="w-full">
+          {loading ? <Loader2 aria-hidden="true" className="animate-spin" /> : null}
+          {loading ? 'Verifying…' : 'Verify email'}
+        </Button>
 
+        <p className="text-center text-sm text-fg-muted">
+          Didn&apos;t get a code?{' '}
           <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-lg bg-blue-600 px-4 py-3 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 transition-colors"
+            type="button"
+            onClick={handleResend}
+            disabled={resending}
+            className="font-medium text-accent underline-offset-4 hover:underline disabled:opacity-50"
           >
-            {loading ? 'Verifying...' : 'Verify Email'}
+            {resending ? 'Sending…' : 'Resend it'}
           </button>
-
-          <p className="text-center text-sm text-slate-600">
-            Didn't receive a code?{' '}
-            <button
-              type="button"
-              onClick={handleResend}
-              disabled={resending}
-              className="font-medium text-blue-600 hover:text-blue-500 disabled:opacity-50"
-            >
-              {resending ? 'Sending...' : 'Resend Code'}
-            </button>
-          </p>
-
-          <p className="text-center text-sm text-slate-600">
-            <Link to="/login" className="font-medium text-blue-600 hover:text-blue-500">
-              Back to Sign In
-            </Link>
-          </p>
-        </form>
-      </div>
-    </div>
+        </p>
+      </form>
+    </AuthLayout>
   );
 }

@@ -1,5 +1,5 @@
 /**
- * CrisisMap AI — shared domain model.
+ * CRIS — shared domain model.
  *
  * These constants are the single source of truth for the report lifecycle, user
  * roles, priority bands, and classification enums. They are consumed by the
@@ -450,4 +450,47 @@ export function toPublicReport(report: RedactableReport): PublicReport {
     createdAt: report.createdAt ?? null,
     updatedAt: report.updatedAt ?? null,
   };
+}
+
+/* -------------------------------------------------------------------------- */
+/* Public visibility — design doc §5.3, §5.6 (CRIS-54, ADR-0056)              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Statuses an incident may be shown at on the UNAUTHENTICATED public map.
+ *
+ * Redaction (`toPublicReport`) answers "which FIELDS are safe to expose". This
+ * answers the separate and equally important question: "which INCIDENTS are
+ * safe to expose at all". A report can be perfectly redacted and still be
+ * harmful to publish — an unverified report is, by definition, an unconfirmed
+ * claim, and putting one on a public map during a disaster broadcasts
+ * potentially false information to everyone in the area.
+ *
+ * So the public map shows only incidents a HUMAN has confirmed (§2.6's
+ * human-in-the-loop guarantee) or that are already being acted on:
+ *
+ *   - `VERIFIED`     — a responder or coordinator confirmed it happened
+ *   - `IN_PROGRESS`  — a team is on it
+ *   - `RESOLVED`     — it happened and has been handled
+ *
+ * Everything else is withheld, each for its own reason:
+ *
+ *   - `NEW` / `PROCESSING`     — nothing has assessed it yet
+ *   - `AI_CLASSIFIED`          — the MODEL believes it; no human has agreed
+ *   - `NEEDS_VERIFICATION`     — actively flagged as doubtful
+ *   - `REJECTED`               — found to be false; publishing it would be
+ *                                spreading a claim already known to be untrue
+ *
+ * Staff surfaces are unaffected: coordinators and responders must see
+ * unverified reports — triaging them is the job.
+ */
+export const PUBLICLY_VISIBLE_STATUSES: readonly ReportStatus[] = [
+  ReportStatus.VERIFIED,
+  ReportStatus.IN_PROGRESS,
+  ReportStatus.RESOLVED,
+];
+
+/** True when `status` may appear on the unauthenticated public map. */
+export function isPubliclyVisible(status: ReportStatus): boolean {
+  return PUBLICLY_VISIBLE_STATUSES.includes(status);
 }

@@ -1,35 +1,24 @@
-import { Link } from 'react-router-dom';
-
 import { ReportForm } from '../components/ReportForm';
+import { CitizenShell } from '../shell/CitizenShell';
 
 /**
- * Web citizen report surface (ADR-0021). The mobile app is still the primary
- * channel, but an emergency has no time to install anything — anyone with a
- * link and a browser can file a report here. Layout mirrors the App shell
- * (slate-50 canvas, white card) so the two surfaces read as one product.
+ * The citizen report surface (`/report`, ADR-0021, restyled in CRIS-54).
+ *
+ * Mounted in `CitizenShell` rather than the operational `AppShell`: no
+ * navigation, no role chip, no live-connection indicator, no account menu.
+ * Somebody filing a report is doing one thing, once, and every additional
+ * control is a place to get lost on the way to it.
+ *
+ * Mobile remains the primary citizen channel (ADR-0020); this is the browser
+ * fallback, because an emergency leaves no time to install an app.
  */
 export function ReportPage() {
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-900">
-      <div className="mx-auto max-w-xl px-6 py-10">
-        <header className="mb-8">
-          <Link
-            to="/"
-            className="text-sm text-slate-500 hover:text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            ← CrisisMap AI
-          </Link>
-          <h1 className="mt-3 text-3xl font-bold tracking-tight">Report an emergency</h1>
-          <p className="mt-2 text-slate-600">
-            Describe what is happening and what is needed. Reports go straight to emergency
-            coordinators — no account required.
-          </p>
-        </header>
-
-        <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-          <ReportForm />
-        </div>
-      </div>
-    </main>
+    <CitizenShell
+      title="Report an emergency"
+      description="Describe what is happening. It goes straight to emergency coordinators — no account needed, and you can stay anonymous."
+    >
+      <ReportForm />
+    </CitizenShell>
   );
 }

@@ -1,6 +1,6 @@
-# CrisisMap AI
+# CRIS
 
-Real-time serverless disaster intelligence and emergency coordination platform. CrisisMap AI
+Real-time serverless disaster intelligence and emergency coordination platform. CRIS
 turns free-text emergency reports from citizens and field personnel into structured,
 geolocated, priority-ranked incidents on a live map, and routes targeted alerts to response
 teams — while staying available even when individual AI, geocoding, or notification
@@ -46,7 +46,7 @@ packages/shared/     @crisismap/shared — domain enums/types shared across laye
 docs/                architecture, conventions, runbooks, and ADRs
 scripts/aws/         one-time AWS account/team wiring helpers
 infra/bootstrap/     GitHub OIDC deploy-role template
-.github/workflows/   CI and gated backend deployment
+.github/workflows/   CI and gated backend + Amplify Hosting deployment
 ```
 
 ## Prerequisites
@@ -85,7 +85,7 @@ npx ampx sandbox     # provisions a personal dev backend + writes amplify_output
 ```
 
 `amplify_outputs.json` and `.amplify/` are generated and git-ignored.
-Production deployment is separately gated through `.github/workflows/deploy.yml`; see the
+Production backend and web Hosting deployment is gated through `.github/workflows/deploy.yml`; see the
 [deploy runbook](docs/runbooks/deploy.md). Source control alone does not establish whether a
 shared environment is currently active.
 

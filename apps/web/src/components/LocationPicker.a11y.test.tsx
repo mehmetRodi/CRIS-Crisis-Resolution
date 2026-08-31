@@ -7,7 +7,11 @@ import type { ReportLocation } from '@crisismap/shared';
 // See __mocks__/maplibre-gl.ts.
 vi.mock('maplibre-gl');
 
-import { LocationPicker } from './LocationPicker';
+// Imported directly rather than through the `React.lazy` boundary in
+// `LocationPicker.tsx` (CRIS-54): these tests assert the picker's own
+// behaviour, and going through Suspense would make every one of them async
+// for no added coverage. The boundary has its own test.
+import LocationPicker from './LocationPickerMap';
 
 /**
  * Accessibility contract for the location picker (CRIS-27, ADR-0037).

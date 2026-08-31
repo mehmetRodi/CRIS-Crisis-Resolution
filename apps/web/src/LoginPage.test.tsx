@@ -52,10 +52,14 @@ describe('LoginPage', () => {
     signInMock.mockReset();
   });
 
-  it('navigates home after a completed sign-in', async () => {
+  it('sends a completed sign-in to the workspace, not the public home page', async () => {
     signInMock.mockResolvedValue({ isSignedIn: true, nextStep: { signInStep: 'DONE' } });
     renderLogin();
-    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/'));
+    // `/workspace` then routes on to the pane this role actually works from
+    // (ADR-0055). Landing on `/` would put a public homepage between a
+    // responder and the incident they were paged about. `replace` keeps Back
+    // from returning to the sign-in form they just completed.
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/workspace', { replace: true }));
   });
 
   it('sends an unverified account to confirmation via the CONFIRM_SIGN_UP next step', async () => {
@@ -84,9 +88,36 @@ describe('LoginPage', () => {
   });
 
   it('shows a credentials error and does not navigate on a failed sign-in', async () => {
-    signInMock.mockRejectedValue(new Error('NotAuthorizedException'));
+    // Cognito carries the fault on `name`, not in the message — asserting on a
+    // message-only error would keep passing even if the branch stopped matching.
+    const err = new Error('Incorrect username or password.');
+    err.name = 'NotAuthorizedException';
+    signInMock.mockRejectedValue(err);
     renderLogin();
     expect(await screen.findByText(/invalid email or password/i)).toBeInTheDocument();
     expect(navigateMock).not.toHaveBeenCalled();
+  });
+
+  it('clears a stale session and retries rather than reporting bad credentials', async () => {
+    // Amplify refuses to sign in over an existing session instead of replacing
+    // it. Reporting that as a password failure sends the user to reset a
+    // password that was never wrong, which is the bug this branch exists for.
+    const err = new Error('There is already a signed in user.');
+    err.name = 'UserAlreadyAuthenticatedException';
+    signInMock
+      .mockRejectedValueOnce(err)
+      .mockResolvedValueOnce({ isSignedIn: true, nextStep: { signInStep: 'DONE' } });
+    renderLogin();
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith('/workspace', { replace: true }));
+    expect(signInMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('surfaces an unexpected failure instead of disguising it as bad credentials', async () => {
+    // A configuration or service fault has a different remedy than a wrong
+    // password, so it must not be collapsed into the credentials message.
+    signInMock.mockRejectedValue(new Error('User pool client does not exist.'));
+    renderLogin();
+    expect(await screen.findByText(/user pool client does not exist/i)).toBeInTheDocument();
+    expect(screen.queryByText(/invalid email or password/i)).not.toBeInTheDocument();
   });
 });

@@ -1,5 +1,5 @@
 /**
- * CrisisMap AI — report media upload contract (CRIS-17).
+ * CRIS — report media upload contract (CRIS-17).
  *
  * Shared between the presigned-upload Lambda (server-side enforcement, the
  * only place that actually matters for security) and both clients

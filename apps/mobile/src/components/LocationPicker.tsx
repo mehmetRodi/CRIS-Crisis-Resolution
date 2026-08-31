@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import type { NativeSyntheticEvent } from 'react-native';
 import {
   Camera,
@@ -9,9 +9,11 @@ import {
   type ViewStateChangeEvent,
 } from '@maplibre/maplibre-react-native';
 import * as Location from 'expo-location';
+import { Crosshair, MapPin, X } from 'lucide-react-native';
 import type { ReportLocation } from '@crisismap/shared';
 
-import { colors, radii } from '../theme';
+import { colors, numeric, radii, space, srOnly, type } from '../theme';
+import { Button } from './ui/Button';
 
 /**
  * OpenFreeMap's "Liberty" style — full OSM vector data (place names down to
@@ -125,22 +127,25 @@ export function LocationPicker({
   return (
     <View style={styles.container}>
       <View style={styles.actions}>
-        <Pressable
+        <Button
+          label={gpsLoading ? 'Locating…' : 'Use my location'}
           onPress={useMyLocation}
-          disabled={gpsLoading}
-          style={styles.gpsButton}
-          accessibilityRole="button"
-        >
-          {gpsLoading ? (
-            <ActivityIndicator color={colors.primary} />
-          ) : (
-            <Text style={styles.gpsButtonText}>📍 Use my location</Text>
-          )}
-        </Pressable>
+          icon={Crosshair}
+          loading={gpsLoading}
+          // `blocked`, not `disabled`: disabling the control the user just
+          // pressed removes it from the accessibility tree mid-interaction
+          // (ADR-0037). `useMyLocation` holds the re-entry guard instead.
+          blocked={gpsLoading}
+          accessibilityLabel={gpsLoading ? 'Getting your location' : 'Use my location'}
+        />
         {value ? (
-          <Pressable onPress={() => onChange(null)} hitSlop={8} accessibilityRole="button">
-            <Text style={styles.clearText}>Clear</Text>
-          </Pressable>
+          <Button
+            label="Clear"
+            onPress={() => onChange(null)}
+            variant="ghost"
+            icon={X}
+            accessibilityLabel="Clear selected location"
+          />
         ) : null}
       </View>
 
@@ -162,70 +167,71 @@ export function LocationPicker({
           />
           {value ? (
             <Marker id="report-location" lngLat={[value.lng, value.lat]}>
-              <View style={styles.pin} />
+              <View style={styles.pin}>
+                <View style={styles.pinCore} />
+              </View>
             </Marker>
           ) : null}
         </Map>
-        {/* Aiming reticle, fixed at screen-centre; the map pans underneath it. */}
-        <View pointerEvents="none" style={styles.crosshair} />
+        {/* Aiming reticle, fixed at screen-centre; the map pans underneath it.
+            Purely decorative — the coordinate it points at is announced in the
+            status line below, which is what a non-sighted user actually reads. */}
+        <View pointerEvents="none" style={styles.crosshair}>
+          <View style={styles.crosshairDot} />
+        </View>
       </View>
 
-      <Pressable
+      <Button
+        label={value ? 'Move pin here' : 'Use this location'}
         onPress={() => onChange(center)}
-        disabled={crosshairOnPin}
-        style={[styles.confirmButton, crosshairOnPin && styles.confirmButtonDisabled]}
-        accessibilityRole="button"
-        accessibilityState={{ disabled: crosshairOnPin }}
-      >
-        <Text style={styles.confirmButtonText}>
-          {value ? 'Move pin here' : 'Use this location'}
-        </Text>
-      </Pressable>
+        variant="primary"
+        icon={MapPin}
+        blocked={crosshairOnPin}
+        accessibilityHint={
+          crosshairOnPin
+            ? 'The pin is already at the centre of the map. Pan the map to move it.'
+            : undefined
+        }
+      />
 
-      <Text style={styles.hint}>
+      {/* Always rendered, in both states, so the live region exists before its
+          text changes (ADR-0037) — that is what makes a committed pin audible
+          rather than silent. */}
+      <Text accessibilityLiveRegion="polite" style={styles.hint}>
         {value
           ? `Pin at ${value.lat.toFixed(5)}, ${value.lng.toFixed(5)}.`
           : `Aim the crosshair at ${center.lat.toFixed(5)}, ${center.lng.toFixed(5)}, then confirm.`}
       </Text>
-      {gpsError ? <Text style={styles.error}>{gpsError}</Text> : null}
+
+      {/* Kept mounted for the same reason, and hidden while empty so an
+          always-present region costs no layout. A denied permission is the most
+          likely outcome of the button above; it must not fail quietly. */}
+      <Text
+        accessibilityLiveRegion="assertive"
+        accessibilityRole="alert"
+        style={gpsError ? styles.error : srOnly}
+      >
+        {gpsError ?? ''}
+      </Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
-    gap: 8,
+    gap: space.md,
   },
   actions: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-  },
-  gpsButton: {
-    borderWidth: 1,
-    borderColor: colors.inputBorder,
-    borderRadius: radii.lg,
-    backgroundColor: colors.surface,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  gpsButtonText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.textPrimary,
-  },
-  clearText: {
-    fontSize: 12,
-    color: colors.textSecondary,
-    textDecorationLine: 'underline',
+    gap: space.md,
   },
   mapBox: {
     height: 280,
-    borderRadius: radii.lg,
+    borderRadius: radii.md,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: colors.inputBorder,
+    borderColor: colors.border,
   },
   map: {
     flex: 1,
@@ -234,43 +240,50 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: '50%',
     left: '50%',
-    width: 22,
-    height: 22,
-    marginLeft: -11,
-    marginTop: -11,
-    borderRadius: 11,
+    width: 26,
+    height: 26,
+    marginLeft: -13,
+    marginTop: -13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radii.full,
     borderWidth: 2,
-    borderColor: colors.primary,
+    borderColor: colors.accent,
     backgroundColor: 'transparent',
   },
+  crosshairDot: {
+    width: 4,
+    height: 4,
+    borderRadius: radii.full,
+    backgroundColor: colors.accent,
+  },
   pin: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: colors.primary,
-    borderWidth: 2,
-    borderColor: '#ffffff',
-  },
-  confirmButton: {
-    borderRadius: radii.lg,
-    backgroundColor: colors.primary,
-    paddingVertical: 10,
+    width: 22,
+    height: 22,
     alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: radii.full,
+    backgroundColor: colors.accent,
+    // A light ring so the pin stays legible over dark map features.
+    borderWidth: 3,
+    borderColor: colors.surface,
   },
-  confirmButtonDisabled: {
-    opacity: 0.5,
-  },
-  confirmButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#ffffff',
+  pinCore: {
+    width: 6,
+    height: 6,
+    borderRadius: radii.full,
+    backgroundColor: colors.surface,
   },
   hint: {
-    fontSize: 12,
-    color: colors.textSecondary,
+    fontSize: type.caption.fontSize,
+    lineHeight: type.caption.lineHeight,
+    color: colors.fgMuted,
+    ...numeric,
   },
   error: {
-    fontSize: 12,
-    color: colors.errorText,
+    fontSize: type.caption.fontSize,
+    lineHeight: type.caption.lineHeight,
+    fontWeight: '600',
+    color: colors.danger,
   },
 });

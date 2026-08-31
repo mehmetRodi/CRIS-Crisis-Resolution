@@ -1,6 +1,6 @@
 # Conventions
 
-Shared conventions for CrisisMap AI. Keep this current; it is the reference for reviews.
+Shared conventions for CRIS. Keep this current; it is the reference for reviews.
 
 ## Language & style
 
@@ -97,6 +97,50 @@ rationale in ADR-0011):
   and deletes its throwaway coordinator. Failure triage lives in
   `docs/runbooks/incident-response.md`.
 
+## UI & design system (ADR-0054, ADR-0055)
+
+The web client has one design system. Nothing below is stylistic preference — each rule exists
+because its absence produced a specific defect in the pre-CRIS-54 UI.
+
+- **The palette lives in `@crisismap/design`, and nowhere else.** Both clients derive from it:
+  web through `styles/tokens.css` (which restates the values because a browser needs literal CSS
+  custom properties — a drift test fails if the two disagree), mobile through
+  `apps/mobile/src/theme`. Add a colour to the package first, then to `tokens.css`. Never inline.
+- **Never name a raw Tailwind palette step.** `bg-slate-50`, `text-blue-600`, and friends are
+  gone: `tailwind.config.js` REPLACES the default colour scale with semantic tokens, so a raw
+  step is a build error rather than a review catch.
+- **Colour means severity, and only severity.** P0–P3 own the warm spectrum (red → orange →
+  amber → neutral). The accent is teal specifically so an ordinary button can never be mistaken
+  for a critical incident. `--info` is close to the accent in hue and is therefore reserved for
+  passive informational surfaces — never for an interactive element.
+- **"Unscored" is not P3.** A not-yet-classified report has its own neutral treatment
+  (`UNSCORED_META`). Rendering it as P3 tells a coordinator the AI assessed it and found it
+  routine, which is the opposite of the truth.
+- **Domain enums are displayed through `lib/domain-display.ts`, never formatted inline** — and
+  the WORDING inside it comes from `@crisismap/design`, so both clients call the same status by
+  the same name. Every map is a total `Record<Enum, …>`, so adding a status or category without a
+  label fails the type-check. `@crisismap/shared` owns the vocabulary and the authority; the
+  display modules own only how it is shown and may never change behaviour.
+- **A shared `Tone` is an intent, not a colour.** The design package emits intents; each client
+  resolves them against its own styling layer (Tailwind badge variants on web, `StyleSheet`
+  objects on mobile). Never put a class name or a hex value in the shared package.
+- **Role capability is derived in `lib/capabilities.ts`, not tested inline.** Every flag mirrors
+  a gate the server already enforces. If the two disagree, the server wins and the user sees an
+  error — the correct failure direction. Never let this module be the only thing standing
+  between a caller and an action.
+- **Omit an action a role can never take; do not disable it.** A disabled control is a promise
+  of access. (Distinct from ADR-0037's `aria-disabled`, which is for a control that is
+  temporarily gated and has a reason to announce.)
+- **Compose classes with `cn()`.** String concatenation leaves both conflicting classes in the
+  attribute and lets stylesheet order decide, so a caller's `className` override silently loses.
+- **Reach for the primitives in `components/ui/` before hand-rolling.** They carry the focus
+  trapping, dismissal, and ARIA roles that overlays reliably get wrong.
+- **Keep `maplibre-gl` behind a `React.lazy` boundary.** It is ~285 kB gzipped. Both the incident
+  map and the report form's location picker are split; a single eager import anywhere in the
+  graph pulls it back into the entry chunk and silently undoes both.
+- **Distinguish "empty" from "filtered to empty" from "failed to load".** A coordinator reading
+  "no incidents" when a filter is on, or when the read failed, will believe a region is quiet.
+
 ## Accessibility (ADR-0036)
 
 Users reach these surfaces under duress — one-handed, on a phone, sometimes with a screen
@@ -123,9 +167,18 @@ reader. Every web interactive surface ships with five guarantees, asserted in a 
   This is also the announcement mechanism for a wholesale replacement, where a persistent
   region would have nothing to persist.
 
-Not covered by these tests, and still owed: colour contrast, zoom/reflow, and real
-screen-reader passes against WCAG 2.1 AA. The mobile workspace has no test harness, so its
-surfaces are unasserted.
+**These rules apply to the Expo app too, and it now follows them** (CRIS-57, ADR-0057). React
+Native spells them differently: `accessibilityState={{ disabled }}` on a still-pressable control
+rather than `aria-disabled`; `accessibilityLiveRegion` rather than `role="status"`;
+`AccessibilityInfo.setAccessibilityFocus` rather than `.focus()` for anything that is not a text
+input. The trap to know: a React Native `Pressable` with `disabled` is removed from the
+accessibility tree entirely, so a screen reader cannot reach it to hear why it is unavailable —
+which is why `Button` distinguishes `blocked` from `disabled`.
+
+Not covered by these tests, and still owed: colour contrast, zoom/reflow, and real screen-reader
+passes against WCAG 2.1 AA. **The mobile workspace still has no test harness**, so its surfaces —
+including the accessibility behaviour just described — are verified only by a successful Metro
+bundle and by review. Adding `jest-expo` + `@testing-library/react-native` is an open follow-up.
 
 ## Commits & branches
 

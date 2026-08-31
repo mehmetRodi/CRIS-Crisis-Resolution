@@ -67,8 +67,11 @@ describe('Router volunteer authorization', () => {
 
       render(<Router />);
 
+      // `/volunteer` is a legacy URL that now redirects into the consolidated
+      // workspace (ADR-0055); the assertion follows the redirect through to the
+      // board it lands on.
       expect(
-        screen.getByRole('heading', { level: 1, name: /volunteer task board/i }),
+        screen.getByRole('heading', { level: 2, name: /regional task board/i }),
       ).toBeInTheDocument();
       expect(mocks.useVolunteerTasks).toHaveBeenCalledOnce();
     },
@@ -80,7 +83,9 @@ describe('Router volunteer authorization', () => {
 
     render(<Router />);
 
-    expect(screen.getByRole('heading', { name: /not authorized/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole('heading', { level: 1, name: /don.t have access/i }),
+    ).toBeInTheDocument();
     expect(mocks.useVolunteerTasks).not.toHaveBeenCalled();
   });
 });

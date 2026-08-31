@@ -1,151 +1,98 @@
-import { useEffect, useState } from 'react';
-import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { UserRole } from '@crisismap/shared';
-import { AuthProvider, useAuth } from './AuthContext';
+
+import { AuthProvider } from './AuthContext';
 import { OfflineQueueProvider } from './OfflineQueueContext';
 import { RequireRole } from './RequireRole';
-import App from './App';
-import { ReportPage } from './screens/ReportPage';
-import { MapPage } from './screens/MapPage';
+import { TooltipProvider } from './components/ui/tooltip';
+import { OPERATIONAL_ROLES } from './lib/capabilities';
+import ConfirmSignupPage from './ConfirmSignupPage';
 import LoginPage from './LoginPage';
 import SignupPage from './SignupPage';
-import ConfirmSignupPage from './ConfirmSignupPage';
-import { CoordinatorDashboard } from './surfaces/coordinator/CoordinatorDashboard';
-import { useLiveReports } from './surfaces/coordinator/useLiveReports';
-import { useReportTransition } from './surfaces/coordinator/useReportTransition';
-import { useAssignTeam } from './surfaces/coordinator/useAssignTeam';
-import { useTeams } from './surfaces/coordinator/useTeams';
-import { useIncidentTimeline } from './surfaces/coordinator/useIncidentTimeline';
-import { VolunteerTaskBoard } from './surfaces/volunteer/VolunteerTaskBoard';
-import { useVolunteerTasks } from './surfaces/volunteer/useVolunteerTasks';
+import { LandingPage } from './screens/LandingPage';
+import { NotFoundPage } from './screens/NotFoundPage';
+import { ReportPage } from './screens/ReportPage';
+import { PublicMapPage } from './surfaces/map/PublicMapPage';
+import {
+  IncidentWorkspaceRoute,
+  TaskWorkspaceRoute,
+  WorkspaceIndexRoute,
+} from './surfaces/workspace/WorkspaceRoutes';
 
 /**
- * Web routes. The web SPA is chiefly the coordinator/responder/volunteer
- * surface, but `/report` is a citizen emergency-fallback form so anyone with a
- * browser can file a report without installing the mobile app (ADR-0021;
- * mobile remains the primary citizen channel per ADR-0020). The coordinator
- * dashboard shell mounts at `/coordinator` (CRIS-12, ADR-0022); the volunteer
- * task board mounts at `/volunteer` (CRIS-33, ADR-0040); the full-screen live
- * map mounts at `/map` (CRIS-13, ADR-0025). Operational routes are gated by
- * Cognito role via `RequireRole` (CRIS-24, ADR-0041/0042).
+ * Web routes (CRIS-54, ADR-0055).
+ *
+ * Three tiers, and the tier a route belongs to is the security decision:
+ *
+ *   PUBLIC       `/`, `/report`, `/map` — no session required. `/map` reads the
+ *                guest-authorized `listPublicReports` (ADR-0056); the other two
+ *                read nothing. `/report` stays open because an emergency leaves
+ *                no time to create an account (ADR-0021/0024).
+ *   AUTH         `/login`, `/signup`, `/confirm-signup`.
+ *   OPERATIONAL  `/workspace/*` — gated by Cognito group via `RequireRole`
+ *                (CRIS-24, ADR-0041). The gate here is a usability guarantee;
+ *                the server's schema rules and guarded resolvers are the actual
+ *                enforcement.
+ *
+ * `/coordinator` and `/volunteer` are kept as permanent redirects rather than
+ * removed: they were the shipped URLs before the workspace consolidation, and
+ * they are exactly the kind of link that ends up bookmarked or pasted into an
+ * incident channel. Breaking them during a crisis is not an acceptable cost of
+ * a rename.
  */
 
-/**
- * Wires the presentational dashboard to its data source and router. The live
- * incident feed (`useLiveReports`) degrades gracefully to an `unauthenticated`
- * state when there is no session; `onExit` navigates home (ADR-0022).
- */
-function CoordinatorRoute() {
-  const navigate = useNavigate();
-  const { highestRole } = useAuth();
-  const { state, realtime, lastUpdate, activity, refresh } = useLiveReports();
-  // CRIS-23: per-incident audit timeline. The dashboard owns row selection but
-  // reports it here so this wrapper can drive the timeline read; nothing is
-  // fetched until a row is selected (`selectedId === null` → idle).
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const { state: timeline, refresh: refreshTimeline } = useIncidentTimeline(selectedId);
-  // CRIS-28: a report update also invalidates the selected incident's audit
-  // timeline. A null report id denotes reconnect recovery, where any events may
-  // have been missed while the WebSocket was disrupted.
-  useEffect(() => {
-    if (selectedId && lastUpdate && (!lastUpdate.reportId || lastUpdate.reportId === selectedId)) {
-      refreshTimeline();
-    }
-  }, [lastUpdate, refreshTimeline, selectedId]);
-  // CRIS-18: guarded status transitions. Re-read the feed AND the timeline after
-  // any successful transition so the queue reflects the new status and a fresh
-  // optimistic-lock version (§5.3), and the newly-appended audit event appears.
-  const { state: transition, transition: applyTransition } = useReportTransition({
-    onSuccess: () => {
-      refresh();
-      refreshTimeline();
-    },
-  });
-  // CRIS-32: guarded team assignment. Same reconciliation as a status
-  // transition — re-read the feed and timeline so the queue reflects the new
-  // `assignedTeamId` and a fresh optimistic-lock version, and the newly
-  // appended `ASSIGNED` audit event appears.
-  const { state: assignment, assign: applyAssignTeam } = useAssignTeam({
-    onSuccess: () => {
-      refresh();
-      refreshTimeline();
-    },
-  });
-  const teamsState = useTeams();
-  const teams = teamsState.status === 'ready' ? teamsState.teams : [];
-  return (
-    <CoordinatorDashboard
-      onExit={() => navigate('/')}
-      feed={state}
-      realtime={realtime}
-      activity={activity}
-      onRefresh={refresh}
-      onTransition={(request) => void applyTransition(request)}
-      transition={transition}
-      onSelectIncident={setSelectedId}
-      timeline={timeline}
-      onAssignTeam={(request) => void applyAssignTeam(request)}
-      assignment={assignment}
-      teams={teams}
-      // RequireRole (below) only ever mounts this route for COORDINATOR/ADMIN,
-      // but falls back to the dashboard's own default if that were ever null.
-      callerRole={highestRole ?? undefined}
-    />
-  );
-}
-
-function VolunteerRoute() {
-  const navigate = useNavigate();
-  const { state, realtime, refresh } = useVolunteerTasks();
-  return (
-    <VolunteerTaskBoard
-      onExit={() => navigate('/')}
-      feed={state}
-      realtime={realtime}
-      onRefresh={refresh}
-    />
-  );
-}
+/** Roles permitted into the staff incident feed (`Report` model auth). */
+const INCIDENT_ROLES = [UserRole.RESPONDER, UserRole.COORDINATOR, UserRole.ADMIN] as const;
 
 export function Router() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        {/* Root-level (CRIS-26), not per-route: the flush loop and
-            connectivity subscription must persist across navigation, not
-            restart every time ReportForm mounts. */}
+        {/* Root-level (CRIS-26), not per-route: the flush loop and connectivity
+            subscription must persist across navigation, not restart every time
+            the report form mounts. */}
         <OfflineQueueProvider>
-          <Routes>
-            <Route path="/" element={<App />} />
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/signup" element={<SignupPage />} />
-            <Route path="/confirm-signup" element={<ConfirmSignupPage />} />
-            <Route path="/report" element={<ReportPage />} />
-            <Route path="/map" element={<MapPage />} />
-            <Route
-              path="/coordinator"
-              element={
-                <RequireRole allow={[UserRole.COORDINATOR, UserRole.ADMIN]}>
-                  <CoordinatorRoute />
-                </RequireRole>
-              }
-            />
-            <Route
-              path="/volunteer"
-              element={
-                <RequireRole
-                  allow={[
-                    UserRole.VOLUNTEER,
-                    UserRole.RESPONDER,
-                    UserRole.COORDINATOR,
-                    UserRole.ADMIN,
-                  ]}
-                >
-                  <VolunteerRoute />
-                </RequireRole>
-              }
-            />
-          </Routes>
+          {/* One provider for the whole app so tooltips share a single delay
+              timer — per-tooltip providers make the first hover in a toolbar
+              slow and every subsequent one instant, which reads as jitter. */}
+          <TooltipProvider delayDuration={300}>
+            <Routes>
+              {/* Public */}
+              <Route path="/" element={<LandingPage />} />
+              <Route path="/report" element={<ReportPage />} />
+              <Route path="/map" element={<PublicMapPage />} />
+
+              {/* Auth */}
+              <Route path="/login" element={<LoginPage />} />
+              <Route path="/signup" element={<SignupPage />} />
+              <Route path="/confirm-signup" element={<ConfirmSignupPage />} />
+
+              {/* Operational */}
+              <Route path="/workspace" element={<WorkspaceIndexRoute />} />
+              <Route
+                path="/workspace/incidents"
+                element={
+                  <RequireRole allow={INCIDENT_ROLES}>
+                    <IncidentWorkspaceRoute />
+                  </RequireRole>
+                }
+              />
+              <Route
+                path="/workspace/tasks"
+                element={
+                  <RequireRole allow={OPERATIONAL_ROLES}>
+                    <TaskWorkspaceRoute />
+                  </RequireRole>
+                }
+              />
+
+              {/* Legacy URLs from before the workspace consolidation. */}
+              <Route path="/coordinator" element={<Navigate to="/workspace/incidents" replace />} />
+              <Route path="/volunteer" element={<Navigate to="/workspace/tasks" replace />} />
+
+              <Route path="*" element={<NotFoundPage />} />
+            </Routes>
+          </TooltipProvider>
         </OfflineQueueProvider>
       </AuthProvider>
     </BrowserRouter>

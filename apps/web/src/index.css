@@ -1,3 +1,77 @@
+/* Self-hosted variable Inter — no third-party request on the citizen path. */
+@import '@fontsource-variable/inter';
+@import './styles/tokens.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    /* Anchor navigation must not drop a heading under the sticky top bar. */
+    scroll-padding-top: 5rem;
+  }
+
+  body {
+    @apply bg-bg font-sans text-fg antialiased;
+    /* Soften the map artwork so it supports, rather than competes with, the
+       dark foreground copy and controls. */
+    background-image:
+      linear-gradient(hsl(var(--bg) / 0.5), hsl(var(--bg) / 0.5)),
+      url('./assets/background-image.png');
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: cover;
+    background-attachment: fixed;
+    /* Inter's contextual alternates fix the `i`/`l` sequences that otherwise
+       collide at the small sizes the incident queue runs at. */
+    font-feature-settings:
+      'cv05' 1,
+      'ss01' 1;
+    text-rendering: optimizeLegibility;
+  }
+
+  #root {
+    min-height: 100dvh;
+  }
+
+  /*
+   * One focus treatment for the whole product, defined once.
+   *
+   * `:focus-visible` rather than `:focus` so a mouse click on an incident row
+   * does not paint a ring, while Tab still does. The offset keeps the ring
+   * clear of the element's own border so it stays legible on filled buttons.
+   */
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-bg;
+  }
+
+  /*
+   * Digits that update in place — priority scores, incident counts, elapsed
+   * time — must not change width as they change value, or the whole queue
+   * shivers on every live update.
+   */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum' 1;
+  }
+
+  /*
+   * Respect a reduced-motion preference globally. This product is used under
+   * stress, where motion sensitivity is worse, not better.
+   */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}

@@ -142,11 +142,14 @@ describe('processCandidate', () => {
     const { deps, deliveries, deliverSms, deliverEmail } = fakeDeps([subscription()]);
     await processCandidate(deps, candidate());
 
-    expect(deliverSms).toHaveBeenCalledWith('+15551234567', expect.stringContaining('P0'));
+    expect(deliverSms).toHaveBeenCalledWith(
+      '+15551234567',
+      'CRIS alert: a P0 incident was reported near you.',
+    );
     expect(deliverEmail).toHaveBeenCalledWith(
       'user@example.com',
-      expect.any(String),
-      expect.any(String),
+      'CRIS proximity alert',
+      'A P0 incident (FIRE) was reported near your subscribed area.',
     );
     expect(deliveries.size).toBe(2);
     for (const d of deliveries.values()) {

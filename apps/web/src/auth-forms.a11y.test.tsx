@@ -73,7 +73,9 @@ describe('auth form accessibility', () => {
     });
 
     it('announces a failed sign-in through an alert region', async () => {
-      signInMock.mockRejectedValue(new Error('NotAuthorizedException'));
+      const err = new Error('Incorrect username or password.');
+      err.name = 'NotAuthorizedException';
+      signInMock.mockRejectedValue(err);
       renderPage(<LoginPage />);
 
       fireEvent.change(screen.getByLabelText(/^email$/i), {

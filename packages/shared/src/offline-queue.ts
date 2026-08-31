@@ -1,5 +1,5 @@
 /**
- * CrisisMap AI — offline report queue core (CRIS-26, design doc §2.1/§4).
+ * CRIS — offline report queue core (CRIS-26, design doc §2.1/§4).
  *
  * Platform-agnostic queue/backoff/staleness logic behind "offline save, retry,
  * and recovery" for citizen report submission. No I/O here — persistence

@@ -49,7 +49,7 @@ PS_ARN="$(aws sso-admin list-permission-sets --instance-arn "$INSTANCE_ARN" \
 if [[ -z "$PS_ARN" ]]; then
   PS_ARN="$(aws sso-admin create-permission-set --instance-arn "$INSTANCE_ARN" \
     --name "$SSO_PERMISSION_SET" \
-    --description "CrisisMap developer: run 'ampx sandbox' + read the console" \
+    --description "CRIS developer: run 'ampx sandbox' + read the console" \
     --session-duration PT8H --query 'PermissionSet.PermissionSetArn' --output text)"
   ok "Created $PS_ARN"
 else
@@ -88,7 +88,7 @@ GROUP_ID="$(aws identitystore list-groups --identity-store-id "$IDENTITY_STORE_I
   --query 'Groups[0].GroupId' --output text 2>/dev/null || true)"
 if [[ -z "$GROUP_ID" || "$GROUP_ID" == "None" ]]; then
   GROUP_ID="$(aws identitystore create-group --identity-store-id "$IDENTITY_STORE_ID" \
-    --display-name "$SSO_GROUP_NAME" --description "CrisisMap developers" \
+    --display-name "$SSO_GROUP_NAME" --description "CRIS developers" \
     --query 'GroupId' --output text)"
   ok "Created group $GROUP_ID"
 else

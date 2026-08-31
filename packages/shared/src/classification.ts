@@ -1,5 +1,5 @@
 /**
- * CrisisMap AI — AI triage contract & deterministic priority scoring (CRIS-11/30).
+ * CRIS — AI triage contract & deterministic priority scoring (CRIS-11/30).
  *
  * This module is the single source of truth for two things the async pipeline
  * (CRIS-10) depends on:

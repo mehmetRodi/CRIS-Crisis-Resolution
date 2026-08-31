@@ -21,4 +21,4 @@ aws sns subscribe --region "$AWS_REGION" --topic-arn "$TOPIC_ARN" \
 ok "Subscription requested — confirm via the email AWS sends before alarms deliver."
 
 step "Alarms wired"
-ok "Per-alarm response lives in docs/runbooks/deploy.md; dashboard: CloudWatch → Dashboards → CrisisMap-*."
+ok "Per-alarm response lives in docs/runbooks/deploy.md; dashboard: CloudWatch → Dashboards → CRIS-*."

@@ -1,37 +1,86 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { useAuth } from './AuthContext';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Loader2 } from 'lucide-react';
 
+import { useAuth } from './AuthContext';
+import { AuthError, AuthLayout } from './screens/AuthLayout';
+import { Button } from './components/ui/button';
+import { Input } from './components/ui/input';
+import { Label } from './components/ui/label';
+
+/**
+ * Staff sign-in (CRIS-7, ADR-0024).
+ *
+ * On success the caller lands on the route that sent them here (`state.from`,
+ * set by `RequireRole`) or on `/workspace`, which then routes them to the pane
+ * their role actually works from. Returning them to `/` would put a homepage
+ * between a responder and the incident they were paged about.
+ */
 export default function LoginPage() {
   const navigate = useNavigate();
-  const { signIn } = useAuth();
+  const location = useLocation();
+  const { signIn, signOut } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const from = (location.state as { from?: string } | null)?.from;
+
+  const attemptSignIn = async () => {
+    const result = await signIn(email, password);
+    if (result.isSignedIn) {
+      navigate(from ?? '/workspace', { replace: true });
+    } else if (result.nextStep.signInStep === 'CONFIRM_SIGN_UP') {
+      // The account exists but was never verified. Take them to confirmation
+      // rather than reporting a credentials failure they cannot act on.
+      navigate('/confirm-signup', { state: { email } });
+    } else {
+      setError('Additional verification is required to finish signing in.');
+    }
+  };
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
     setError('');
     setLoading(true);
 
     try {
-      const result = await signIn(email, password);
-      if (result.isSignedIn) {
-        navigate('/');
-      } else if (result.nextStep.signInStep === 'CONFIRM_SIGN_UP') {
-        // Account exists but was never verified — take them to confirmation.
-        navigate('/confirm-signup', { state: { email } });
-      } else {
-        setError('Additional verification is required to finish signing in.');
-      }
+      await attemptSignIn();
     } catch (err) {
-      // Cognito throws UserNotConfirmedException when the email was never
-      // verified; route there rather than a misleading credentials error.
-      if (err instanceof Error && err.name === 'UserNotConfirmedException') {
+      const name = err instanceof Error ? err.name : '';
+
+      // Not every failure is a bad password, and reporting them all as one used
+      // to send people to reset a password that was never wrong. Each branch
+      // below is a distinct problem with a distinct remedy.
+      if (name === 'UserNotConfirmedException') {
         navigate('/confirm-signup', { state: { email } });
+      } else if (name === 'UserAlreadyAuthenticatedException') {
+        // A stale session is still in local storage — typically tokens left by a
+        // backend that has since been torn down and redeployed. Amplify refuses
+        // to sign in over it rather than replacing it, so clear it and retry
+        // once. Doing this silently is correct: the user asked to sign in as
+        // this account, and the session in the way is not one they can see.
+        try {
+          await signOut();
+          await attemptSignIn();
+        } catch {
+          setError('A previous session could not be cleared. Reload the page and try again.');
+        }
+      } else if (name === 'NetworkError') {
+        setError('Could not reach the sign-in service. Check your connection and try again.');
+      } else if (name === 'NotAuthorizedException' || name === 'UserNotFoundException') {
+        // Cognito deliberately conflates these two so an attacker cannot probe
+        // which addresses have accounts. Keep them conflated here too.
+        setError('Invalid email or password.');
       } else {
-        setError('Invalid email or password');
+        // Anything else is a configuration or service fault, not a credentials
+        // problem. Surfacing the real name is what makes it diagnosable at all.
+        setError(
+          err instanceof Error && err.message
+            ? `Sign-in failed: ${err.message}`
+            : 'Sign-in failed for an unexpected reason.',
+        );
       }
     } finally {
       setLoading(false);
@@ -39,74 +88,51 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8 bg-white p-8 rounded-2xl shadow-lg">
-        <div>
-          <h2 className="text-3xl font-bold text-slate-900 text-center">Welcome Back</h2>
-          <p className="mt-2 text-sm text-slate-600 text-center">
-            Sign in to submit an emergency report
-          </p>
+    <AuthLayout
+      title="Sign in"
+      description="For responders, coordinators, volunteers, and administrators."
+      footer={
+        <>
+          Don&apos;t have an account?{' '}
+          <Link to="/signup" className="font-medium text-accent underline-offset-4 hover:underline">
+            Create one
+          </Link>
+        </>
+      }
+    >
+      <form className="space-y-4" onSubmit={handleSubmit}>
+        <div className="space-y-1.5">
+          <Label htmlFor="login-email">Email</Label>
+          <Input
+            id="login-email"
+            type="email"
+            autoComplete="email"
+            required
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            placeholder="you@example.org"
+          />
         </div>
 
-        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-          <div className="space-y-4">
-            <div>
-              <label htmlFor="login-email" className="block text-sm font-medium text-slate-700">
-                Email
-              </label>
-              <input
-                id="login-email"
-                type="email"
-                autoComplete="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                className="mt-1 w-full rounded-lg border border-slate-300 px-4 py-2.5 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Enter your email"
-              />
-            </div>
-            <div>
-              <label htmlFor="login-password" className="block text-sm font-medium text-slate-700">
-                Password
-              </label>
-              <input
-                id="login-password"
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                className="mt-1 w-full rounded-lg border border-slate-300 px-4 py-2.5 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="Enter your password"
-              />
-            </div>
-          </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="login-password">Password</Label>
+          <Input
+            id="login-password"
+            type="password"
+            autoComplete="current-password"
+            required
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+          />
+        </div>
 
-          {error && (
-            <div
-              role="alert"
-              className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700"
-            >
-              {error}
-            </div>
-          )}
+        {error ? <AuthError message={error} /> : null}
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-lg bg-blue-600 px-4 py-3 text-sm font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 transition-colors"
-          >
-            {loading ? 'Signing in...' : 'Sign In'}
-          </button>
-
-          <p className="text-center text-sm text-slate-600">
-            Don't have an account?{' '}
-            <Link to="/signup" className="font-medium text-blue-600 hover:text-blue-500">
-              Sign up
-            </Link>
-          </p>
-        </form>
-      </div>
-    </div>
+        <Button type="submit" variant="primary" size="lg" disabled={loading} className="w-full">
+          {loading ? <Loader2 aria-hidden="true" className="animate-spin" /> : null}
+          {loading ? 'Signing in…' : 'Sign in'}
+        </Button>
+      </form>
+    </AuthLayout>
   );
 }
