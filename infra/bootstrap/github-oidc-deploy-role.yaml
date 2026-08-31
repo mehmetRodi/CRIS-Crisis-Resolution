@@ -181,15 +181,23 @@ Resources:
                   - amplify:UpdateApp
                 Resource:
                   - !Sub 'arn:${AWS::Partition}:amplify:${AWS::Region}:${AWS::AccountId}:apps/${AmplifyAppId}'
+              - Sid: ConfigureAmplifyHostingBranch
+                Effect: Allow
+                Action:
+                  - amplify:GetBranch
+                  - amplify:UpdateBranch
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:amplify:${AWS::Region}:${AWS::AccountId}:apps/${AmplifyAppId}/branches/${GitHubBranch}'
+              # Although CreateDeployment/StartDeployment take app + branch
+              # parameters, IAM evaluates them against Amplify's generated
+              # deployments child ARN rather than the parent branch ARN.
               - Sid: DeployAmplifyHostingBranch
                 Effect: Allow
                 Action:
                   - amplify:CreateDeployment
-                  - amplify:GetBranch
                   - amplify:StartDeployment
-                  - amplify:UpdateBranch
                 Resource:
-                  - !Sub 'arn:${AWS::Partition}:amplify:${AWS::Region}:${AWS::AccountId}:apps/${AmplifyAppId}/branches/${GitHubBranch}'
+                  - !Sub 'arn:${AWS::Partition}:amplify:${AWS::Region}:${AWS::AccountId}:apps/${AmplifyAppId}/branches/${GitHubBranch}/deployments/*'
               - Sid: ReadAmplifyHostingJobs
                 Effect: Allow
                 Action:

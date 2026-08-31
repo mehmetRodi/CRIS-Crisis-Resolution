@@ -117,7 +117,9 @@ to `pipeRole`. Recovery is just re-running the deploy — the stack rolls back c
 ### Frontend Hosting failure
 
 - **`AccessDeniedException` on an Amplify action:** rerun `scripts/aws/30-deploy-role.sh` from the
-  repository version containing ADR-0059, then rerun the Deploy workflow from `main`.
+  latest repository version, then rerun the Deploy workflow from `main`. `CreateDeployment` and
+  `StartDeployment` must be allowed on the branch's `deployments/*` child ARN; permission on the
+  parent branch ARN alone is insufficient.
 - **"app is source-connected":** disconnect the repository/disable the competing Amplify build
   path before retrying. Do not work around the guard; it prevents two deployment authorities.
 - **`CreateDeployment`/upload/start/job failure:** the backend is already verified, but Amplify's
