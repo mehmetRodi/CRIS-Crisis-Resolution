@@ -123,7 +123,9 @@ export default function LocationPickerMap({ value, onChange }: LocationPickerPro
       attributionControl: { compact: true },
     });
     mapRef.current = map;
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+    // Keep MapLibre's compass visible: after a trackpad/touch rotation it is
+    // the one-click path back to a north-up, level orientation.
+    map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-right');
 
     if (value) {
       placeMarker(value);

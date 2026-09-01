@@ -3,7 +3,9 @@
 A living, code-adjacent reference for the versioned repository. A local `crisismap.pdf`, when
 supplied, provides product-design context but is not currently tracked. Accepted decisions are
 recorded in [`adr/`](adr/). This document distinguishes the target design from what is wired
-today.
+today. See the source-controlled [architectural design diagram](architecture-diagram.md) for a
+rendered view of the current client, API, data, asynchronous processing, alerting, and operations
+boundaries.
 
 ## 1. Target system shape (design doc §3)
 

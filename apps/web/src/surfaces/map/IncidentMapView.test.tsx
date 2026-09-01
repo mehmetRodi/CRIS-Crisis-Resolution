@@ -103,6 +103,7 @@ describe('IncidentMapView', () => {
     expect(MapMock).toHaveBeenCalledOnce();
     expect(MapMock).toHaveBeenCalledWith(expect.objectContaining({ style: DEMO_MAP_STYLE }));
     expect(NavigationControl).toHaveBeenCalledOnce();
+    expect(NavigationControl).toHaveBeenCalledWith({ showCompass: true });
     expect(addControl).toHaveBeenCalledOnce();
   });
 

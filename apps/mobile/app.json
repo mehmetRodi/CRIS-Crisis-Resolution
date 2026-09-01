@@ -35,6 +35,12 @@
           "locationWhenInUsePermission": "CRIS uses your location to attach it to emergency reports you submit."
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "1fb6470f-c06f-4d87-a25e-146972879a06"
+      }
+    },
+    "owner": "mehmetrodi"
   }
 }
