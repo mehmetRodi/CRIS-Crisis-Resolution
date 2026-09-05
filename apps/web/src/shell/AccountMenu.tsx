@@ -60,7 +60,10 @@ export function AccountMenu() {
         </Button>
       </DropdownMenuTrigger>
 
-      <DropdownMenuContent align="end" className="min-w-[16rem] p-1.5 rounded-xl border-border/80 bg-surface/95 backdrop-blur-md shadow-lg">
+      <DropdownMenuContent
+        align="end"
+        className="min-w-[16rem] p-1.5 rounded-xl border-border/80 bg-surface/95 backdrop-blur-md shadow-lg"
+      >
         <DropdownMenuLabel className="px-2.5 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-fg-subtle">
           Signed in Account
         </DropdownMenuLabel>

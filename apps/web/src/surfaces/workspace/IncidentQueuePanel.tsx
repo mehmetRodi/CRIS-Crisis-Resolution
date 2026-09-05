@@ -129,7 +129,8 @@ export function IncidentQueuePanel({
           <div className="flex items-center gap-2 rounded-lg bg-warning/10 px-2.5 py-1.5 border border-warning/20">
             <TriangleAlert aria-hidden="true" className="size-3.5 shrink-0 text-warning" />
             <p className="text-xs font-medium text-fg-muted">
-              <span className="font-bold text-fg">{unscored}</span> {pluralize(unscored, 'report')} awaiting classification.
+              <span className="font-bold text-fg">{unscored}</span> {pluralize(unscored, 'report')}{' '}
+              awaiting classification.
             </p>
           </div>
         ) : null}
@@ -143,7 +144,11 @@ export function IncidentQueuePanel({
               ? `${visible.length} of ${incidents.length} shown`
               : pluralize(incidents.length, 'incident')}
           </p>
-          <div className="flex items-center gap-1 rounded-lg bg-surface-sunken p-0.5 border border-border/50" role="group" aria-label="Sort incidents">
+          <div
+            className="flex items-center gap-1 rounded-lg bg-surface-sunken p-0.5 border border-border/50"
+            role="group"
+            aria-label="Sort incidents"
+          >
             {(
               [
                 ['priority', 'Priority'],

@@ -72,7 +72,9 @@ export function IncidentRow({
                 <span aria-hidden="true" className="text-fg-subtle text-xs">
                   ·
                 </span>
-                <span className="truncate text-[11px] font-medium text-fg-muted">{incident.regionId}</span>
+                <span className="truncate text-[11px] font-medium text-fg-muted">
+                  {incident.regionId}
+                </span>
               </>
             ) : null}
             <StatusBadge status={incident.status} className="ml-auto text-[11px]" />
@@ -83,7 +85,9 @@ export function IncidentRow({
           aria-hidden="true"
           className={cn(
             'mt-1 size-4 shrink-0 transition-transform duration-150',
-            selected ? 'text-accent translate-x-0.5' : 'text-fg-subtle group-hover:text-fg-muted group-hover:translate-x-0.5',
+            selected
+              ? 'text-accent translate-x-0.5'
+              : 'text-fg-subtle group-hover:text-fg-muted group-hover:translate-x-0.5',
           )}
         />
       </button>

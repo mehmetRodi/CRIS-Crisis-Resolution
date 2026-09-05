@@ -49,7 +49,9 @@ export function PublicMapPage() {
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <span className="flex size-2 rounded-full bg-success"></span>
-                <p className="text-xs font-bold uppercase tracking-wider text-fg">Confirmed Incidents</p>
+                <p className="text-xs font-bold uppercase tracking-wider text-fg">
+                  Confirmed Incidents
+                </p>
               </div>
               <p className="mt-0.5 text-xs text-fg-muted">
                 {state.status === 'loading'
@@ -66,9 +68,17 @@ export function PublicMapPage() {
               aria-label="Refresh incidents"
               className="rounded-lg hover:bg-surface-hover"
             >
-              <RefreshCw aria-hidden="true" className={cn('size-4 text-fg-muted', state.status === 'loading' && 'animate-spin')} />
+              <RefreshCw
+                aria-hidden="true"
+                className={cn('size-4 text-fg-muted', state.status === 'loading' && 'animate-spin')}
+              />
             </Button>
-            <Button variant="primary" size="sm" asChild className="shrink-0 rounded-xl font-semibold shadow-xs">
+            <Button
+              variant="primary"
+              size="sm"
+              asChild
+              className="shrink-0 rounded-xl font-semibold shadow-xs"
+            >
               <Link to="/report">
                 <Send aria-hidden="true" className="size-3.5" />
                 Report
