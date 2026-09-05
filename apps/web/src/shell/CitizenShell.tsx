@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
 
+import { SiteFooter } from './SiteFooter';
 import { Logo } from '../components/brand/Logo';
 import { cn } from '../lib/cn';
 
@@ -33,25 +34,34 @@ export function CitizenShell({
   children: React.ReactNode;
 }) {
   return (
-    <div className={cn('flex min-h-dvh flex-col bg-transparent', bleed && 'h-dvh overflow-hidden')}>
-      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border/80 bg-surface/90 px-4 backdrop-blur-md shadow-2xs">
-        <Link to={backTo} className="rounded-lg p-1.5 transition-all hover:bg-surface-hover hover:scale-105 active:scale-95" aria-label={`Back to ${backLabel}`}>
+    <div className={cn('flex min-h-dvh flex-col bg-bg', bleed && 'h-dvh overflow-hidden')}>
+      <header className="grid h-16 shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-3 border-b border-border bg-surface px-4">
+        <Link
+          to={backTo}
+          className="inline-flex min-h-11 min-w-11 items-center justify-self-start rounded-lg px-2 transition-colors hover:bg-surface-hover"
+          aria-label={`Back to ${backLabel}`}
+        >
           <span className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-fg-muted transition-colors hover:text-fg">
             <ArrowLeft className="size-4" aria-hidden="true" />
             <span className="hidden sm:inline">{backLabel}</span>
           </span>
         </Link>
-        <span className="mx-auto">
+        <span className="justify-self-center">
           <Logo />
         </span>
         {/* Balances the back link so the logo stays optically centred. */}
-        <span aria-hidden="true" className="w-4 sm:w-[4.5rem]" />
+        <Link
+          to="/help"
+          className="justify-self-end rounded-lg px-3 py-2 text-xs font-medium text-fg-muted hover:bg-surface-hover"
+        >
+          Help
+        </Link>
       </header>
 
       {bleed ? (
         <main className="relative min-h-0 flex-1">{children}</main>
       ) : (
-        <main className="mx-auto w-full max-w-xl flex-1 px-4 py-8 sm:px-6">
+        <main className="mx-auto w-full max-w-2xl flex-1 px-4 py-8 sm:px-6">
           {title ? (
             <div className="mb-6">
               <h1 className="text-2xl font-semibold tracking-tight text-fg">{title}</h1>
@@ -61,6 +71,7 @@ export function CitizenShell({
           {children}
         </main>
       )}
+      {!bleed ? <SiteFooter /> : null}
     </div>
   );
 }

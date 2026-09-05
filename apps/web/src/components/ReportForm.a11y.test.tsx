@@ -42,6 +42,10 @@ import { ReportForm } from './ReportForm';
  * without sight.
  */
 
+function goTo(step: 'Situation' | 'Location' | 'Details' | 'Review') {
+  fireEvent.click(screen.getByRole('button', { name: `Go to ${step}` }));
+}
+
 const VALID_TEXT = 'A gas leak is filling the stairwell on Elm Street.';
 
 /** The first chip inside a named `fieldset` group (type of emergency, urgency). */
@@ -51,17 +55,20 @@ function firstOptionIn(groupName: RegExp) {
 
 /** Selects a photo through the visually-hidden file input the box proxies. */
 function pickPhoto(name = 'stairwell.png') {
+  goTo('Details');
   const input = document.querySelector('input[type="file"]') as HTMLInputElement;
   fireEvent.change(input, { target: { files: [new File(['x'], name, { type: 'image/png' })] } });
 }
 
 /** Fills the three required fields, leaving the form submittable. */
 function fillRequired() {
+  goTo('Situation');
   fireEvent.change(screen.getByLabelText(/describe the situation/i), {
     target: { value: VALID_TEXT },
   });
   fireEvent.click(screen.getByRole('button', { name: /medical/i }));
   fireEvent.click(screen.getByRole('button', { name: /^critical$/i }));
+  goTo('Review');
 }
 
 describe('ReportForm accessibility', () => {
@@ -109,7 +116,7 @@ describe('ReportForm accessibility', () => {
   it('explains why submit is unavailable while the form is incomplete', () => {
     render(<ReportForm />);
 
-    const submit = screen.getByRole('button', { name: /send report/i });
+    const submit = screen.getByRole('button', { name: /^continue$/i });
     expect(submit).toHaveAttribute('aria-disabled', 'true');
     // Sourced from the shared validator, so it names every outstanding field
     // rather than restating a fixed sentence that could drift from the gate.
@@ -124,7 +131,7 @@ describe('ReportForm accessibility', () => {
     // The whole point of aria-disabled over disabled (ADR-0037): a `disabled`
     // button leaves the tab order, and a description on a control that cannot
     // be focused is never announced to the person it was written for.
-    const submit = screen.getByRole('button', { name: /send report/i });
+    const submit = screen.getByRole('button', { name: /^continue$/i });
     expect(submit).not.toBeDisabled();
 
     submit.focus();
@@ -133,7 +140,7 @@ describe('ReportForm accessibility', () => {
 
   it('sends focus to the first outstanding field when a gated submit is pressed', () => {
     render(<ReportForm />);
-    const submit = screen.getByRole('button', { name: /send report/i });
+    const submit = screen.getByRole('button', { name: /^continue$/i });
 
     // Nothing filled in: the description is what is missing.
     fireEvent.click(submit);
@@ -165,6 +172,7 @@ describe('ReportForm accessibility', () => {
   it('names the location picker as a group rather than by adjacent text', () => {
     render(<ReportForm />);
 
+    goTo('Location');
     // The picker is several controls plus a map; without a legend its heading is
     // loose text that a screen reader has no reason to tie to them (CRIS-27).
     expect(screen.getByRole('group', { name: /location/i })).toBeInTheDocument();
@@ -174,6 +182,7 @@ describe('ReportForm accessibility', () => {
     uploadReportMedia.mockResolvedValue('reports/test-request-id/a.png');
     render(<ReportForm />);
 
+    goTo('Details');
     expect(screen.getByRole('button', { name: /add a photo/i })).toBeInTheDocument();
 
     pickPhoto();

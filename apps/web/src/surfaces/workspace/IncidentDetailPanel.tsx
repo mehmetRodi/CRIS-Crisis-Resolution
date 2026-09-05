@@ -1,3 +1,4 @@
+import { ReportWorkPanel } from './ReportWorkPanel';
 import type { TriageEntities, UserRole } from '@crisismap/shared';
 import { X } from 'lucide-react';
 
@@ -85,7 +86,9 @@ function Entities({ entities }: { entities: TriageEntities }) {
         ) : null}
         {entities.infrastructure.length > 0 ? (
           <div>
-            <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-fg-subtle">Infrastructure</p>
+            <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-fg-subtle">
+              Infrastructure
+            </p>
             <div className="flex flex-wrap gap-1">
               {entities.infrastructure.map((item) => (
                 <Badge key={item} variant="neutral" className="text-[11px]">
@@ -97,7 +100,9 @@ function Entities({ entities }: { entities: TriageEntities }) {
         ) : null}
         {entities.hazards.length > 0 ? (
           <div>
-            <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-fg-subtle">Hazards</p>
+            <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-fg-subtle">
+              Hazards
+            </p>
             <div className="flex flex-wrap gap-1">
               {entities.hazards.map((item) => (
                 <Badge key={item} variant="warning" className="text-[11px]">
@@ -165,11 +170,52 @@ export function IncidentDetailPanel({
             {incident.summary ?? 'Awaiting AI summary'}
           </h2>
         </div>
-        <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close incident detail" className="rounded-lg hover:bg-surface-hover">
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={onClose}
+          aria-label="Close incident detail"
+          className="rounded-lg hover:bg-surface-hover"
+        >
           <X aria-hidden="true" className="size-4" />
         </Button>
       </header>
 
+      {showActions ? (
+        <Section title="Actions">
+          <div className="space-y-4">
+            {capabilities.canTransitionStatus && onTransition ? (
+              <TransitionActions
+                incident={incident}
+                callerRole={callerRole}
+                onTransition={onTransition}
+                transition={transition}
+              />
+            ) : null}
+            {capabilities.canAssignTeam && onAssignTeam ? (
+              <div className="border-t border-border pt-3.5">
+                <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-fg-subtle">
+                  Response team
+                </h4>
+                <AssignTeamAction
+                  incident={incident}
+                  teams={teams}
+                  onAssignTeam={onAssignTeam}
+                  assignment={assignment}
+                />
+              </div>
+            ) : null}
+          </div>
+        </Section>
+      ) : null}
+
+      <div className="p-4">
+        <ReportWorkPanel
+          key={incident.reportId}
+          reportId={incident.reportId}
+          callerRole={callerRole}
+        />
+      </div>
       <Section title="Classification" className="border-t-0">
         <dl className="grid grid-cols-2 gap-2">
           <div className="min-w-0 rounded-xl border border-border/50 bg-surface-sunken/40 p-2.5">
@@ -208,34 +254,6 @@ export function IncidentDetailPanel({
       {capabilities.canViewTimeline ? (
         <Section title="Timeline">
           <IncidentTimeline timeline={timeline} />
-        </Section>
-      ) : null}
-
-      {showActions ? (
-        <Section title="Actions">
-          <div className="space-y-4">
-            {capabilities.canTransitionStatus && onTransition ? (
-              <TransitionActions
-                incident={incident}
-                callerRole={callerRole}
-                onTransition={onTransition}
-                transition={transition}
-              />
-            ) : null}
-            {capabilities.canAssignTeam && onAssignTeam ? (
-              <div className="border-t border-border pt-3.5">
-                <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-fg-subtle">
-                  Response team
-                </h4>
-                <AssignTeamAction
-                  incident={incident}
-                  teams={teams}
-                  onAssignTeam={onAssignTeam}
-                  assignment={assignment}
-                />
-              </div>
-            ) : null}
-          </div>
         </Section>
       ) : null}
 

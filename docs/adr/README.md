@@ -75,3 +75,7 @@ behind the code — essential when refactoring or extending the system.
 | [0057](0057-shared-design-package-and-mobile-migration.md)           | Shared design package + Expo migration (CRIS-57)                     | Accepted                         |
 | [0058](0058-cris-visible-product-name.md)                            | CRIS as the visible product name                                     | Accepted                         |
 | [0059](0059-amplify-hosting-from-gated-deploy-workflow.md)           | Amplify Hosting from the gated deploy workflow                       | Accepted                         |
+| [0060](0060-citizen-entry-visual-hierarchy.md)                       | Clearer citizen entry and navigation                                 | Accepted                         |
+| [0061](0061-citizen-report-form-readability.md)                      | Citizen report form readability                                      | Accepted                         |
+| [0062](0062-focused-web-workspaces-and-report-cards.md)              | Focused web workspaces, adjustable panels, report cards              | Accepted                         |
+| [0063](0063-report-ownership-and-progress.md)                        | Report claims, person assignment, and progress updates               | Accepted                         |

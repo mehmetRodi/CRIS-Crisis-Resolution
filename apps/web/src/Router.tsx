@@ -9,6 +9,7 @@ import { OPERATIONAL_ROLES } from './lib/capabilities';
 import ConfirmSignupPage from './ConfirmSignupPage';
 import LoginPage from './LoginPage';
 import SignupPage from './SignupPage';
+import { InformationPage } from './screens/InformationPage';
 import { LandingPage } from './screens/LandingPage';
 import { NotFoundPage } from './screens/NotFoundPage';
 import { ReportPage } from './screens/ReportPage';
@@ -61,6 +62,10 @@ export function Router() {
               <Route path="/" element={<LandingPage />} />
               <Route path="/report" element={<ReportPage />} />
               <Route path="/map" element={<PublicMapPage />} />
+
+              {(['about', 'help', 'privacy', 'terms'] as const).map((kind) => (
+                <Route key={kind} path={`/${kind}`} element={<InformationPage kind={kind} />} />
+              ))}
 
               {/* Auth */}
               <Route path="/login" element={<LoginPage />} />

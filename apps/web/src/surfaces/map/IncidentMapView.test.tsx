@@ -242,3 +242,11 @@ describe('IncidentMapView', () => {
     });
   });
 });
+
+it('contains a WebGL startup failure inside the map', () => {
+  MapMock.mockImplementationOnce(() => {
+    throw new Error('WebGL unavailable');
+  });
+  render(<IncidentMapView />);
+  expect(screen.getByRole('status')).toHaveTextContent('Map unavailable');
+});

@@ -65,28 +65,8 @@ export function usePublicIncidents(): UsePublicIncidents {
         const firstError = result.errors?.[0];
         if (firstError) throw new Error(firstError.message ?? 'Could not load incidents.');
         reports = (result.data ?? []).filter(Boolean) as PublicReport[];
-      } else if (signedIn && client?.models?.Report) {
-        // Fallback for staff when custom query is unavailable
-        const { data, errors } = await client.models.Report.list({ limit: READ_LIMIT });
-        if (errors?.[0]) throw new Error(errors[0].message ?? 'Could not load incidents.');
-        reports = (data ?? [])
-          .filter((r) => r.status && ['VERIFIED', 'IN_PROGRESS', 'RESOLVED'].includes(r.status))
-          .map((r) => ({
-            reportId: r.id,
-            status: r.status as any,
-            category: (r.category as any) ?? null,
-            urgency: (r.urgency as any) ?? null,
-            priorityScore: r.priorityScore ?? null,
-            priorityBand: (r.priorityBand as any) ?? null,
-            summary: r.summary ?? null,
-            lat: r.lat ?? null,
-            lng: r.lng ?? null,
-            geohash: r.geohash ?? null,
-            geohashPrefix: r.geohashPrefix ?? null,
-            regionId: r.regionId ?? null,
-            createdAt: r.createdAt ?? null,
-            updatedAt: r.updatedAt ?? null,
-          }));
+      } else {
+        throw new Error('The public incident service is unavailable. Please try again later.');
       }
 
       if (sequence !== sequenceRef.current) return;

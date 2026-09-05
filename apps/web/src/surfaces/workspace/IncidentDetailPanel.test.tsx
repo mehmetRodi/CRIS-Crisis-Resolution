@@ -2,6 +2,10 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ReportStatus, UserRole } from '@crisismap/shared';
 
+// Ownership actions have their own interaction and authorization coverage.
+vi.mock('./ReportWorkPanel', () => ({ ReportWorkPanel: () => null }));
+vi.mock('./CreateTeamAction', () => ({ CreateTeamAction: () => null }));
+
 import { capabilitiesFor } from '../../lib/capabilities';
 import { IncidentDetailPanel } from './IncidentDetailPanel';
 import { coordinatorIncident } from './testFixtures';

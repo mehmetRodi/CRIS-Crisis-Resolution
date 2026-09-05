@@ -61,7 +61,7 @@ describe('color', () => {
     // React Native's colour parser does not reliably accept space-separated
     // CSS Color 4 syntax, and an unparsed colour renders as opaque black
     // rather than throwing — a failure that is easy to ship and hard to spot.
-    expect(color('accent')).toBe('hsl(184, 82%, 28%)');
+    expect(color('accent')).toBe('hsl(172, 52%, 26%)');
     expect(color('surface')).toBe('hsl(0, 0%, 100%)');
   });
 });

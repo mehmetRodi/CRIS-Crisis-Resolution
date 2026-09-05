@@ -71,7 +71,7 @@ describe('Router volunteer authorization', () => {
       // workspace (ADR-0055); the assertion follows the redirect through to the
       // board it lands on.
       expect(
-        screen.getByRole('heading', { level: 2, name: /regional task board/i }),
+        screen.getByRole('heading', { level: 1, name: /find where you can help/i }),
       ).toBeInTheDocument();
       expect(mocks.useVolunteerTasks).toHaveBeenCalledOnce();
     },

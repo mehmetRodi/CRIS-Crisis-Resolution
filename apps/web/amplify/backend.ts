@@ -17,6 +17,7 @@ import { classifyReport } from './functions/classify-report/resource';
 import { createMediaUploadUrl } from './functions/create-media-upload-url/resource';
 import { listVolunteerTasks } from './functions/list-volunteer-tasks/resource';
 import { listPublicReports } from './functions/list-public-reports/resource';
+import { reportWork } from './functions/report-work/resource';
 import { assignTeam } from './functions/assign-team/resource';
 import { alertDispatch } from './functions/alert-dispatch/resource';
 import { createDataKey } from './security/encryption';
@@ -69,6 +70,7 @@ const backend = defineBackend({
   listVolunteerTasks,
   listPublicReports,
   assignTeam,
+  reportWork,
   alertDispatch,
 });
 
@@ -233,6 +235,21 @@ tables['Report'].grantReadWriteData(assignTeamFn);
 tables['Team'].grantReadData(assignTeamFn);
 tables['Assignment'].grantWriteData(assignTeamFn);
 tables['ReportEvent'].grantWriteData(assignTeamFn);
+
+const reportWorkFn = backend.reportWork.resources.lambda;
+tables['Report'].grantReadWriteData(reportWorkFn);
+tables['ReportWork'].grantReadWriteData(reportWorkFn);
+tables['ReportEvent'].grantWriteData(reportWorkFn);
+backend.reportWork.addEnvironment('REPORT_TABLE_NAME', tables['Report'].tableName);
+backend.reportWork.addEnvironment('REPORT_WORK_TABLE_NAME', tables['ReportWork'].tableName);
+backend.reportWork.addEnvironment('REPORT_EVENT_TABLE_NAME', tables['ReportEvent'].tableName);
+backend.reportWork.addEnvironment('USER_POOL_ID', backend.auth.resources.userPool.userPoolId);
+reportWorkFn.addToRolePolicy(
+  new PolicyStatement({
+    actions: ['cognito-idp:AdminGetUser', 'cognito-idp:AdminListGroupsForUser'],
+    resources: [backend.auth.resources.userPool.userPoolArn],
+  }),
+);
 
 backend.assignTeam.addEnvironment('REPORT_TABLE_NAME', tables['Report'].tableName);
 backend.assignTeam.addEnvironment('TEAM_TABLE_NAME', tables['Team'].tableName);
@@ -644,6 +661,7 @@ const tracedFunctions = [
   backend.classifyReport,
   backend.createMediaUploadUrl,
   backend.assignTeam,
+  backend.reportWork,
   backend.alertDispatch,
 ];
 for (const fn of tracedFunctions) {
@@ -674,6 +692,7 @@ addObservability({
     // the one function an unauthenticated caller can invoke (ADR-0056).
     listPublicReports: publicReportsFn,
     assignTeam: assignTeamFn,
+    reportWork: reportWorkFn,
     // Lives in the auth stack; alarming it from here adds a data→auth metric
     // reference, the dependency direction that already exists (ADR-0051).
     citizenRoleAssignment: citizenRoleFn,

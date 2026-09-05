@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import type { UserRole } from '@crisismap/shared';
-import { LayoutList, Map as MapIcon } from 'lucide-react';
+import { LayoutList, Map as MapIcon, PanelRight, RotateCcw } from 'lucide-react';
 
 import { Button } from '../../components/ui/button';
 import { Dialog, DialogTitle, SheetContent } from '../../components/ui/dialog';
 import { cn } from '../../lib/cn';
 import type { Capabilities } from '../../lib/capabilities';
-import { LG_QUERY, XL_QUERY, useMediaQuery } from '../../lib/useMediaQuery';
+import { LG_QUERY, useMediaQuery } from '../../lib/useMediaQuery';
 import type { RealtimeConnectionState } from '../../lib/report-updates';
 import { IncidentMap } from '../map/IncidentMap';
 import { MapLegend } from '../map/MapLegend';
@@ -29,6 +29,7 @@ import type { TeamOption } from '../coordinator/useTeams';
 import { IncidentDetailPanel } from './IncidentDetailPanel';
 import { IncidentQueuePanel } from './IncidentQueuePanel';
 import { OverviewPanel } from './OverviewPanel';
+import { PanelResizeHandle } from './PanelResizeHandle';
 
 /**
  * The map-first operational workspace (CRIS-54, ADR-0055).
@@ -82,12 +83,14 @@ export function IncidentWorkspace({
   assignment: AssignTeamUiState;
   teams: readonly TeamOption[];
 }) {
-  const isXl = useMediaQuery(XL_QUERY);
   const isLg = useMediaQuery(LG_QUERY);
 
   const [filters, setFilters] = useState<IncidentFilters>(EMPTY_FILTERS);
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<IncidentSort>('priority');
+  const [panels, setPanels] = useState({ queue: true, map: true, details: true });
+  const [queueWidth, setQueueWidth] = useState(300);
+  const [detailWidth, setDetailWidth] = useState(320);
   const [narrowPane, setNarrowPane] = useState<NarrowPane>('map');
 
   const incidents: CoordinatorIncident[] = feed.status === 'ready' ? feed.incidents : [];
@@ -97,6 +100,12 @@ export function IncidentWorkspace({
   // map while the queue is filtered would put pins on screen with no
   // corresponding row — unreachable by keyboard, and confusing by mouse.
   const visible = sortIncidents(searchIncidents(applyFilters(incidents, filters), query), sort);
+
+  function selectIncident(reportId: string | null) {
+    onSelectIncident(reportId);
+    if (reportId) setPanels((current) => ({ ...current, details: true }));
+    if (!isLg) setNarrowPane('map');
+  }
 
   const queue = (
     <IncidentQueuePanel
@@ -109,12 +118,7 @@ export function IncidentWorkspace({
       onSortChange={setSort}
       regions={regionOptions(incidents)}
       selectedId={selectedId}
-      onSelect={(reportId) => {
-        onSelectIncident(reportId);
-        // On a narrow screen the queue covers the map, so a selection would
-        // otherwise pan a map the user cannot see. Follow them to it.
-        if (!isLg) setNarrowPane('map');
-      }}
+      onSelect={selectIncident}
       className="h-full"
     />
   );
@@ -141,77 +145,171 @@ export function IncidentWorkspace({
         className="absolute inset-0"
         incidents={visible}
         selectedId={selectedId}
-        onSelectIncident={onSelectIncident}
+        onSelectIncident={selectIncident}
       />
       <MapLegend className="absolute bottom-6 left-3 z-[2]" />
     </div>
   );
 
-  return (
-    <div className="flex min-h-0 w-full flex-1">
-      {/* ── Queue column (lg and up) ───────────────────────────────────────── */}
-      {isLg ? (
-        <div className="w-[21rem] shrink-0 border-r border-border xl:w-[23rem]">{queue}</div>
-      ) : null}
+  const overview = (
+    <OverviewPanel
+      incidents={incidents}
+      activity={activity}
+      realtime={realtime}
+      className="h-full"
+    />
+  );
+  const visiblePanelCount = Object.values(panels).filter(Boolean).length;
 
-      {/* ── Centre ─────────────────────────────────────────────────────────── */}
-      <div className="relative min-w-0 flex-1">
-        {isLg ? (
-          map
-        ) : (
-          <>
-            {/* Below lg, one pane at a time with an explicit switch. Tabs rather
-                than a swipe: a gesture is undiscoverable, and this surface is
-                operated under pressure by people who have never been trained on
-                it. */}
-            <div
-              role="group"
-              aria-label="Workspace pane"
-              className="absolute left-1/2 top-3 z-[3] flex -translate-x-1/2 gap-0.5 rounded-lg border border-border bg-surface p-0.5 shadow-md"
-            >
+  return (
+    <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-xs">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+        <div>
+          <h1 className="text-base font-semibold tracking-tight">Incident workspace</h1>
+          <p className="mt-0.5 text-xs text-fg-muted">
+            {isLg
+              ? 'Choose your panels. Drag the dividers to resize.'
+              : 'Switch between the incident list and map.'}
+          </p>
+        </div>
+        <div
+          role="group"
+          aria-label="Visible workspace panels"
+          className="flex flex-wrap items-center gap-1"
+        >
+          {isLg ? (
+            <>
               {(
                 [
+                  ['queue', 'Incident list', LayoutList],
                   ['map', 'Map', MapIcon],
-                  ['queue', 'Queue', LayoutList],
+                  ['details', 'Overview & details', PanelRight],
                 ] as const
-              ).map(([pane, label, Icon]) => (
+              ).map(([key, label, Icon]) => (
                 <Button
-                  key={pane}
+                  key={key}
                   variant="ghost"
                   size="sm"
-                  aria-pressed={narrowPane === pane}
-                  onClick={() => setNarrowPane(pane)}
-                  className={cn(
-                    'h-8',
-                    narrowPane === pane && 'bg-accent-subtle text-accent-subtle-fg',
-                  )}
+                  aria-pressed={panels[key]}
+                  aria-controls={`incident-pane-${key}`}
+                  aria-disabled={panels[key] && visiblePanelCount === 1}
+                  aria-describedby={
+                    panels[key] && visiblePanelCount === 1 ? 'panel-minimum' : undefined
+                  }
+                  onClick={() =>
+                    setPanels((current) =>
+                      current[key] && Object.values(current).filter(Boolean).length === 1
+                        ? current
+                        : { ...current, [key]: !current[key] },
+                    )
+                  }
+                  className={cn(panels[key] && 'bg-accent-subtle text-accent-subtle-fg')}
                 >
                   <Icon aria-hidden="true" />
                   {label}
                 </Button>
               ))}
-            </div>
-            <div className="h-full">{narrowPane === 'map' ? map : queue}</div>
-          </>
-        )}
-      </div>
-
-      {/* ── Detail rail (xl) ───────────────────────────────────────────────── */}
-      {isXl ? (
-        <div className="w-[23rem] shrink-0 border-l border-border">
-          {detail ?? (
-            <OverviewPanel
-              incidents={incidents}
-              activity={activity}
-              realtime={realtime}
-              className="h-full"
-            />
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Reset workspace layout"
+                title="Reset layout"
+                onClick={() => {
+                  setPanels({ queue: true, map: true, details: true });
+                  setQueueWidth(300);
+                  setDetailWidth(320);
+                }}
+              >
+                <RotateCcw aria-hidden="true" />
+              </Button>
+              <span id="panel-minimum" className="sr-only">
+                Keep at least one panel visible.
+              </span>
+            </>
+          ) : (
+            (['queue', 'map'] as const).map((pane) => (
+              <Button
+                key={pane}
+                variant="ghost"
+                size="sm"
+                aria-pressed={narrowPane === pane}
+                onClick={() => setNarrowPane(pane)}
+                className={cn(narrowPane === pane && 'bg-accent-subtle text-accent-subtle-fg')}
+              >
+                {pane === 'map' ? (
+                  <MapIcon aria-hidden="true" />
+                ) : (
+                  <LayoutList aria-hidden="true" />
+                )}
+                {pane === 'map' ? 'Map' : 'Incident list'}
+              </Button>
+            ))
           )}
         </div>
-      ) : null}
-
-      {/* ── Detail as a sheet (below xl) ───────────────────────────────────── */}
-      {!isXl ? (
+      </div>
+      <div className="flex min-h-0 min-w-0 flex-1">
+        {isLg ? (
+          <>
+            {panels.queue ? (
+              <div
+                id="incident-pane-queue"
+                className={cn(
+                  'min-w-0',
+                  visiblePanelCount === 1 || !panels.map ? 'flex-1' : 'shrink-0',
+                )}
+                style={
+                  panels.map
+                    ? { width: queueWidth, maxWidth: panels.details ? '35%' : '60%' }
+                    : undefined
+                }
+              >
+                {queue}
+              </div>
+            ) : null}
+            {panels.queue && visiblePanelCount > 1 ? (
+              <PanelResizeHandle
+                label={panels.map ? 'Resize incident list' : 'Resize overview and details'}
+                controls={panels.map ? 'incident-pane-queue' : 'incident-pane-details'}
+                width={panels.map ? queueWidth : detailWidth}
+                direction={panels.map ? 1 : -1}
+                onResize={panels.map ? setQueueWidth : setDetailWidth}
+              />
+            ) : null}
+            {panels.map ? (
+              <div id="incident-pane-map" className="relative min-w-0 flex-1">
+                {map}
+              </div>
+            ) : null}
+            {panels.details && panels.map ? (
+              <PanelResizeHandle
+                label="Resize overview and details"
+                controls="incident-pane-details"
+                width={detailWidth}
+                direction={-1}
+                onResize={setDetailWidth}
+              />
+            ) : null}
+            {panels.details ? (
+              <div
+                id="incident-pane-details"
+                className={cn('min-w-0', visiblePanelCount === 1 ? 'flex-1' : 'shrink-0')}
+                style={
+                  visiblePanelCount > 1
+                    ? { width: detailWidth, maxWidth: panels.map && panels.queue ? '35%' : '60%' }
+                    : undefined
+                }
+              >
+                {detail ?? overview}
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <div className="relative min-h-0 min-w-0 flex-1">
+            {narrowPane === 'map' ? map : queue}
+          </div>
+        )}
+      </div>
+      {!isLg ? (
         <Dialog
           open={selected != null}
           onOpenChange={(open) => {
@@ -219,16 +317,11 @@ export function IncidentWorkspace({
           }}
         >
           <SheetContent
-            side={isLg ? 'right' : 'bottom'}
-            className={cn('p-0', !isLg && 'h-[80vh]')}
-            // The panel supplies its own header and close button; the sheet's
-            // built-in close would be a second, redundant control in the same
-            // corner.
+            side="bottom"
+            className="h-[80vh] p-0"
             hideClose
+            aria-describedby={undefined}
           >
-            {/* Radix requires a title on every dialog, and it is what a screen
-                reader announces on open. Hidden visually because the panel
-                below already shows the incident summary as its heading. */}
             <DialogTitle className="sr-only">Incident detail</DialogTitle>
             {detail}
           </SheetContent>

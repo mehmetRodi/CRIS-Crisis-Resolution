@@ -1,3 +1,5 @@
+import { isTerminalStatus } from '@crisismap/shared';
+import { CreateTeamAction } from './CreateTeamAction';
 import { useEffect, useState } from 'react';
 import { Loader2, Users } from 'lucide-react';
 
@@ -32,6 +34,10 @@ export function AssignTeamAction({
   onAssignTeam: (request: AssignTeamRequest) => void;
   assignment: AssignTeamUiState;
 }) {
+  const [createdTeams, setCreatedTeams] = useState<TeamOption[]>([]);
+  const availableTeams = [
+    ...new Map([...teams, ...createdTeams].map((team) => [team.id, team])).values(),
+  ];
   const [teamId, setTeamId] = useState('');
 
   // Reset the picker when the selection moves to another incident, so a team
@@ -42,7 +48,7 @@ export function AssignTeamAction({
 
   const forThis = assignment.status !== 'idle' && assignment.reportId === incident.reportId;
   const submitting = forThis && assignment.status === 'submitting';
-  const assignedTeam = teams.find((team) => team.id === incident.assignedTeamId);
+  const assignedTeam = availableTeams.find((team) => team.id === incident.assignedTeamId);
 
   if (incident.assignedTeamId) {
     return (
@@ -58,41 +64,62 @@ export function AssignTeamAction({
     );
   }
 
-  if (teams.length === 0) {
-    return <p className="text-xs text-fg-muted">No response teams are available to assign.</p>;
-  }
+  if (isTerminalStatus(incident.status))
+    return <p className="text-xs text-fg-muted">Closed reports cannot be assigned a new team.</p>;
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-2">
-        <Select value={teamId} onValueChange={setTeamId}>
-          <SelectTrigger aria-label="Response team" className="flex-1">
-            <SelectValue placeholder="Select a team…" />
-          </SelectTrigger>
-          <SelectContent>
-            {teams.map((team) => (
-              <SelectItem key={team.id} value={team.id}>
-                {team.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Button
-          size="sm"
-          variant="primary"
-          disabled={!teamId || submitting}
-          onClick={() =>
-            onAssignTeam({
-              reportId: incident.reportId,
-              teamId,
-              expectedVersion: incident.version,
-            })
-          }
-        >
-          {submitting ? <Loader2 aria-hidden="true" className="animate-spin" /> : null}
-          Assign
-        </Button>
-      </div>
+      {availableTeams.length ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Select value={teamId} onValueChange={setTeamId}>
+            <SelectTrigger id="response-team-picker" aria-label="Response team" className="flex-1">
+              <SelectValue placeholder="Select a team…" />
+            </SelectTrigger>
+            <SelectContent>
+              {availableTeams.map((team) => (
+                <SelectItem key={team.id} value={team.id}>
+                  {team.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            size="sm"
+            variant="primary"
+            aria-disabled={!teamId || submitting}
+            aria-describedby={!teamId ? 'team-assignment-hint' : undefined}
+            onClick={() => {
+              if (!teamId || submitting) {
+                document.getElementById('response-team-picker')?.focus();
+                return;
+              }
+              onAssignTeam({
+                reportId: incident.reportId,
+                teamId,
+                expectedVersion: incident.version,
+              });
+            }}
+          >
+            {submitting ? <Loader2 aria-hidden="true" className="animate-spin" /> : null}
+            Assign
+          </Button>
+        </div>
+      ) : (
+        <p className="text-xs text-fg-muted">
+          No response teams are available yet. Create one to assign this report.
+        </p>
+      )}
+      {!teamId ? (
+        <span id="team-assignment-hint" className="sr-only">
+          Select a response team first.
+        </span>
+      ) : null}
+      <CreateTeamAction
+        onCreated={(team) => {
+          setCreatedTeams((current) => [...current, team]);
+          setTeamId(team.id);
+        }}
+      />
 
       {forThis && assignment.status === 'success' ? (
         <p role="status" className="text-xs font-medium text-success">

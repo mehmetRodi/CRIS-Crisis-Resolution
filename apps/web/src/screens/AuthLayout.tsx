@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 
+import { SiteFooter } from '../shell/SiteFooter';
 import { Logo } from '../components/brand/Logo';
 
 /**
@@ -33,8 +34,8 @@ export function AuthLayout({
         </Link>
       </header>
 
-      <main className="mx-auto w-full max-w-sm flex-1 px-5 pb-12">
-        <div className="rounded-xl border border-border bg-surface p-6 shadow-sm">
+      <main className="mx-auto w-full max-w-md flex-1 px-5 pb-12 pt-8 sm:pt-16">
+        <div className="rounded-3xl border border-border bg-surface p-7 shadow-md sm:p-9">
           <h1 className="text-xl font-semibold tracking-tight text-fg">{title}</h1>
           <p className="mt-1.5 text-sm text-fg-muted">{description}</p>
           <div className="mt-6">{children}</div>
@@ -50,6 +51,7 @@ export function AuthLayout({
           — no account required.
         </p>
       </main>
+      <SiteFooter />
     </div>
   );
 }

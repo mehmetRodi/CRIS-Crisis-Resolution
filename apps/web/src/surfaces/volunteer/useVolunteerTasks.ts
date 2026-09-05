@@ -41,6 +41,7 @@ export function useVolunteerTasks(): LiveVolunteerTasks {
           status: 'ready',
           tasks: (result.data ?? []) as VolunteerTask[],
         });
+        window.dispatchEvent(new Event('cris:work-updated'));
       }
     } catch (error) {
       if (background) throw error;
@@ -60,6 +61,7 @@ export function useVolunteerTasks(): LiveVolunteerTasks {
   const realtime = useReportUpdates({
     enabled: state.status === 'ready',
     onUpdate: (report) => {
+      window.dispatchEvent(new Event('cris:work-updated'));
       setState((current) =>
         current.status === 'ready'
           ? { status: 'ready', tasks: reconcileVolunteerReport(current.tasks, report) }

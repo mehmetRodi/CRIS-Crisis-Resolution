@@ -3,7 +3,7 @@
  * (CRIS-57, ADR-0057).
  *
  * ── Why the values are bare HSL triples ────────────────────────────────────
- * `'184 82% 28%'`, not `'hsl(184 82% 28%)'` and not `'#12908f'`. The web app
+ * `'172 52% 26%'`, not `'hsl(172 52% 26%)'` and not `'#12908f'`. The web app
  * composes them as `hsl(var(--token) / <alpha-value>)` so Tailwind opacity
  * modifiers (`bg-accent/10`) keep working, which a complete colour function
  * cannot support. React Native cannot read CSS variables at all, so it calls
@@ -27,35 +27,35 @@ export const TOKENS = {
   /* A faintly cool off-white rather than pure white: a full-bleed white canvas
      under a dense incident table is fatiguing over a long shift, and it leaves
      no lighter value available for raised surfaces to sit on. */
-  bg: '200 24% 97%',
+  bg: '160 18% 96%',
   surface: '0 0% 100%',
   /** Recessed wells — filter trays, empty states, table headers. */
-  'surface-sunken': '200 20% 95%',
+  'surface-sunken': '160 18% 93%',
   /** Hover/pressed fill for rows and ghost buttons. */
-  'surface-hover': '200 22% 96%',
+  'surface-hover': '160 20% 95%',
   overlay: '205 30% 12%',
 
   /* ── Text ──────────────────────────────────────────────────────────────── */
   /* Near-black with a cool cast, never pure black — pure black on off-white
      over-contrasts and vibrates at small sizes. */
-  fg: '205 32% 13%',
+  fg: '200 32% 10%',
   'fg-muted': '205 12% 40%',
   'fg-subtle': '205 11% 55%',
   /** Only for text on a saturated fill (accent buttons, severity chips). */
   'fg-on-solid': '0 0% 100%',
 
   /* ── Lines ─────────────────────────────────────────────────────────────── */
-  border: '205 20% 89%',
+  border: '165 15% 86%',
   'border-strong': '205 16% 78%',
 
   /* ── Accent (teal) ─────────────────────────────────────────────────────── */
-  accent: '184 82% 28%',
-  'accent-hover': '184 84% 23%',
-  'accent-active': '184 86% 19%',
+  accent: '172 52% 26%',
+  'accent-hover': '172 54% 21%',
+  'accent-active': '172 56% 17%',
   /** Tinted background for selected rows and active facets. */
-  'accent-subtle': '184 52% 94%',
-  'accent-subtle-fg': '184 78% 22%',
-  'accent-border': '184 44% 76%',
+  'accent-subtle': '160 30% 90%',
+  'accent-subtle-fg': '172 55% 21%',
+  'accent-border': '165 28% 72%',
 
   /* ── Focus ring ────────────────────────────────────────────────────────── */
   /* Lighter and more saturated than `accent` so the ring stays visible when it

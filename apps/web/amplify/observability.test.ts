@@ -20,7 +20,7 @@ import {
  * the same `Template.fromStack` pattern as `security/encryption.test.ts`.
  */
 
-const EXPECTED_ALARMS = 16;
+const EXPECTED_ALARMS = 17;
 
 interface SynthesizedObservability {
   template: Template;
@@ -59,6 +59,7 @@ function synthesizeObservability(): SynthesizedObservability {
     listVolunteerTasks: lambdaStub(data, 'ListVolunteerTasksFn'),
     listPublicReports: lambdaStub(data, 'ListPublicReportsFn'),
     assignTeam: lambdaStub(data, 'AssignTeamFn'),
+    reportWork: lambdaStub(data, 'ReportWorkFn'),
     citizenRoleAssignment: lambdaStub(auth, 'CitizenRoleAssignmentFn'),
   };
 
@@ -115,6 +116,9 @@ describe('observability baseline (ADR-0015, ADR-0051)', () => {
     const dashboard = Object.values(dashboards)[0] as CfnResource;
     expect(JSON.stringify(dashboard.Properties.DashboardName)).toContain('CRIS-');
     expect(JSON.stringify(dashboard.Properties.DashboardBody)).toContain('CRIS — Observability');
+    expect(JSON.stringify(dashboard.Properties.DashboardBody)).toContain(
+      'Report work — claims, person assignment, progress',
+    );
   });
 
   it('routes every alarm to the ops topic on ALARM and OK and never pages on missing data', () => {
@@ -168,6 +172,7 @@ describe('observability baseline (ADR-0015, ADR-0051)', () => {
       ['TransitionReportErrors', ResolverOperation.UPDATE_REPORT_STATUS],
       ['MediaUploadUrlErrors', ResolverOperation.CREATE_MEDIA_UPLOAD_URL],
       ['AssignTeamErrors', ResolverOperation.ASSIGN_TEAM],
+      ['ReportWorkErrors', ResolverOperation.REPORT_WORK],
     ] as const) {
       expect(alarmByLogicalIdPrefix(alarms, prefix)).toMatchObject({
         MetricName: UNEXPECTED_ERROR_METRIC,

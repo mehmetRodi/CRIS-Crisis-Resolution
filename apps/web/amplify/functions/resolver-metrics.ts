@@ -6,6 +6,7 @@ export const ResolverOperation = {
   UPDATE_REPORT_STATUS: 'updateReportStatus',
   CREATE_MEDIA_UPLOAD_URL: 'createMediaUploadUrl',
   ASSIGN_TEAM: 'assignTeam',
+  REPORT_WORK: 'reportWork',
 } as const;
 export type ResolverOperation = (typeof ResolverOperation)[keyof typeof ResolverOperation];
 

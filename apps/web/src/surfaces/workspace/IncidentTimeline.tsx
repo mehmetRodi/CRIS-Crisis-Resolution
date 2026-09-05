@@ -24,6 +24,8 @@ function eventLabel(event: TimelineEvent): string {
       return 'Priority scored';
     case ReportEventType.VERIFICATION_RECORDED:
       return 'Verification recorded';
+    case ReportEventType.WORK_UPDATED:
+      return 'Work ownership or progress updated';
     case ReportEventType.ASSIGNED:
       return 'Team assigned';
     case ReportEventType.DUPLICATE_LINKED:

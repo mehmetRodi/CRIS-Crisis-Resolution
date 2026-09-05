@@ -186,7 +186,7 @@ export function TaskWorkspaceRoute() {
         </>
       }
     >
-      <TaskWorkspace feed={state} />
+      <TaskWorkspace feed={state} callerRole={highestRole ?? UserRole.VOLUNTEER} />
     </AppShell>
   );
 }

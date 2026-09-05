@@ -117,3 +117,19 @@ but they are not a per-record access log because AWS services reuse data keys (A
 Phase 2: Verification Agent + Dispatch Agent, ChatOps (Slack/Teams), OpenSearch, SageMaker
 Geospatial satellite verification. Future: CV damage assessment, evacuation routing,
 cross-agency identity federation, active-active multi-region writes.
+
+## Web flow and work ownership (ADR-0062/0063)
+
+The web app now uses top workspace navigation, independently toggleable and resizable
+incident panels, a four-card reporting flow, and task details with the existing
+confirmed-public-location map. Shared information pages cover About, Help, Privacy,
+and Terms of use. The shared palette changes apply to both clients; card navigation
+and workspace changes are web-only.
+
+`ReportWork` adds guarded individual claims, coordinator person assignment, and
+private progress updates. `getReportWork`, `updateReportWork`, and `listMyReportWork`
+serve the operational UI without exposing reporter data or work notes publicly.
+Ownership updates atomically version-check the report and work record and append
+WORK_UPDATED audit events. See ADR-0063 for the read bound, privacy contract, and
+lifecycle rules. These source changes require backend deployment and refreshed
+Amplify outputs; they do not establish that a deployed environment has these APIs.
