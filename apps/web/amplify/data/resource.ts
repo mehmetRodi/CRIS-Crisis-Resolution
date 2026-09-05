@@ -48,7 +48,7 @@ import { assignTeam as assignTeamFn } from '../functions/assign-team/resource';
  * custom resolvers, not inferred from these rules alone. Generated model
  * operations still coexist with the guarded mutations pending auth hardening.
  */
-const schema = a
+export const schema = a
   .schema({
     /* ---------------------------------------------------------------------- */
     /* Report — system of record (§5.1, §5.2)                                  */
@@ -537,6 +537,8 @@ const schema = a
         updatesJson: a.string().required(),
         createdAt: a.datetime(),
       })
+      // Reserve getReportWork/updateReportWork for the guarded custom operations (ADR-0064).
+      .disableOperations(['get', 'mutations'])
       .authorization((allow) => [allow.groups(['COORDINATOR', 'ADMIN']).to(['read'])]),
 
     WorkUpdate: a.customType({

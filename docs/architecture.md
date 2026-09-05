@@ -131,5 +131,7 @@ private progress updates. `getReportWork`, `updateReportWork`, and `listMyReport
 serve the operational UI without exposing reporter data or work notes publicly.
 Ownership updates atomically version-check the report and work record and append
 WORK_UPDATED audit events. See ADR-0063 for the read bound, privacy contract, and
-lifecycle rules. These source changes require backend deployment and refreshed
+lifecycle rules. Generated `ReportWork` get and mutation operations are disabled
+to reserve the custom resolver names (ADR-0064); staff model list access remains.
+These source changes require backend deployment and refreshed
 Amplify outputs; they do not establish that a deployed environment has these APIs.

@@ -79,3 +79,4 @@ behind the code — essential when refactoring or extending the system.
 | [0061](0061-citizen-report-form-readability.md)                      | Citizen report form readability                                      | Accepted                         |
 | [0062](0062-focused-web-workspaces-and-report-cards.md)              | Focused web workspaces, adjustable panels, report cards              | Accepted                         |
 | [0063](0063-report-ownership-and-progress.md)                        | Report claims, person assignment, and progress updates               | Accepted                         |
+| [0064](0064-report-work-operation-names.md)                          | Reserve ReportWork operation names for guarded resolvers             | Accepted                         |
