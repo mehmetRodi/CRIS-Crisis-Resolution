@@ -61,17 +61,17 @@ function FilterSelect({
 }) {
   return (
     <label className="flex min-w-0 flex-col gap-1">
-      <span className="text-[11px] font-medium uppercase tracking-wide text-fg-subtle">
+      <span className="text-[10px] font-bold uppercase tracking-wider text-fg-subtle">
         {label}
       </span>
       <Select value={value || ALL} onValueChange={(next) => onChange(next === ALL ? '' : next)}>
-        <SelectTrigger aria-label={label} className="w-44">
+        <SelectTrigger aria-label={label} className="w-40 min-w-[150px] text-xs h-8 rounded-lg border-border/80 bg-surface shadow-2xs">
           <SelectValue />
         </SelectTrigger>
-        <SelectContent>
-          <SelectItem value={ALL}>All {label.toLowerCase()}</SelectItem>
+        <SelectContent className="rounded-xl border-border/80 bg-surface/95 backdrop-blur-md shadow-lg">
+          <SelectItem value={ALL} className="text-xs">All {label.toLowerCase()}</SelectItem>
           {options.map((option) => (
-            <SelectItem key={option.value} value={option.value}>
+            <SelectItem key={option.value} value={option.value} className="text-xs">
               {option.label}
             </SelectItem>
           ))}
@@ -86,24 +86,24 @@ function Column({ label, tasks }: { label: string; tasks: readonly VolunteerTask
   return (
     <section
       aria-labelledby={headingId}
-      className="flex min-h-0 w-72 shrink-0 flex-col rounded-lg bg-surface-sunken"
+      className="flex min-h-0 w-72 shrink-0 flex-col rounded-2xl border border-border/80 bg-surface-sunken/60 shadow-2xs backdrop-blur-xs"
     >
-      <div className="flex shrink-0 items-center justify-between gap-2 px-3 py-2.5">
-        <h3 id={headingId} className="text-xs font-semibold uppercase tracking-wide text-fg-muted">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/60 px-3.5 py-3">
+        <h3 id={headingId} className="text-xs font-bold uppercase tracking-wider text-fg">
           {label}
         </h3>
         <span
-          className="tabular rounded-sm bg-surface px-1.5 py-0.5 text-xs font-semibold text-fg-muted"
+          className="tabular rounded-full border border-border/60 bg-surface px-2 py-0.5 text-xs font-bold text-fg-muted shadow-2xs"
           aria-label={pluralize(tasks.length, 'task')}
         >
           {tasks.length}
         </span>
       </div>
-      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-2 pb-2">
+      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2.5">
         {tasks.length === 0 ? (
-          <p className="rounded border border-dashed border-border px-3 py-6 text-center text-xs text-fg-subtle">
+          <div className="rounded-xl border border-dashed border-border/80 bg-surface/30 px-3 py-8 text-center text-xs font-medium text-fg-subtle">
             Nothing at this stage
-          </p>
+          </div>
         ) : (
           tasks.map((task) => <TaskCard key={task.reportId} task={task} />)
         )}

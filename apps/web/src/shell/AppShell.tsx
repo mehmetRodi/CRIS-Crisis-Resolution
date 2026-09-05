@@ -52,22 +52,22 @@ export function AppShell({
         Skip to main content
       </a>
 
-      <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border bg-surface px-3 sm:px-4">
-        <Link to="/" className="rounded" aria-label="CRIS home">
+      <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border/80 bg-surface/90 px-3 sm:px-4 backdrop-blur-md shadow-2xs">
+        <Link to="/" className="rounded-lg transition-transform hover:scale-105 active:scale-95" aria-label="CRIS home">
           <Logo className="shrink-0" />
         </Link>
 
         {nav.length > 0 ? (
-          <nav aria-label="Workspace sections" className="ml-2 flex items-center gap-1">
+          <nav aria-label="Workspace sections" className="ml-3 flex items-center gap-1.5">
             {nav.map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}
                 className={({ isActive }) =>
                   cn(
-                    'inline-flex items-center gap-1.5 rounded px-2.5 py-1.5 text-sm font-medium transition-colors',
+                    'inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold tracking-wide transition-all',
                     isActive
-                      ? 'bg-accent-subtle text-accent-subtle-fg'
+                      ? 'bg-accent/15 text-accent shadow-xs ring-1 ring-accent/25'
                       : 'text-fg-muted hover:bg-surface-hover hover:text-fg',
                   )
                 }

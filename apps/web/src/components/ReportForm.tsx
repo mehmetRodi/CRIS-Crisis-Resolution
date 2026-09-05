@@ -74,22 +74,40 @@ function Chip({
   onClick,
   children,
   className,
+  variant = 'default',
 }: {
   selected: boolean;
   onClick: () => void;
   children: React.ReactNode;
   className?: string;
+  variant?: 'default' | 'critical' | 'high' | 'medium' | 'low';
 }) {
+  const variantStyles = {
+    default: selected
+      ? 'border-accent bg-accent text-fg-on-solid shadow-xs font-semibold'
+      : 'border-border/80 bg-surface text-fg hover:bg-surface-hover hover:border-border',
+    critical: selected
+      ? 'border-danger bg-danger text-fg-on-solid shadow-xs font-semibold ring-2 ring-danger/20'
+      : 'border-border/80 bg-surface text-fg hover:bg-danger-subtle hover:border-danger-border',
+    high: selected
+      ? 'border-severity-p1 bg-severity-p1 text-fg-on-solid shadow-xs font-semibold ring-2 ring-severity-p1/20'
+      : 'border-border/80 bg-surface text-fg hover:bg-severity-p1-subtle hover:border-severity-p1-border',
+    medium: selected
+      ? 'border-warning bg-warning text-fg-on-solid shadow-xs font-semibold ring-2 ring-warning/20'
+      : 'border-border/80 bg-surface text-fg hover:bg-warning-subtle hover:border-warning-border',
+    low: selected
+      ? 'border-severity-p3 bg-severity-p3 text-fg-on-solid shadow-xs font-semibold ring-2 ring-severity-p3/20'
+      : 'border-border/80 bg-surface text-fg hover:bg-severity-p3-subtle hover:border-severity-p3-border',
+  };
+
   return (
     <button
       type="button"
       aria-pressed={selected}
       onClick={onClick}
       className={cn(
-        'inline-flex items-center gap-1.5 rounded border px-3 py-2 text-sm font-medium transition-colors',
-        selected
-          ? 'border-accent bg-accent text-fg-on-solid'
-          : 'border-border bg-surface text-fg hover:bg-surface-hover',
+        'inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium transition-all duration-150',
+        variantStyles[variant],
         className,
       )}
     >
@@ -111,12 +129,20 @@ function FormSection({
   children: React.ReactNode;
 }) {
   return (
-    <section className="space-y-4">
-      <div className="flex items-baseline gap-2">
-        <h2 className="text-sm font-semibold text-fg">{title}</h2>
-        {optional ? <span className="text-xs font-medium text-fg-subtle">Optional</span> : null}
+    <section className="space-y-4 rounded-2xl border border-border/80 bg-surface/90 p-5 shadow-xs backdrop-blur-xs sm:p-6">
+      <div className="flex items-baseline justify-between gap-2 border-b border-border/60 pb-3">
+        <h2 className="text-sm font-bold uppercase tracking-wider text-fg">{title}</h2>
+        {optional ? (
+          <span className="rounded-full bg-surface-sunken px-2 py-0.5 text-[11px] font-semibold text-fg-subtle border border-border/50">
+            Optional
+          </span>
+        ) : (
+          <span className="text-[11px] font-bold uppercase tracking-wider text-accent">
+            Required
+          </span>
+        )}
       </div>
-      {description ? <p className="-mt-2 text-xs text-fg-muted">{description}</p> : null}
+      {description ? <p className="-mt-2 text-xs leading-relaxed text-fg-muted">{description}</p> : null}
       {children}
     </section>
   );
@@ -436,16 +462,27 @@ export function ReportForm() {
               How urgent is it <RequiredMark />
             </legend>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {URGENCY_OPTIONS.map((urgency) => (
-                <Chip
-                  key={urgency}
-                  selected={draft.urgency === urgency}
-                  onClick={() => setDraft((d) => ({ ...d, urgency }))}
-                  className="justify-center"
-                >
-                  {urgencyLabel(urgency)}
-                </Chip>
-              ))}
+              {URGENCY_OPTIONS.map((urgency) => {
+                const variant =
+                  urgency === Urgency.CRITICAL
+                    ? 'critical'
+                    : urgency === Urgency.HIGH
+                      ? 'high'
+                      : urgency === Urgency.MEDIUM
+                        ? 'medium'
+                        : 'low';
+                return (
+                  <Chip
+                    key={urgency}
+                    selected={draft.urgency === urgency}
+                    variant={variant}
+                    onClick={() => setDraft((d) => ({ ...d, urgency }))}
+                    className="justify-center py-2.5 font-semibold"
+                  >
+                    {urgencyLabel(urgency)}
+                  </Chip>
+                );
+              })}
             </div>
           </fieldset>
         </FormSection>
@@ -510,30 +547,36 @@ export function ReportForm() {
               fileInputRef.current?.click();
             }}
             className={cn(
-              'flex w-full flex-col items-center gap-1.5 rounded-lg border-2 border-dashed px-4 py-8 text-center transition-colors',
+              'group flex w-full flex-col items-center gap-2 rounded-xl border-2 border-dashed px-4 py-7 text-center transition-all',
               photoBusy && 'opacity-70',
               mediaKey
-                ? 'border-success-border bg-success-subtle'
+                ? 'border-success-border bg-success-subtle shadow-2xs'
                 : photoError
-                  ? 'border-danger-border bg-danger-subtle'
-                  : 'border-border-strong bg-surface hover:bg-surface-hover',
+                  ? 'border-danger-border bg-danger-subtle shadow-2xs'
+                  : 'border-border-strong/70 bg-surface hover:bg-surface-hover hover:border-accent/60 shadow-2xs',
             )}
           >
             {photoUploading ? (
-              <Loader2 aria-hidden="true" className="size-6 animate-spin text-fg-muted" />
+              <Loader2 aria-hidden="true" className="size-7 animate-spin text-accent" />
             ) : mediaKey ? (
-              <Check aria-hidden="true" className="size-6 text-success" />
+              <div className="flex size-10 items-center justify-center rounded-full bg-success/15 text-success ring-1 ring-success/30">
+                <Check aria-hidden="true" className="size-6" />
+              </div>
             ) : photoError ? (
-              <TriangleAlert aria-hidden="true" className="size-6 text-danger" />
+              <div className="flex size-10 items-center justify-center rounded-full bg-danger/15 text-danger ring-1 ring-danger/30">
+                <TriangleAlert aria-hidden="true" className="size-6" />
+              </div>
             ) : (
-              <Camera aria-hidden="true" className="size-6 text-fg-subtle" />
+              <div className="flex size-10 items-center justify-center rounded-full bg-accent/10 text-accent ring-1 ring-accent/20 transition-transform group-hover:scale-110">
+                <Camera aria-hidden="true" className="size-5" />
+              </div>
             )}
 
             {photoName ? (
               <>
                 <span
                   className={cn(
-                    'max-w-full truncate text-sm font-medium',
+                    'max-w-full truncate text-sm font-semibold',
                     mediaKey ? 'text-success' : 'text-fg',
                   )}
                 >
@@ -545,7 +588,7 @@ export function ReportForm() {
                 <span
                   className={cn(
                     'text-xs',
-                    photoError ? 'font-medium text-danger' : 'text-fg-subtle',
+                    photoError ? 'font-semibold text-danger' : 'text-fg-subtle',
                   )}
                 >
                   {photoUploading ? 'Uploading…' : photoError ? photoError : 'Tap to change photo'}
@@ -553,7 +596,7 @@ export function ReportForm() {
               </>
             ) : (
               <>
-                <span className="text-sm font-medium text-fg">Add a photo</span>
+                <span className="text-sm font-semibold text-fg">Add a photo</span>
                 <span className="text-xs text-fg-subtle">
                   Images help responders understand the situation
                 </span>
@@ -583,10 +626,10 @@ export function ReportForm() {
         </FormSection>
 
         <FormSection title="About you" optional>
-          <div className="flex items-center justify-between gap-4 rounded-lg border border-border bg-surface-sunken px-4 py-3">
+          <div className="flex items-center justify-between gap-4 rounded-xl border border-border/80 bg-surface-sunken/60 px-4 py-3.5 shadow-2xs">
             <div className="min-w-0">
-              <Label htmlFor="report-anonymous">Report anonymously</Label>
-              <FieldHint className="mt-0.5">
+              <Label htmlFor="report-anonymous" className="font-semibold text-fg">Report anonymously</Label>
+              <FieldHint className="mt-0.5 text-xs text-fg-muted">
                 Your identity is hidden from responders and never appears on the map.
               </FieldHint>
             </div>
@@ -598,8 +641,8 @@ export function ReportForm() {
           </div>
 
           {!draft.anonymous ? (
-            <div className="space-y-1.5">
-              <Label htmlFor="report-contact">Contact details</Label>
+            <div className="space-y-1.5 pt-1">
+              <Label htmlFor="report-contact" className="font-medium">Contact details</Label>
               <Input
                 id="report-contact"
                 autoCapitalize="none"
@@ -608,8 +651,9 @@ export function ReportForm() {
                 onChange={(event) => setDraft((d) => ({ ...d, contact: event.target.value }))}
                 placeholder="Phone or email"
                 aria-describedby="report-contact-hint"
+                className="h-10 text-sm"
               />
-              <FieldHint id="report-contact-hint">
+              <FieldHint id="report-contact-hint" className="text-xs text-fg-subtle">
                 Used only if a responder needs to reach you. Never shown publicly and never sent to
                 the classification model.
               </FieldHint>
@@ -620,17 +664,18 @@ export function ReportForm() {
         {error ? (
           <div
             role="alert"
-            className="rounded-lg border border-danger-border bg-danger-subtle px-4 py-3 text-sm text-danger"
+            className="rounded-xl border border-danger-border bg-danger-subtle px-4 py-3 text-sm font-medium text-danger shadow-2xs"
           >
             {error}
           </div>
         ) : null}
 
-        <div className="space-y-3">
+        <div className="space-y-3 pt-2">
           <Button
             type="submit"
             variant="primary"
             size="xl"
+            className="rounded-xl text-base font-semibold shadow-md hover:shadow-lg transition-all"
             // `aria-disabled` rather than `disabled`: a disabled button leaves
             // the tab order, so the reason hanging off `aria-describedby` could
             // never be reached by the keyboard user who most needs it
@@ -642,7 +687,7 @@ export function ReportForm() {
             // nothing.
             aria-describedby={blockedReason ? 'report-submit-requirements' : undefined}
           >
-            {submitting ? <Loader2 aria-hidden="true" className="animate-spin" /> : null}
+            {submitting ? <Loader2 aria-hidden="true" className="animate-spin size-5" /> : null}
             {submitting ? 'Sending…' : 'Send report'}
           </Button>
           {blockedReason ? (

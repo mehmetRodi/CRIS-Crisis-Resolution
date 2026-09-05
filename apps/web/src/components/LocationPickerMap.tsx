@@ -208,23 +208,28 @@ export default function LocationPickerMap({ value, onChange }: LocationPickerPro
           aria-disabled={gpsLoading}
           aria-busy={gpsLoading}
           className={cn(
-            'inline-flex h-9 items-center gap-2 rounded border border-border bg-surface px-3 text-sm font-medium text-fg shadow-xs transition-colors',
-            gpsLoading ? 'opacity-50' : 'hover:bg-surface-hover',
+            'inline-flex h-9 items-center gap-2 rounded-lg border border-border/80 bg-surface px-3 text-xs font-semibold text-fg shadow-2xs transition-all',
+            gpsLoading ? 'opacity-50' : 'hover:bg-surface-hover hover:border-accent/40 active:scale-95',
           )}
         >
-          <Crosshair aria-hidden="true" className="size-4 shrink-0" />
+          <Crosshair aria-hidden="true" className={cn('size-4 shrink-0 text-accent', gpsLoading && 'animate-spin')} />
           {gpsLoading ? 'Locating…' : 'Use my location'}
         </button>
         {value ? (
-          <button
-            type="button"
-            onClick={() => onChange(null)}
-            // "Clear" alone gives no object; out of context it is unanswerable.
-            aria-label="Clear selected location"
-            className="rounded text-xs font-medium text-fg-muted underline-offset-4 hover:text-fg hover:underline"
-          >
-            Clear
-          </button>
+          <div className="flex items-center gap-2">
+            <span className="tabular rounded-md bg-accent/10 px-2 py-0.5 text-[11px] font-mono font-medium text-accent border border-accent/20">
+              {value.lat.toFixed(4)}, {value.lng.toFixed(4)}
+            </span>
+            <button
+              type="button"
+              onClick={() => onChange(null)}
+              // "Clear" alone gives no object; out of context it is unanswerable.
+              aria-label="Clear selected location"
+              className="rounded text-xs font-semibold text-danger/80 underline-offset-4 hover:text-danger hover:underline"
+            >
+              Clear
+            </button>
+          </div>
         ) : null}
       </div>
 
@@ -237,7 +242,7 @@ export default function LocationPickerMap({ value, onChange }: LocationPickerPro
         // location is never required (ADR-0037).
         role="application"
         aria-label="Location map — drop a pin to mark the incident"
-        className="h-56 w-full overflow-hidden rounded-lg border border-border"
+        className="h-56 w-full overflow-hidden rounded-xl border border-border/80 shadow-2xs"
       />
 
       {/* Already rendered in both states, so it is a live region that exists

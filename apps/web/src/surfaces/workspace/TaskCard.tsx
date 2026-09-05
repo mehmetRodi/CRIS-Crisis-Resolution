@@ -30,11 +30,11 @@ export function TaskCard({ task }: { task: VolunteerTask }) {
   return (
     <article
       aria-label={`${title}. Priority ${band ?? 'unscored'}.`}
-      className="rounded border border-border bg-surface p-2.5 shadow-xs"
+      className="rounded-xl border border-border/80 bg-surface p-3 shadow-2xs transition-all duration-150 hover:border-accent/40 hover:shadow-xs"
     >
       <div className="flex items-start justify-between gap-2">
         <PriorityBadge band={band} />
-        <span className="tabular shrink-0 text-[11px] text-fg-subtle">
+        <span className="tabular shrink-0 text-[11px] font-medium text-fg-subtle">
           {relativeTime(task.createdAt)}
         </span>
       </div>
@@ -42,33 +42,33 @@ export function TaskCard({ task }: { task: VolunteerTask }) {
       <p
         className={
           task.summary
-            ? 'mt-2 line-clamp-3 text-sm leading-snug text-fg'
-            : 'mt-2 text-sm italic text-fg-subtle'
+            ? 'mt-2 line-clamp-3 text-xs font-semibold leading-relaxed text-fg'
+            : 'mt-2 text-xs italic text-fg-subtle'
         }
       >
         {title}
       </p>
 
-      <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+      <div className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1">
         <CategoryTag category={(task.category as Category | null) ?? null} className="text-xs" />
         {task.urgency ? (
-          <span className="text-xs text-fg-subtle">· {urgencyLabel(task.urgency as Urgency)}</span>
+          <span className="text-[11px] font-medium text-fg-subtle">· {urgencyLabel(task.urgency as Urgency)}</span>
         ) : null}
       </div>
 
-      <dl className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border pt-2 text-[11px]">
+      <dl className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/60 pt-2 text-[11px]">
         <div className="flex items-center gap-1">
           <dt className="text-fg-subtle">Region</dt>
-          <dd className="font-medium text-fg-muted">{task.regionId ?? 'Unassigned'}</dd>
+          <dd className="font-semibold text-fg-muted">{task.regionId ?? 'Unassigned'}</dd>
         </div>
         <div className="flex items-center gap-1">
           <dt className="text-fg-subtle">Team</dt>
-          <dd className="font-medium text-fg-muted">{task.teamName ?? 'Unassigned'}</dd>
+          <dd className="font-semibold text-fg-muted">{task.teamName ?? 'Unassigned'}</dd>
         </div>
       </dl>
 
       {assignment ? (
-        <Badge variant={assignment.badge} size="sm" className="mt-2">
+        <Badge variant={assignment.badge} size="sm" className="mt-2 text-[11px]">
           {assignment.label}
         </Badge>
       ) : null}

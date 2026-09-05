@@ -34,9 +34,9 @@ export function CitizenShell({
 }) {
   return (
     <div className={cn('flex min-h-dvh flex-col bg-transparent', bleed && 'h-dvh overflow-hidden')}>
-      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-surface px-4">
-        <Link to={backTo} className="rounded" aria-label={`Back to ${backLabel}`}>
-          <span className="inline-flex items-center gap-2 text-sm font-medium text-fg-muted transition-colors hover:text-fg">
+      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border/80 bg-surface/90 px-4 backdrop-blur-md shadow-2xs">
+        <Link to={backTo} className="rounded-lg p-1.5 transition-all hover:bg-surface-hover hover:scale-105 active:scale-95" aria-label={`Back to ${backLabel}`}>
+          <span className="inline-flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-fg-muted transition-colors hover:text-fg">
             <ArrowLeft className="size-4" aria-hidden="true" />
             <span className="hidden sm:inline">{backLabel}</span>
           </span>
