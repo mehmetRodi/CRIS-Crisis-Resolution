@@ -65,6 +65,7 @@ export interface BackendFunctions {
    */
   listPublicReports: IFunction;
   assignTeam: IFunction;
+  reportWork: IFunction;
   /** Cognito post-confirmation trigger — lives in the auth stack, alarmed from here. */
   citizenRoleAssignment: IFunction;
 }
@@ -336,6 +337,12 @@ export function addObservability(props: ObservabilityProps): Topic {
     }),
   );
   register(
+    resolverUnexpectedErrorAlarm(scope, 'ReportWorkErrors', ResolverOperation.REPORT_WORK, {
+      description:
+        'Report ownership or progress updates are failing unexpectedly; inspect report-work traces and transaction conflicts.',
+    }),
+  );
+  register(
     lambdaErrorAlarm(scope, 'CitizenRoleAssignmentErrors', functions.citizenRoleAssignment, {
       description:
         'citizen-role-assignment trigger errors — sign-up confirmation may be failing, or new ' +
@@ -583,5 +590,23 @@ function buildDashboard(
         height: 6,
       }),
     ),
+  );
+  dashboard.addWidgets(
+    new GraphWidget({
+      title: 'Report work — claims, person assignment, progress',
+      left: [
+        invocations(functions.reportWork),
+        new Metric({
+          namespace: RESOLVER_METRIC_NAMESPACE,
+          metricName: UNEXPECTED_ERROR_METRIC,
+          dimensionsMap: { Operation: ResolverOperation.REPORT_WORK },
+          period: Duration.minutes(1),
+          statistic: Stats.SUM,
+        }),
+      ],
+      right: [p95(functions.reportWork)],
+      width: 24,
+      height: 6,
+    }),
   );
 }

@@ -56,19 +56,23 @@ export function usePublicIncidents(): UsePublicIncidents {
     }
 
     try {
-      const result = await client.queries.listPublicReports(
-        { limit: READ_LIMIT },
-        { authMode: signedIn ? 'userPool' : 'identityPool' },
-      );
-      const firstError = result.errors?.[0];
-      if (firstError) throw new Error(firstError.message ?? 'Could not load incidents.');
+      let reports: PublicReport[] = [];
+      if (typeof client?.queries?.listPublicReports === 'function') {
+        const result = await client.queries.listPublicReports(
+          { limit: READ_LIMIT },
+          { authMode: signedIn ? 'userPool' : 'identityPool' },
+        );
+        const firstError = result.errors?.[0];
+        if (firstError) throw new Error(firstError.message ?? 'Could not load incidents.');
+        reports = (result.data ?? []).filter(Boolean) as PublicReport[];
+      } else {
+        throw new Error('The public incident service is unavailable. Please try again later.');
+      }
 
       if (sequence !== sequenceRef.current) return;
       setState({
         status: 'ready',
-        // The resolver returns the `PublicReport` shape by construction; the
-        // cast is the GraphQL codegen boundary, not a widening of trust.
-        incidents: (result.data ?? []).filter(Boolean) as PublicReport[],
+        incidents: reports,
       });
     } catch (error) {
       if (sequence !== sequenceRef.current) return;

@@ -103,6 +103,7 @@ describe('IncidentMapView', () => {
     expect(MapMock).toHaveBeenCalledOnce();
     expect(MapMock).toHaveBeenCalledWith(expect.objectContaining({ style: DEMO_MAP_STYLE }));
     expect(NavigationControl).toHaveBeenCalledOnce();
+    expect(NavigationControl).toHaveBeenCalledWith({ showCompass: true });
     expect(addControl).toHaveBeenCalledOnce();
   });
 
@@ -240,4 +241,12 @@ describe('IncidentMapView', () => {
       expect(camera.zoom).toBeGreaterThanOrEqual(3);
     });
   });
+});
+
+it('contains a WebGL startup failure inside the map', () => {
+  MapMock.mockImplementationOnce(() => {
+    throw new Error('WebGL unavailable');
+  });
+  render(<IncidentMapView />);
+  expect(screen.getByRole('status')).toHaveTextContent('Map unavailable');
 });

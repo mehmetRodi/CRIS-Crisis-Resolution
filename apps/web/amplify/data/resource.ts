@@ -6,6 +6,7 @@ import { publishReportUpdate as publishReportUpdateFn } from '../functions/publi
 import { classifyReport as classifyReportFn } from '../functions/classify-report/resource';
 import { listVolunteerTasks as listVolunteerTasksFn } from '../functions/list-volunteer-tasks/resource';
 import { listPublicReports as listPublicReportsFn } from '../functions/list-public-reports/resource';
+import { reportWork as reportWorkFn } from '../functions/report-work/resource';
 import { assignTeam as assignTeamFn } from '../functions/assign-team/resource';
 
 /**
@@ -184,6 +185,7 @@ const schema = a
           'PRIORITY_SCORED',
           'VERIFICATION_RECORDED',
           'ASSIGNED',
+          'WORK_UPDATED',
           'DUPLICATE_LINKED',
           'ALERT_DISPATCHED',
         ]),
@@ -526,6 +528,56 @@ const schema = a
       .handler(a.handler.function(assignTeamFn))
       .authorization((allow) => [allow.groups(['COORDINATOR', 'ADMIN'])]),
 
+    /** Private work ownership. All writes go through updateReportWork. */
+    ReportWork: a
+      .model({
+        assigneeId: a.string(),
+        assigneeLabel: a.string(),
+        version: a.integer().required(),
+        updatesJson: a.string().required(),
+        createdAt: a.datetime(),
+      })
+      .authorization((allow) => [allow.groups(['COORDINATOR', 'ADMIN']).to(['read'])]),
+
+    WorkUpdate: a.customType({
+      id: a.id().required(),
+      text: a.string().required(),
+      authorLabel: a.string().required(),
+      createdAt: a.datetime().required(),
+    }),
+    ReportWorkView: a.customType({
+      reportId: a.id().required(),
+      version: a.integer().required(),
+      assigneeLabel: a.string(),
+      isMine: a.boolean().required(),
+      canClaim: a.boolean().required(),
+      canEdit: a.boolean().required(),
+      updates: a.ref('WorkUpdate').array().required(),
+    }),
+    getReportWork: a
+      .query()
+      .arguments({ reportId: a.id().required() })
+      .returns(a.ref('ReportWorkView'))
+      .handler(a.handler.function(reportWorkFn))
+      .authorization((allow) => [allow.groups(['VOLUNTEER', 'RESPONDER', 'COORDINATOR', 'ADMIN'])]),
+    listMyReportWork: a
+      .query()
+      .returns(a.id().array().required())
+      .handler(a.handler.function(reportWorkFn))
+      .authorization((allow) => [allow.groups(['VOLUNTEER', 'RESPONDER', 'COORDINATOR', 'ADMIN'])]),
+    updateReportWork: a
+      .mutation()
+      .arguments({
+        reportId: a.id().required(),
+        expectedVersion: a.integer().required(),
+        action: a.string().required(),
+        note: a.string(),
+        targetUsername: a.string(),
+      })
+      .returns(a.ref('ReportWorkView'))
+      .handler(a.handler.function(reportWorkFn))
+      .authorization((allow) => [allow.groups(['VOLUNTEER', 'RESPONDER', 'COORDINATOR', 'ADMIN'])]),
+
     /* ---------------------------------------------------------------------- */
     /* Volunteer task projection (CRIS-33, ADR-0042)                           */
     /* ---------------------------------------------------------------------- */
@@ -728,6 +780,7 @@ const schema = a
     allow.resource(classifyReportFn).to(['mutate']),
     allow.resource(transitionReportFn).to(['mutate']),
     allow.resource(assignTeamFn).to(['mutate']),
+    allow.resource(reportWorkFn).to(['mutate']),
   ]);
 
 export type Schema = ClientSchema<typeof schema>;

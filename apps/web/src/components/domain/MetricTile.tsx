@@ -38,31 +38,34 @@ export function MetricTile({
       {accent ? (
         <span
           aria-hidden="true"
-          className={cn('absolute inset-y-0 left-0 w-1 rounded-l-lg', accent)}
+          className={cn('absolute inset-y-0 left-0 w-1.5 rounded-l-xl', accent)}
         />
       ) : null}
-      <span className="flex items-baseline justify-between gap-2">
-        <span className="text-xs font-semibold uppercase tracking-wide text-fg-muted">{label}</span>
-        {sublabel ? <span className="text-[11px] text-fg-subtle">{sublabel}</span> : null}
+      <span className="flex items-baseline justify-between gap-1">
+        <span className="text-xs font-bold uppercase tracking-wide text-fg-muted">{label}</span>
+        {sublabel ? (
+          <span className="text-[10px] font-medium text-fg-subtle">{sublabel}</span>
+        ) : null}
       </span>
       {count == null ? (
-        <span
-          aria-hidden="true"
-          className="mt-1 block text-2xl font-semibold tabular text-fg-subtle"
-        >
+        <span aria-hidden="true" className="mt-1 block text-2xl font-bold tabular text-fg-subtle">
           —
         </span>
       ) : (
-        <span className="mt-1 block text-2xl font-semibold tabular text-fg">{count}</span>
+        <span className="mt-1 block text-2xl font-bold tabular text-fg tracking-tight">
+          {count}
+        </span>
       )}
       {count == null ? <span className="sr-only">{emptyLabel}</span> : null}
     </>
   );
 
   const shell = cn(
-    'relative block w-full overflow-hidden rounded-lg border bg-surface px-4 py-3 pl-5 text-left shadow-xs transition-colors',
-    selected ? 'border-accent-border bg-accent-subtle' : 'border-border',
-    onClick && 'hover:bg-surface-hover',
+    'relative block w-full overflow-hidden rounded-xl border px-3.5 py-2.5 pl-4 text-left shadow-2xs transition-all duration-150',
+    selected
+      ? 'border-accent bg-accent/10 ring-2 ring-accent/20 shadow-xs'
+      : 'border-border/80 bg-surface',
+    onClick && 'hover:bg-surface-hover hover:border-border hover:shadow-xs active:scale-[0.98]',
     className,
   );
 

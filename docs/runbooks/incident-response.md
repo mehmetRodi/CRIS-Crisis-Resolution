@@ -153,3 +153,17 @@ baseline public query, and incident markers are deferred together by ADR-0048.
 End-to-end subscription delivery latency (real-time p95 < 2 s, §3.2) still has no automated
 measurement — the smoke gate measures submit→classified only. Deployed client telemetry
 remains an open follow-up.
+
+## Report ownership and progress failures (ADR-0063)
+
+For `ReportWorkErrors`, inspect the `report-work` Lambda/X-Ray trace and
+`CrisisMap/Resolvers` unexpected-error metric with Operation `reportWork`. Check
+Report/ReportWork/ReportEvent table permissions and the function's user-pool-scoped
+AdminGetUser/AdminListGroupsForUser grants. Never log or copy work note text or
+user identifiers into an incident log. Expected CONFLICT, FORBIDDEN, ILLEGAL,
+VALIDATION, and NOT_FOUND errors do not page. On a conflict, refresh ownership and
+review the current owner before retrying; do not automatically resubmit a claim.
+If the UI reports the service unavailable after deployment, verify that the schema,
+function, new table, and generated Amplify outputs came from the same checkout.
+My tasks has a bounded scan and explicitly fails if it cannot complete; investigate
+working-set size and migrate to an assignee index rather than showing partial IDs.

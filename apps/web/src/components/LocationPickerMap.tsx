@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { Crosshair } from 'lucide-react';
+import { TOKENS } from '@crisismap/design';
 import type { ReportLocation } from '@crisismap/shared';
 
 import { cn } from '../lib/cn';
@@ -27,10 +28,10 @@ const PIN_ZOOM = 15;
  */
 function markerColor(): string {
   if (typeof window === 'undefined' || typeof getComputedStyle !== 'function') {
-    return 'hsl(184 82% 28%)';
+    return `hsl(${TOKENS.accent})`;
   }
   const raw = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
-  return raw ? `hsl(${raw})` : 'hsl(184 82% 28%)';
+  return raw ? `hsl(${raw})` : `hsl(${TOKENS.accent})`;
 }
 
 function isSameLocation(a: ReportLocation | null, b: ReportLocation | null): boolean {
@@ -75,6 +76,7 @@ export default function LocationPickerMap({ value, onChange }: LocationPickerPro
    */
   const selfEmittedRef = useRef<ReportLocation | null>(value);
 
+  const [mapFailed, setMapFailed] = useState(false);
   const [gpsLoading, setGpsLoading] = useState(false);
   const [gpsError, setGpsError] = useState<string | null>(null);
 
@@ -113,17 +115,29 @@ export default function LocationPickerMap({ value, onChange }: LocationPickerPro
     if (!containerRef.current) return;
 
     const { url } = resolveMapStyle();
-    const map = new maplibregl.Map({
-      container: containerRef.current,
-      style: url,
-      center: value ? [value.lng, value.lat] : DEFAULT_CENTER,
-      zoom: value ? PIN_ZOOM : DEFAULT_ZOOM,
-      // OpenFreeMap serves OpenStreetMap data under ODbL — attribution is
-      // required, not optional. `compact` keeps it to a small (i) on mobile.
-      attributionControl: { compact: true },
-    });
+    let map: maplibregl.Map;
+    try {
+      map = new maplibregl.Map({
+        container: containerRef.current,
+        style: url,
+        center: value ? [value.lng, value.lat] : DEFAULT_CENTER,
+        zoom: value ? PIN_ZOOM : DEFAULT_ZOOM,
+        // OpenFreeMap serves OpenStreetMap data under ODbL — attribution is
+        // required, not optional. `compact` keeps it to a small (i) on mobile.
+        attributionControl: { compact: true },
+      });
+    } catch {
+      setMapFailed(true);
+      return;
+    }
+    map.on('error', () => setMapFailed(true));
     mapRef.current = map;
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+    const resizeObserver =
+      typeof ResizeObserver === 'function' ? new ResizeObserver(() => map.resize()) : null;
+    resizeObserver?.observe(containerRef.current!);
+    // Keep MapLibre's compass visible: after a trackpad/touch rotation it is
+    // the one-click path back to a north-up, level orientation.
+    map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-right');
 
     if (value) {
       placeMarker(value);
@@ -135,6 +149,7 @@ export default function LocationPickerMap({ value, onChange }: LocationPickerPro
     });
 
     return () => {
+      resizeObserver?.disconnect();
       map.remove();
       mapRef.current = null;
       markerRef.current = null;
@@ -206,45 +221,67 @@ export default function LocationPickerMap({ value, onChange }: LocationPickerPro
           aria-disabled={gpsLoading}
           aria-busy={gpsLoading}
           className={cn(
-            'inline-flex h-9 items-center gap-2 rounded border border-border bg-surface px-3 text-sm font-medium text-fg shadow-xs transition-colors',
-            gpsLoading ? 'opacity-50' : 'hover:bg-surface-hover',
+            'inline-flex h-9 items-center gap-2 rounded-lg border border-border/80 bg-surface px-3 text-xs font-semibold text-fg shadow-2xs transition-all',
+            gpsLoading
+              ? 'opacity-50'
+              : 'hover:bg-surface-hover hover:border-accent/40 active:scale-95',
           )}
         >
-          <Crosshair aria-hidden="true" className="size-4 shrink-0" />
+          <Crosshair
+            aria-hidden="true"
+            className={cn('size-4 shrink-0 text-accent', gpsLoading && 'animate-spin')}
+          />
           {gpsLoading ? 'Locating…' : 'Use my location'}
         </button>
         {value ? (
-          <button
-            type="button"
-            onClick={() => onChange(null)}
-            // "Clear" alone gives no object; out of context it is unanswerable.
-            aria-label="Clear selected location"
-            className="rounded text-xs font-medium text-fg-muted underline-offset-4 hover:text-fg hover:underline"
-          >
-            Clear
-          </button>
+          <div className="flex items-center gap-2">
+            <span className="tabular rounded-md bg-accent/10 px-2 py-0.5 text-[11px] font-mono font-medium text-accent border border-accent/20">
+              {value.lat.toFixed(4)}, {value.lng.toFixed(4)}
+            </span>
+            <button
+              type="button"
+              onClick={() => onChange(null)}
+              // "Clear" alone gives no object; out of context it is unanswerable.
+              aria-label="Clear selected location"
+              className="rounded text-xs font-semibold text-danger/80 underline-offset-4 hover:text-danger hover:underline"
+            >
+              Clear
+            </button>
+          </div>
         ) : null}
       </div>
 
-      <div
-        ref={containerRef}
-        data-testid="location-map"
-        // Named and given a role so the map is not an anonymous group in the
-        // reading order. Pin-dropping is pointer-only by nature; the GPS button
-        // above and the location-hint field below are the keyboard paths, and
-        // location is never required (ADR-0037).
-        role="application"
-        aria-label="Location map — drop a pin to mark the incident"
-        className="h-56 w-full overflow-hidden rounded-lg border border-border"
-      />
+      <div className="relative">
+        <div
+          ref={containerRef}
+          data-testid="location-map"
+          // Named and given a role so the map is not an anonymous group in the
+          // reading order. Pin-dropping is pointer-only by nature; the GPS button
+          // above and the location-hint field below are the keyboard paths, and
+          // location is never required (ADR-0037).
+          role="application"
+          aria-label="Location map — drop a pin to mark the incident"
+          className="h-56 w-full overflow-hidden rounded-xl border border-border/80 shadow-2xs"
+        />
+
+        {mapFailed ? (
+          <div className="absolute inset-0 flex items-center justify-center rounded-xl border border-border bg-surface-sunken p-6 text-center text-sm text-fg-muted">
+            Map unavailable. You can still use GPS or enter a landmark below.
+          </div>
+        ) : null}
+      </div>
 
       {/* Already rendered in both states, so it is a live region that exists
           *before* its text changes — which is what makes "Use my location"
           succeeding audible rather than silent (ADR-0037). */}
       <p role="status" className="text-xs text-fg-muted">
-        {value
-          ? `Pin at ${value.lat.toFixed(5)}, ${value.lng.toFixed(5)} — drag the pin or tap the map to adjust.`
-          : 'Tap the map to drop a pin, or use your location above.'}
+        {mapFailed
+          ? value
+            ? `Location selected: ${value.lat.toFixed(5)}, ${value.lng.toFixed(5)}. Map unavailable.`
+            : 'Map unavailable. Use GPS or enter a landmark below.'
+          : value
+            ? `Pin at ${value.lat.toFixed(5)}, ${value.lng.toFixed(5)} — drag the pin or tap the map to adjust.`
+            : 'Tap the map to drop a pin, or use your location above.'}
       </p>
       {/* Kept mounted for the same reason, and visually hidden while empty so an
           always-present region costs no layout. A denied permission is the most

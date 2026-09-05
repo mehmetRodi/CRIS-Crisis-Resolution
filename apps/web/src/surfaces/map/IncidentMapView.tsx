@@ -91,15 +91,26 @@ export default function IncidentMapView({
     const container = containerRef.current;
     if (!container) return;
 
-    const map = new maplibregl.Map({
-      container,
-      style: style.url,
-      center,
-      zoom,
-      attributionControl: { compact: true },
-    });
+    let map: maplibregl.Map;
+    try {
+      map = new maplibregl.Map({
+        container,
+        style: style.url,
+        center,
+        zoom,
+        attributionControl: { compact: true },
+      });
+    } catch {
+      setFailed(true);
+      return;
+    }
     mapRef.current = map;
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
+    const resizeObserver =
+      typeof ResizeObserver === 'function' ? new ResizeObserver(() => map.resize()) : null;
+    resizeObserver?.observe(containerRef.current!);
+    // Keep MapLibre's compass visible: after a trackpad/touch rotation it is
+    // the one-click path back to a north-up, level orientation.
+    map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-right');
 
     const onError = () => setFailed(true);
     map.on('error', onError);
@@ -225,6 +236,7 @@ export default function IncidentMapView({
     map.on('load', onLoad);
 
     return () => {
+      resizeObserver?.disconnect();
       setReady(false);
       mapRef.current = null;
       map.off('error', onError);
@@ -308,7 +320,7 @@ export default function IncidentMapView({
       {failed ? (
         <div className="absolute inset-0 z-[1] flex items-center justify-center bg-bg/95 p-6 text-center">
           <p className="max-w-xs text-sm text-fg-muted">
-            Map unavailable — base tiles could not be loaded. Incidents are still listed beside the
+            Map unavailable — the map could not be loaded. Incidents are still listed beside the
             map.
           </p>
         </div>

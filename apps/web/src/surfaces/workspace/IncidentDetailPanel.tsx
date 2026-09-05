@@ -1,3 +1,4 @@
+import { ReportWorkPanel } from './ReportWorkPanel';
 import type { TriageEntities, UserRole } from '@crisismap/shared';
 import { X } from 'lucide-react';
 
@@ -59,9 +60,9 @@ function Section({
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-0">
-      <dt className="text-[11px] font-medium uppercase tracking-wide text-fg-subtle">{label}</dt>
-      <dd className="truncate text-sm text-fg">{value}</dd>
+    <div className="min-w-0 rounded-xl border border-border/50 bg-surface-sunken/40 p-2.5">
+      <dt className="text-[10px] font-bold uppercase tracking-wider text-fg-subtle">{label}</dt>
+      <dd className="truncate text-xs font-semibold text-fg mt-0.5">{value}</dd>
     </div>
   );
 }
@@ -76,19 +77,21 @@ function Entities({ entities }: { entities: TriageEntities }) {
 
   return (
     <Section title="Extracted details">
-      <div className="space-y-2.5">
+      <div className="space-y-3 rounded-xl border border-border/50 bg-surface-sunken/30 p-3">
         {entities.peopleAffected != null ? (
-          <p className="text-sm text-fg">
-            <span className="tabular font-semibold">{entities.peopleAffected}</span>
+          <p className="text-xs text-fg">
+            <span className="tabular font-bold text-accent">{entities.peopleAffected}</span>
             <span className="text-fg-muted"> people affected</span>
           </p>
         ) : null}
         {entities.infrastructure.length > 0 ? (
           <div>
-            <p className="mb-1 text-[11px] text-fg-subtle">Infrastructure</p>
+            <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-fg-subtle">
+              Infrastructure
+            </p>
             <div className="flex flex-wrap gap-1">
               {entities.infrastructure.map((item) => (
-                <Badge key={item} variant="neutral">
+                <Badge key={item} variant="neutral" className="text-[11px]">
                   {item}
                 </Badge>
               ))}
@@ -97,10 +100,12 @@ function Entities({ entities }: { entities: TriageEntities }) {
         ) : null}
         {entities.hazards.length > 0 ? (
           <div>
-            <p className="mb-1 text-[11px] text-fg-subtle">Hazards</p>
+            <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-fg-subtle">
+              Hazards
+            </p>
             <div className="flex flex-wrap gap-1">
               {entities.hazards.map((item) => (
-                <Badge key={item} variant="warning">
+                <Badge key={item} variant="warning" className="text-[11px]">
                   {item}
                 </Badge>
               ))}
@@ -149,7 +154,7 @@ export function IncidentDetailPanel({
     >
       {/* Sticky so the incident under discussion stays identified while the
           coordinator scrolls to the timeline or the actions. */}
-      <header className="sticky top-0 z-10 flex items-start gap-2 border-b border-border bg-surface px-4 py-3">
+      <header className="sticky top-0 z-10 flex items-start gap-2 border-b border-border/80 bg-surface/90 backdrop-blur-md px-4 py-3 shadow-2xs">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <PriorityBadge band={band} score={incident.priorityScore} />
@@ -158,26 +163,67 @@ export function IncidentDetailPanel({
           <h2
             id="incident-detail-heading"
             className={cn(
-              'mt-2 text-sm font-medium leading-snug',
+              'mt-2 text-xs font-semibold leading-relaxed',
               incident.summary ? 'text-fg' : 'italic text-fg-subtle',
             )}
           >
             {incident.summary ?? 'Awaiting AI summary'}
           </h2>
         </div>
-        <Button variant="ghost" size="icon-sm" onClick={onClose} aria-label="Close incident detail">
-          <X aria-hidden="true" />
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={onClose}
+          aria-label="Close incident detail"
+          className="rounded-lg hover:bg-surface-hover"
+        >
+          <X aria-hidden="true" className="size-4" />
         </Button>
       </header>
 
+      {showActions ? (
+        <Section title="Actions">
+          <div className="space-y-4">
+            {capabilities.canTransitionStatus && onTransition ? (
+              <TransitionActions
+                incident={incident}
+                callerRole={callerRole}
+                onTransition={onTransition}
+                transition={transition}
+              />
+            ) : null}
+            {capabilities.canAssignTeam && onAssignTeam ? (
+              <div className="border-t border-border pt-3.5">
+                <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-fg-subtle">
+                  Response team
+                </h4>
+                <AssignTeamAction
+                  incident={incident}
+                  teams={teams}
+                  onAssignTeam={onAssignTeam}
+                  assignment={assignment}
+                />
+              </div>
+            ) : null}
+          </div>
+        </Section>
+      ) : null}
+
+      <div className="p-4">
+        <ReportWorkPanel
+          key={incident.reportId}
+          reportId={incident.reportId}
+          callerRole={callerRole}
+        />
+      </div>
       <Section title="Classification" className="border-t-0">
-        <dl className="grid grid-cols-2 gap-x-3 gap-y-3">
-          <div className="min-w-0">
-            <dt className="text-[11px] font-medium uppercase tracking-wide text-fg-subtle">
+        <dl className="grid grid-cols-2 gap-2">
+          <div className="min-w-0 rounded-xl border border-border/50 bg-surface-sunken/40 p-2.5">
+            <dt className="text-[10px] font-bold uppercase tracking-wider text-fg-subtle">
               Category
             </dt>
-            <dd className="text-sm text-fg">
-              <CategoryTag category={incident.category} className="text-sm text-fg" />
+            <dd className="text-xs font-semibold text-fg mt-0.5">
+              <CategoryTag category={incident.category} className="text-xs" />
             </dd>
           </div>
           <Field label="Urgency" value={urgencyLabel(incident.urgency)} />
@@ -208,34 +254,6 @@ export function IncidentDetailPanel({
       {capabilities.canViewTimeline ? (
         <Section title="Timeline">
           <IncidentTimeline timeline={timeline} />
-        </Section>
-      ) : null}
-
-      {showActions ? (
-        <Section title="Actions">
-          <div className="space-y-4">
-            {capabilities.canTransitionStatus && onTransition ? (
-              <TransitionActions
-                incident={incident}
-                callerRole={callerRole}
-                onTransition={onTransition}
-                transition={transition}
-              />
-            ) : null}
-            {capabilities.canAssignTeam && onAssignTeam ? (
-              <div className="border-t border-border pt-3.5">
-                <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-fg-subtle">
-                  Response team
-                </h4>
-                <AssignTeamAction
-                  incident={incident}
-                  teams={teams}
-                  onAssignTeam={onAssignTeam}
-                  assignment={assignment}
-                />
-              </div>
-            ) : null}
-          </div>
         </Section>
       ) : null}
 

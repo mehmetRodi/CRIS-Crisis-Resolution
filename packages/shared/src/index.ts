@@ -8,3 +8,4 @@ export * from './media';
 export * from './offline-queue';
 export * from './volunteer';
 export * from './alerts';
+export * from './report-work';

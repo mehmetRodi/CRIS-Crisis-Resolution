@@ -20,7 +20,8 @@ geocoding, conservative duplicate grouping, and presigned media uploads are wire
 subscriptions, Amazon Location map tiles, richer incident-map overlays, media quarantine/signed
 delivery, and citizen proximity alerts remain deferred. See
 **[docs/architecture.md](docs/architecture.md)** for the distinction between the current
-implementation and target architecture.
+implementation and target architecture, or open the
+**[architectural design diagram](docs/architecture-diagram.md)** for the rendered system view.
 
 ## Tech stack
 

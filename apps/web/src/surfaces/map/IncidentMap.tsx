@@ -17,7 +17,7 @@ const IncidentMapView = lazy(() => import('./IncidentMapView'));
 
 export function IncidentMap({ className, ...rest }: IncidentMapProps) {
   return (
-    <div className={cn('relative', className)}>
+    <div className={cn('relative h-full w-full', className)}>
       <Suspense
         fallback={
           // `role="status"`, not a bare div: on a slow connection this is on

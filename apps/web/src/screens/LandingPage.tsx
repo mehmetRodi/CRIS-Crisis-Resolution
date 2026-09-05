@@ -1,6 +1,7 @@
 import { Link, Navigate } from 'react-router-dom';
 import { ArrowRight, Lock, Map as MapIcon, Send, ShieldCheck, Zap } from 'lucide-react';
 
+import { SiteFooter } from '../shell/SiteFooter';
 import { useAuth } from '../AuthContext';
 import { Logo } from '../components/brand/Logo';
 import { Button } from '../components/ui/button';
@@ -15,8 +16,7 @@ import { capabilitiesFor } from '../lib/capabilities';
  *
  * One decision drives the layout: a person arriving here mid-emergency needs to
  * reach the report form without reading anything. So "Report an emergency" is
- * the largest element on the page, it is above the fold on a phone, and nothing
- * competes with it for that position. Everything else — how it works, the
+ * the primary action on the page and precedes supporting content on a phone. Everything else — how it works, the
  * public map, staff sign-in — sits below it.
  *
  * Operational users never see this page: they are routed to their workspace, so
@@ -34,106 +34,201 @@ export function LandingPage() {
   }
 
   return (
-    <div className="min-h-dvh bg-transparent">
-      <header className="mx-auto flex h-16 w-full max-w-5xl items-center justify-between px-5">
-        <Logo />
-        <Button variant="ghost" size="sm" asChild>
-          <Link to="/login">
-            Staff sign in
-            <ArrowRight aria-hidden="true" />
-          </Link>
-        </Button>
+    <div className="min-h-dvh bg-bg">
+      <a
+        href="#main-content"
+        className="sr-only z-50 rounded-lg bg-surface p-3 text-accent focus:not-sr-only focus:absolute focus:left-4 focus:top-4"
+      >
+        Skip to content
+      </a>
+      <header className="border-b border-border bg-surface">
+        <div className="mx-auto flex min-h-20 w-full max-w-6xl items-center justify-between gap-4 px-5 sm:px-8">
+          <Logo />
+          <nav aria-label="Main navigation" className="flex items-center gap-2 sm:gap-6">
+            <a
+              href="#how-it-works"
+              className="hidden min-h-11 items-center text-sm font-medium text-fg-muted hover:text-accent sm:inline-flex"
+            >
+              How it works
+            </a>
+            <Link
+              to="/about"
+              className="hidden text-sm font-medium text-fg-muted hover:text-accent sm:block"
+            >
+              About CRIS
+            </Link>
+            <Button variant="secondary" size="lg" className="rounded-lg" asChild>
+              <Link to="/login">
+                Staff sign in
+                <ArrowRight aria-hidden="true" />
+              </Link>
+            </Button>
+          </nav>
+        </div>
       </header>
 
-      <main className="mx-auto w-full max-w-5xl px-5 pb-20">
-        {/* ── Primary action ────────────────────────────────────────────── */}
-        <section className="py-10 sm:py-16">
-          <p className="text-sm font-medium text-accent">Emergency reporting</p>
-          <h1 className="mt-3 max-w-2xl text-3xl font-semibold leading-tight tracking-tight text-fg sm:text-4xl">
-            Report what is happening. Get it to the people who can respond.
-          </h1>
-          <p className="mt-4 max-w-xl text-base leading-relaxed text-fg-muted">
-            Describe the situation in your own words. It is classified, located, and ranked against
-            every other open incident within seconds, then routed to the nearest response team.
-          </p>
-
-          <div className="mt-8 flex flex-col gap-3 sm:max-w-md">
-            <Button size="xl" variant="primary" asChild>
-              <Link to="/report">
-                <Send aria-hidden="true" />
-                Report an emergency
-              </Link>
-            </Button>
-            <Button size="lg" variant="secondary" asChild>
-              <Link to="/map">
-                <MapIcon aria-hidden="true" />
-                View the live incident map
-              </Link>
-            </Button>
+      <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-6xl px-5 pb-12 sm:px-8">
+        <section
+          aria-labelledby="landing-heading"
+          className="grid gap-10 py-10 sm:py-16 lg:grid-cols-[1.2fr_1fr] lg:items-center lg:gap-16 lg:py-20"
+        >
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-accent">
+              Community reports. Coordinated response.
+            </p>
+            <h1
+              id="landing-heading"
+              className="mt-5 max-w-2xl text-4xl font-semibold leading-[1.1] tracking-tight text-fg sm:text-5xl lg:text-6xl"
+            >
+              Every report starts <span className="text-accent">with you.</span>
+            </h1>
+            <p className="mt-5 max-w-lg text-base leading-relaxed text-fg-muted sm:text-lg">
+              Help response teams understand what is happening. Share what you see, where it is, and
+              what help is needed.
+            </p>
+            <div className="mt-7 max-w-md">
+              <Button size="xl" variant="primary" className="h-14 rounded-xl" asChild>
+                <Link to="/report">
+                  <Send aria-hidden="true" />
+                  Report an emergency
+                  <ArrowRight aria-hidden="true" className="ml-auto" />
+                </Link>
+              </Button>
+              <p className="mt-3 flex items-start gap-2 text-sm leading-relaxed text-fg-muted">
+                <Lock aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+                No account needed. You can report anonymously.
+              </p>
+            </div>
           </div>
 
-          <p className="mt-4 flex items-center gap-1.5 text-xs text-fg-subtle">
-            <Lock aria-hidden="true" className="size-3.5 shrink-0" />
-            No account needed. You can report anonymously.
-          </p>
+          <aside
+            aria-labelledby="report-guide"
+            className="overflow-hidden rounded-3xl border border-border bg-surface shadow-lg lg:rotate-1"
+          >
+            <div className="border-b border-border bg-accent-subtle px-6 py-5 sm:px-8">
+              <span className="inline-flex size-11 items-center justify-center rounded-xl border border-accent-border bg-surface text-accent">
+                <MapIcon aria-hidden="true" className="size-5" />
+              </span>
+              <h2 id="report-guide" className="mt-4 text-xl font-semibold tracking-tight text-fg">
+                A little detail makes a difference.
+              </h2>
+              <p className="mt-2 text-sm leading-relaxed text-fg-muted">
+                You do not need to have every answer to send a report.
+              </p>
+            </div>
+            <ul className="space-y-5 px-6 py-6 sm:px-8">
+              {[
+                { title: 'What is happening?', body: 'Describe the situation in your own words.' },
+                {
+                  title: 'Where is help needed?',
+                  body: 'Add a location, a map pin, or a nearby landmark.',
+                },
+                {
+                  title: 'What else can you share?',
+                  body: 'Include a photo if you have one. It is optional.',
+                },
+              ].map((item, index) => (
+                <li key={item.title} className="flex gap-3">
+                  <span
+                    aria-hidden="true"
+                    className="tabular flex size-7 shrink-0 items-center justify-center rounded-full bg-surface-sunken text-xs font-semibold text-fg-muted"
+                  >
+                    {index + 1}
+                  </span>
+                  <div>
+                    <p className="text-sm font-semibold text-fg">{item.title}</p>
+                    <p className="mt-1 text-sm leading-relaxed text-fg-muted">{item.body}</p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </aside>
         </section>
 
-        {/* ── How it works ──────────────────────────────────────────────── */}
-        <section aria-labelledby="how-it-works" className="border-t border-border py-10">
-          <h2 id="how-it-works" className="text-sm font-semibold text-fg">
-            What happens to your report
+        <section
+          aria-labelledby="map-heading"
+          className="flex flex-col gap-5 rounded-2xl border border-border bg-surface p-6 sm:flex-row sm:items-center sm:justify-between sm:px-8"
+        >
+          <div className="flex items-start gap-4">
+            <MapIcon aria-hidden="true" className="mt-1 size-6 shrink-0 text-accent" />
+            <div>
+              <h2 id="map-heading" className="text-base font-semibold text-fg">
+                See the bigger picture
+              </h2>
+              <p className="mt-1 text-sm leading-relaxed text-fg-muted">
+                Explore reported incidents on the public map.
+              </p>
+            </div>
+          </div>
+          <Button size="lg" variant="secondary" className="shrink-0 rounded-lg" asChild>
+            <Link to="/map">
+              View incident map <ArrowRight aria-hidden="true" />
+            </Link>
+          </Button>
+        </section>
+
+        <section aria-labelledby="how-it-works" className="py-12 sm:py-16">
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-accent">
+            From report to review
+          </p>
+          <h2
+            id="how-it-works"
+            className="mt-3 text-2xl font-semibold tracking-tight text-fg sm:text-3xl"
+          >
+            What happens next
           </h2>
-          <ol className="mt-5 grid gap-6 sm:grid-cols-3">
+          <ol className="mt-8 grid gap-8 sm:grid-cols-3">
             {[
               {
                 icon: Send,
-                title: 'You describe it',
-                body: 'Plain words are enough. Add a location and a photo if you can — neither is required.',
+                title: 'You share the situation',
+                body: 'Start with what you know. Your description gives response teams a clearer view of the incident.',
               },
               {
                 icon: Zap,
-                title: 'It is triaged in seconds',
-                body: 'Your report is categorised, located, and given a priority score explained factor by factor.',
+                title: 'Your report is triaged',
+                body: 'Automated analysis helps categorise reports and identify which incidents need attention first.',
               },
               {
                 icon: ShieldCheck,
-                title: 'A person confirms it',
-                body: 'A coordinator reviews and verifies before a team is dispatched. Nothing is actioned by AI alone.',
+                title: 'Coordinators review',
+                body: 'Response coordinators can review incident details, verify reports, and assign teams.',
               },
             ].map((step, index) => (
-              <li key={step.title}>
-                <span className="flex size-9 items-center justify-center rounded-lg bg-accent-subtle text-accent-subtle-fg">
-                  <step.icon aria-hidden="true" className="size-4" />
-                </span>
-                <h3 className="mt-3 text-sm font-semibold text-fg">
-                  <span className="tabular text-fg-subtle">{index + 1}. </span>
-                  {step.title}
-                </h3>
-                <p className="mt-1.5 text-sm leading-relaxed text-fg-muted">{step.body}</p>
+              <li
+                key={step.title}
+                className="rounded-2xl border border-border bg-surface p-6 shadow-xs"
+              >
+                <div className="flex items-center gap-3">
+                  <step.icon aria-hidden="true" className="size-5 text-accent" />
+                  <span className="tabular text-xs font-medium text-fg-muted">
+                    Step {index + 1}
+                  </span>
+                </div>
+                <h3 className="mt-4 text-base font-semibold text-fg">{step.title}</h3>
+                <p className="mt-2 text-sm leading-relaxed text-fg-muted">{step.body}</p>
               </li>
             ))}
           </ol>
         </section>
 
-        {/* ── Privacy ───────────────────────────────────────────────────── */}
         <section
           aria-labelledby="privacy-heading"
-          className="rounded-lg border border-border bg-surface p-5"
+          className="flex items-start gap-4 rounded-xl bg-surface-sunken p-6"
         >
-          <h2
-            id="privacy-heading"
-            className="flex items-center gap-2 text-sm font-semibold text-fg"
-          >
-            <Lock aria-hidden="true" className="size-4 text-accent" />
-            Your identity is protected
-          </h2>
-          <p className="mt-2 max-w-2xl text-sm leading-relaxed text-fg-muted">
-            Contact details are never shown on the map, never sent to the classification model, and
-            never shared with volunteers. The public map shows an AI-written summary of each
-            incident — never the words you wrote, and never anything that identifies you.
-          </p>
+          <Lock aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-accent" />
+          <div>
+            <h2 id="privacy-heading" className="text-sm font-semibold text-fg">
+              Share the situation. Keep personal details out.
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-fg-muted">
+              You can submit without signing in. Focus your description on the incident and avoid
+              including names, phone numbers, or other personal details in your text or photos.
+            </p>
+          </div>
         </section>
       </main>
+      <SiteFooter />
     </div>
   );
 }

@@ -32,6 +32,10 @@ vi.mock('maplibre-gl');
 
 import { ReportForm } from './ReportForm';
 
+function goTo(step: 'Situation' | 'Location' | 'Details' | 'Review') {
+  fireEvent.click(screen.getByRole('button', { name: `Go to ${step}` }));
+}
+
 const VALID_TEXT = 'A gas leak is filling the stairwell on Elm Street.';
 
 /**
@@ -40,6 +44,7 @@ const VALID_TEXT = 'A gas leak is filling the stairwell on Elm Street.';
  * element rather than the document, which would match both copies.
  */
 function photoControl() {
+  goTo('Details');
   return screen.getByRole('button', {
     name: /add a photo|uploading|change photo|retry photo/i,
   });
@@ -54,11 +59,13 @@ function pickFile(file: File) {
 
 /** Fills the three required fields, leaving the form submittable. */
 function fillRequired(category = /medical/i, urgency = /^critical$/i) {
+  goTo('Situation');
   fireEvent.change(screen.getByLabelText(/describe the situation/i), {
     target: { value: VALID_TEXT },
   });
   fireEvent.click(screen.getByRole('button', { name: category }));
   fireEvent.click(screen.getByRole('button', { name: urgency }));
+  goTo('Review');
 }
 
 describe('web ReportForm', () => {
@@ -83,7 +90,7 @@ describe('web ReportForm', () => {
 
     // `aria-disabled`, not `disabled` — the button stays focusable so its reason
     // is reachable; `handleSubmit` holds the actual gate (ADR-0037).
-    const submit = screen.getByRole('button', { name: /send report/i });
+    const submit = screen.getByRole('button', { name: /^continue$/i });
     expect(submit).toHaveAttribute('aria-disabled', 'true');
 
     fireEvent.change(screen.getByLabelText(/describe the situation/i), {
@@ -98,7 +105,7 @@ describe('web ReportForm', () => {
   it('does not submit an incomplete draft when the gated button is pressed', () => {
     render(<ReportForm />);
 
-    fireEvent.click(screen.getByRole('button', { name: /send report/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^continue$/i }));
 
     expect(submitReport).not.toHaveBeenCalled();
   });
@@ -111,6 +118,7 @@ describe('web ReportForm', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: /fire/i }));
     fireEvent.click(screen.getByRole('button', { name: /^high$/i }));
+    goTo('Review');
     fireEvent.click(screen.getByRole('button', { name: /send report/i }));
 
     await waitFor(() => expect(submitReport).toHaveBeenCalledTimes(1));
@@ -258,6 +266,8 @@ describe('web ReportForm', () => {
       await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
       expect(submitReport).not.toHaveBeenCalled();
       expect(await screen.findByText(/report saved/i)).toBeInTheDocument();
+      expect(screen.getByText(/keep this page open, or reopen CRIS/i)).toBeInTheDocument();
+      expect(screen.queryByText(/you can close this page/i)).not.toBeInTheDocument();
 
       const [submission, requestId] = enqueue.mock.calls[0] ?? [];
       expect(requestId).toBe('test-request-id');
@@ -293,9 +303,11 @@ describe('web ReportForm', () => {
       render(<ReportForm />);
 
       fillRequired();
+      goTo('Details');
       fireEvent.change(screen.getByLabelText(/contact details/i), {
         target: { value: 'citizen@example.com' },
       });
+      goTo('Review');
       fireEvent.click(screen.getByRole('button', { name: /send report/i }));
 
       expect(await screen.findByText(/contact details are not stored/i)).toBeInTheDocument();
@@ -326,5 +338,64 @@ describe('web ReportForm', () => {
       // Still the form, not the confirmation — the citizen is present and can retry.
       expect(screen.getByRole('form', { name: /emergency report/i })).toBeInTheDocument();
     });
+  });
+});
+
+describe('report card navigation', () => {
+  beforeEach(() => {
+    submitReport.mockReset();
+    useOfflineQueueMock.mockReturnValue({
+      isOnline: true,
+      pendingCount: 0,
+      isStale: false,
+      enqueue,
+    });
+  });
+
+  it('shows one step at a time, preserves entries, and reviews before sending', () => {
+    render(<ReportForm />);
+    expect(screen.queryByRole('group', { name: /^location$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /send report/i })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/describe the situation/i), {
+      target: { value: VALID_TEXT },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /medical/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^high$/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(screen.getByRole('group', { name: /^location$/i })).toBeVisible();
+    expect(screen.getByRole('heading', { name: /step 2 of 4/i })).toHaveFocus();
+    fireEvent.change(screen.getByLabelText('Landmark or detail'), {
+      target: { value: 'By the station' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(screen.getByLabelText(/describe the situation/i)).toHaveValue(VALID_TEXT);
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(screen.getByLabelText('Landmark or detail')).toHaveValue('By the station');
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(screen.getByRole('button', { name: /add a photo/i })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Review report' }));
+    expect(screen.getByText('By the station')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Send report' })).toBeVisible();
+    expect(submitReport).not.toHaveBeenCalled();
+  });
+
+  it('returns focus to missing fields when review is opened early', () => {
+    render(<ReportForm />);
+    goTo('Review');
+    fireEvent.click(screen.getByRole('button', { name: 'Send report' }));
+    expect(screen.getByLabelText(/describe the situation/i)).toHaveFocus();
+    expect(submitReport).not.toHaveBeenCalled();
+  });
+
+  it('does not bypass the review step through an implicit form submit', () => {
+    render(<ReportForm />);
+    fireEvent.change(screen.getByLabelText(/describe the situation/i), {
+      target: { value: VALID_TEXT },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /medical/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^high$/i }));
+    fireEvent.submit(screen.getByRole('form', { name: 'Emergency report' }));
+    expect(screen.getByRole('heading', { name: /step 2 of 4/i })).toBeInTheDocument();
+    expect(submitReport).not.toHaveBeenCalled();
   });
 });

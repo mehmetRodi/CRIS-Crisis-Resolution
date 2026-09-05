@@ -18,15 +18,6 @@
 
   body {
     @apply bg-bg font-sans text-fg antialiased;
-    /* Soften the map artwork so it supports, rather than competes with, the
-       dark foreground copy and controls. */
-    background-image:
-      linear-gradient(hsl(var(--bg) / 0.5), hsl(var(--bg) / 0.5)),
-      url('./assets/background-image.png');
-    background-position: center;
-    background-repeat: no-repeat;
-    background-size: cover;
-    background-attachment: fixed;
     /* Inter's contextual alternates fix the `i`/`l` sequences that otherwise
        collide at the small sizes the incident queue runs at. */
     font-feature-settings:

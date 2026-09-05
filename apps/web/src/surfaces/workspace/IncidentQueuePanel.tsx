@@ -84,7 +84,7 @@ export function IncidentQueuePanel({
       </h2>
 
       {/* ── Controls ─────────────────────────────────────────────────────── */}
-      <div className="shrink-0 space-y-3 border-b border-border p-3">
+      <div className="shrink-0 space-y-3 border-b border-border/80 bg-surface/60 p-3 backdrop-blur-xs">
         <div className="flex items-center gap-2">
           <div className="relative min-w-0 flex-1">
             <Search
@@ -95,9 +95,9 @@ export function IncidentQueuePanel({
               type="search"
               value={query}
               onChange={(event) => onQueryChange(event.target.value)}
-              placeholder="Search incidents"
+              placeholder="Search incidents…"
               aria-label="Search incidents by summary, category, region, or ID"
-              className="pl-8"
+              className="pl-8 text-xs h-9 rounded-lg border-border/80 bg-surface/90 shadow-2xs focus:border-accent"
             />
           </div>
           <FilterSheet filters={filters} regions={regions} onChange={onFiltersChange} />
@@ -126,22 +126,29 @@ export function IncidentQueuePanel({
         </div>
 
         {unscored > 0 ? (
-          <p className="flex items-center gap-1.5 text-xs text-fg-muted">
+          <div className="flex items-center gap-2 rounded-lg bg-warning/10 px-2.5 py-1.5 border border-warning/20">
             <TriangleAlert aria-hidden="true" className="size-3.5 shrink-0 text-warning" />
-            {pluralize(unscored, 'report')} awaiting classification, not yet ranked.
-          </p>
+            <p className="text-xs font-medium text-fg-muted">
+              <span className="font-bold text-fg">{unscored}</span> {pluralize(unscored, 'report')}{' '}
+              awaiting classification.
+            </p>
+          </div>
         ) : null}
       </div>
 
       {/* ── Result summary ───────────────────────────────────────────────── */}
       {feed.status === 'ready' ? (
-        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2">
-          <p className="text-xs text-fg-muted" aria-live="polite">
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border/70 bg-surface-sunken/40 px-3 py-2">
+          <p className="text-xs font-medium text-fg-muted" aria-live="polite">
             {narrowed
               ? `${visible.length} of ${incidents.length} shown`
               : pluralize(incidents.length, 'incident')}
           </p>
-          <div className="flex items-center gap-0.5" role="group" aria-label="Sort incidents">
+          <div
+            className="flex items-center gap-1 rounded-lg bg-surface-sunken p-0.5 border border-border/50"
+            role="group"
+            aria-label="Sort incidents"
+          >
             {(
               [
                 ['priority', 'Priority'],
@@ -155,8 +162,10 @@ export function IncidentQueuePanel({
                 aria-pressed={sort === value}
                 onClick={() => onSortChange(value)}
                 className={cn(
-                  'h-7 px-2 text-xs',
-                  sort === value && 'bg-accent-subtle text-accent-subtle-fg',
+                  'h-6 px-2 text-[11px] font-semibold rounded-md transition-all',
+                  sort === value
+                    ? 'bg-surface text-fg shadow-2xs font-bold'
+                    : 'text-fg-muted hover:text-fg',
                 )}
               >
                 {label}

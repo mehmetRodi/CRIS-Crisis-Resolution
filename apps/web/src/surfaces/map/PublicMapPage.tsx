@@ -4,6 +4,7 @@ import { RefreshCw, Send, TriangleAlert } from 'lucide-react';
 
 import { EmptyState } from '../../components/domain/EmptyState';
 import { Button } from '../../components/ui/button';
+import { cn } from '../../lib/cn';
 import { pluralize } from '../../lib/format';
 import { CitizenShell } from '../../shell/CitizenShell';
 import { IncidentMap } from './IncidentMap';
@@ -43,24 +44,43 @@ export function PublicMapPage() {
         />
 
         {/* ── What this map is ──────────────────────────────────────────── */}
-        <div className="pointer-events-none absolute inset-x-0 top-0 z-[2] p-3">
-          <div className="pointer-events-auto mx-auto flex max-w-2xl flex-wrap items-center gap-3 rounded-lg border border-border bg-surface/95 px-4 py-2.5 shadow-md backdrop-blur">
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-[2] p-4">
+          <div className="pointer-events-auto mx-auto flex max-w-2xl flex-wrap items-center gap-3 rounded-2xl border border-border/80 bg-surface/90 px-4 py-3 shadow-lg backdrop-blur-md">
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-fg">Confirmed incidents</p>
-              <p className="text-xs text-fg-muted">
+              <div className="flex items-center gap-2">
+                <span className="flex size-2 rounded-full bg-success"></span>
+                <p className="text-xs font-bold uppercase tracking-wider text-fg">
+                  Confirmed Incidents
+                </p>
+              </div>
+              <p className="mt-0.5 text-xs text-fg-muted">
                 {state.status === 'loading'
-                  ? 'Loading…'
+                  ? 'Loading live map data…'
                   : state.status === 'error'
                     ? 'Could not load incidents.'
-                    : `${pluralize(incidents.length, 'incident')} verified by a coordinator. Unconfirmed reports are not shown.`}
+                    : `${pluralize(incidents.length, 'incident')} verified by coordinators. Unconfirmed reports are withheld.`}
               </p>
             </div>
-            <Button variant="ghost" size="icon-sm" onClick={refresh} aria-label="Refresh incidents">
-              <RefreshCw aria-hidden="true" />
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              onClick={refresh}
+              aria-label="Refresh incidents"
+              className="rounded-lg hover:bg-surface-hover"
+            >
+              <RefreshCw
+                aria-hidden="true"
+                className={cn('size-4 text-fg-muted', state.status === 'loading' && 'animate-spin')}
+              />
             </Button>
-            <Button variant="primary" size="sm" asChild className="shrink-0">
+            <Button
+              variant="primary"
+              size="sm"
+              asChild
+              className="shrink-0 rounded-xl font-semibold shadow-xs"
+            >
               <Link to="/report">
-                <Send aria-hidden="true" />
+                <Send aria-hidden="true" className="size-3.5" />
                 Report
               </Link>
             </Button>

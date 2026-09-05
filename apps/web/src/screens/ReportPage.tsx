@@ -16,7 +16,7 @@ export function ReportPage() {
   return (
     <CitizenShell
       title="Report an emergency"
-      description="Describe what is happening. It goes straight to emergency coordinators — no account needed, and you can stay anonymous."
+      description="One step at a time. Share what you know; you can review everything before sending."
     >
       <ReportForm />
     </CitizenShell>

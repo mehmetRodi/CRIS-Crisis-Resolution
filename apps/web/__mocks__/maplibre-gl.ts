@@ -75,7 +75,13 @@ export class Marker {
   }
 }
 
-export class NavigationControl {}
+export class NavigationControl {
+  readonly options: unknown;
+
+  constructor(options?: unknown) {
+    this.options = options;
+  }
+}
 
 export class Map {
   static instances: Map[] = [];

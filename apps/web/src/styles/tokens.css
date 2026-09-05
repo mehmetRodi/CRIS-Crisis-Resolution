@@ -32,35 +32,35 @@
   /* A faintly cool off-white rather than pure #fff: a full-bleed white canvas
      under a dense incident table is fatiguing over a long shift, and it leaves
      no lighter value available for raised surfaces to sit on. */
-  --bg: 200 24% 97%;
+  --bg: 160 18% 96%;
   --surface: 0 0% 100%;
   /* Recessed wells — filter trays, empty states, table headers. */
-  --surface-sunken: 200 20% 95%;
+  --surface-sunken: 160 18% 93%;
   /* Hover/active fill for rows and ghost buttons. */
-  --surface-hover: 200 22% 96%;
+  --surface-hover: 160 20% 95%;
   --overlay: 205 30% 12%;
 
   /* ── Text ──────────────────────────────────────────────────────────────── */
   /* Near-black with a cool cast, never pure #000 — pure black on off-white
      over-contrasts and vibrates at small sizes. */
-  --fg: 205 32% 13%;
+  --fg: 200 32% 10%;
   --fg-muted: 205 12% 40%;
   --fg-subtle: 205 11% 55%;
   /* Only for text on a saturated fill (accent buttons, severity chips). */
   --fg-on-solid: 0 0% 100%;
 
   /* ── Lines ─────────────────────────────────────────────────────────────── */
-  --border: 205 20% 89%;
+  --border: 165 15% 86%;
   --border-strong: 205 16% 78%;
 
   /* ── Accent (teal) ─────────────────────────────────────────────────────── */
-  --accent: 184 82% 28%;
-  --accent-hover: 184 84% 23%;
-  --accent-active: 184 86% 19%;
+  --accent: 172 52% 26%;
+  --accent-hover: 172 54% 21%;
+  --accent-active: 172 56% 17%;
   /* Tinted background for selected rows and active facets. */
-  --accent-subtle: 184 52% 94%;
-  --accent-subtle-fg: 184 78% 22%;
-  --accent-border: 184 44% 76%;
+  --accent-subtle: 160 30% 90%;
+  --accent-subtle-fg: 172 55% 21%;
+  --accent-border: 165 28% 72%;
 
   /* ── Focus ring ────────────────────────────────────────────────────────── */
   /* Lighter and more saturated than `--accent` so the ring stays visible when
@@ -120,10 +120,10 @@
   /* ── Elevation ─────────────────────────────────────────────────────────── */
   /* Tinted with the foreground hue instead of neutral black, so shadows read as
      depth in the palette rather than as grey haze laid over it. */
-  --shadow-xs: 0 1px 2px 0 hsl(205 32% 13% / 0.05);
-  --shadow-sm: 0 1px 3px 0 hsl(205 32% 13% / 0.07), 0 1px 2px -1px hsl(205 32% 13% / 0.05);
-  --shadow-md: 0 4px 12px -2px hsl(205 32% 13% / 0.09), 0 2px 4px -2px hsl(205 32% 13% / 0.05);
-  --shadow-lg: 0 12px 28px -6px hsl(205 32% 13% / 0.14), 0 4px 8px -4px hsl(205 32% 13% / 0.06);
+  --shadow-xs: 0 1px 2px 0 hsl(200 32% 10% / 0.05);
+  --shadow-sm: 0 1px 3px 0 hsl(200 32% 10% / 0.07), 0 1px 2px -1px hsl(200 32% 10% / 0.05);
+  --shadow-md: 0 4px 12px -2px hsl(200 32% 10% / 0.09), 0 2px 4px -2px hsl(200 32% 10% / 0.05);
+  --shadow-lg: 0 12px 28px -6px hsl(200 32% 10% / 0.14), 0 4px 8px -4px hsl(200 32% 10% / 0.06);
 }
 
 /*

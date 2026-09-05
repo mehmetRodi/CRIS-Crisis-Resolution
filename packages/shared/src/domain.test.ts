@@ -211,6 +211,7 @@ describe('schema enum sync guard', () => {
       'PRIORITY_SCORED',
       'VERIFICATION_RECORDED',
       'ASSIGNED',
+      'WORK_UPDATED',
       'DUPLICATE_LINKED',
       'ALERT_DISPATCHED',
     ]);

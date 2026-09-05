@@ -21,6 +21,7 @@ import LocationPicker from './LocationPickerMap';
  */
 interface MockMap {
   options: unknown;
+  addControl: ReturnType<typeof vi.fn>;
   flyTo: ReturnType<typeof vi.fn>;
   emit(event: string, payload?: unknown): void;
 }
@@ -109,6 +110,15 @@ describe('LocationPicker', () => {
   it('renders the map with attribution, as OpenStreetMap tiles require', () => {
     render(<LocationPicker value={null} onChange={vi.fn()} />);
     expect(lastMap().options).toMatchObject({ attributionControl: { compact: true } });
+  });
+
+  it('shows a compass control that resets the map orientation', () => {
+    render(<LocationPicker value={null} onChange={vi.fn()} />);
+
+    expect(lastMap().addControl).toHaveBeenCalledWith(
+      expect.objectContaining({ options: { showCompass: true } }),
+      'top-right',
+    );
   });
 
   it('removes the marker from the map when the location is cleared', () => {

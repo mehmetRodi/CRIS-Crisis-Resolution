@@ -11,7 +11,17 @@ import {
   validateReportDraft,
 } from '@crisismap/shared';
 import type { ReportDraft } from '@crisismap/shared';
-import { Camera, Check, CircleCheck, Loader2, TriangleAlert } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  Camera,
+  Check,
+  CircleCheck,
+  CloudOff,
+  Loader2,
+  ShieldCheck,
+  TriangleAlert,
+} from 'lucide-react';
 
 import { useOfflineQueue } from '../OfflineQueueContext';
 import { cn } from '../lib/cn';
@@ -86,14 +96,18 @@ function Chip({
       aria-pressed={selected}
       onClick={onClick}
       className={cn(
-        'inline-flex items-center gap-1.5 rounded border px-3 py-2 text-sm font-medium transition-colors',
+        'inline-flex min-h-11 items-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors',
         selected
-          ? 'border-accent bg-accent text-fg-on-solid'
-          : 'border-border bg-surface text-fg hover:bg-surface-hover',
+          ? 'border-accent bg-accent-subtle text-accent-subtle-fg ring-1 ring-accent'
+          : 'border-border bg-surface text-fg hover:border-border-strong hover:bg-surface-hover',
         className,
       )}
     >
       {children}
+      <Check
+        aria-hidden="true"
+        className={cn('ml-auto size-4 shrink-0', !selected && 'invisible')}
+      />
     </button>
   );
 }
@@ -111,18 +125,32 @@ function FormSection({
   children: React.ReactNode;
 }) {
   return (
-    <section className="space-y-4">
-      <div className="flex items-baseline gap-2">
-        <h2 className="text-sm font-semibold text-fg">{title}</h2>
-        {optional ? <span className="text-xs font-medium text-fg-subtle">Optional</span> : null}
+    <section className="space-y-5 rounded-2xl border border-border bg-surface p-5 shadow-xs sm:p-6">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-lg font-semibold tracking-tight text-fg">{title}</h2>
+        {optional ? (
+          <span className="rounded-full bg-surface-sunken px-2.5 py-1 text-xs font-medium text-fg-muted">
+            Optional
+          </span>
+        ) : (
+          <span className="rounded-full bg-accent-subtle px-2.5 py-1 text-xs font-medium text-accent-subtle-fg">
+            Required
+          </span>
+        )}
       </div>
-      {description ? <p className="-mt-2 text-xs text-fg-muted">{description}</p> : null}
+      {description ? <p className="text-sm leading-relaxed text-fg-muted">{description}</p> : null}
       {children}
     </section>
   );
 }
 
+const REPORT_STEPS = ['Situation', 'Location', 'Details', 'Review'] as const;
+
 export function ReportForm() {
+  const [step, setStep] = useState(0);
+  const stepHeadingRef = useRef<HTMLHeadingElement>(null);
+  const pendingFieldFocus = useRef(false);
+  const previousStep = useRef(0);
   const [draft, setDraft] = useState(createEmptyReportDraft());
   const [photoName, setPhotoName] = useState<string | null>(null);
   const [mediaKey, setMediaKey] = useState<string | null>(null);
@@ -134,8 +162,7 @@ export function ReportForm() {
   const [contactDropped, setContactDropped] = useState(false);
   // 'submitted': the server confirmed it. 'queued': saved locally, offline or
   // after a retryable failure, and will send automatically (CRIS-26). Both show
-  // the same confirmation with different copy — from the citizen's side, either
-  // way they are done and need do nothing else.
+  // the same confirmation layout with distinct delivery guidance.
   const [outcome, setOutcome] = useState<'submitted' | 'queued' | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -203,10 +230,47 @@ export function ReportForm() {
   /** Sends focus to the first field still holding submission up. */
   function focusFirstOutstandingField() {
     const target = outstanding[0];
+    const targetStep = target === 'locationHint' ? 1 : 0;
+    if (target && step !== targetStep) {
+      pendingFieldFocus.current = true;
+      setStep(targetStep);
+      return;
+    }
     if (target === 'text') textRef.current?.focus();
     else if (target === 'category') firstChip(categoryRef.current)?.focus();
     else if (target === 'urgency') firstChip(urgencyRef.current)?.focus();
     else if (target === 'locationHint') locationHintRef.current?.focus();
+  }
+
+  useEffect(() => {
+    if (previousStep.current === step) return;
+    previousStep.current = step;
+    if (pendingFieldFocus.current) {
+      pendingFieldFocus.current = false;
+      const target = outstanding[0];
+      if (target === 'text') textRef.current?.focus();
+      else if (target === 'category') firstChip(categoryRef.current)?.focus();
+      else if (target === 'urgency') firstChip(urgencyRef.current)?.focus();
+      else locationHintRef.current?.focus();
+    } else {
+      stepHeadingRef.current?.focus();
+    }
+  }, [step, outstanding]);
+
+  const stepErrors = outstanding.filter((field) =>
+    step === 0 ? field !== 'locationHint' : step === 1 ? field === 'locationHint' : false,
+  );
+  const continueReason = stepErrors.map((field) => errors[field]).join(' ');
+
+  function nextStep() {
+    if (submitting) return;
+    if (stepErrors.length) {
+      setError(continueReason);
+      focusFirstOutstandingField();
+      return;
+    }
+    setError(null);
+    setStep((current) => Math.min(3, current + 1));
   }
 
   // The confirmation replaces the form in place. Without moving focus, a screen
@@ -293,6 +357,10 @@ export function ReportForm() {
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     if (submitting) return;
+    if (step < 3) {
+      nextStep();
+      return;
+    }
     // The submit is `aria-disabled`, not `disabled`, so it stays focusable and
     // its reason is actually announced (ADR-0037). The trade is that a click
     // still reaches us while the form is incomplete — so answer it by moving
@@ -341,9 +409,18 @@ export function ReportForm() {
         <OfflineQueueBanner />
         <div
           role="status"
-          className="flex flex-col items-center gap-3 rounded-xl border border-success-border bg-success-subtle px-6 py-10 text-center"
+          className={cn(
+            'flex flex-col items-center gap-3 rounded-2xl border px-6 py-10 text-center',
+            outcome === 'queued'
+              ? 'border-warning-border bg-warning-subtle'
+              : 'border-success-border bg-success-subtle',
+          )}
         >
-          <CircleCheck aria-hidden="true" className="size-10 text-success" />
+          {outcome === 'queued' ? (
+            <CloudOff aria-hidden="true" className="size-10 text-warning" />
+          ) : (
+            <CircleCheck aria-hidden="true" className="size-10 text-success" />
+          )}
           <h2
             ref={confirmationRef}
             tabIndex={-1}
@@ -353,8 +430,8 @@ export function ReportForm() {
           </h2>
           <p className="max-w-sm text-sm leading-relaxed text-fg-muted">
             {outcome === 'queued'
-              ? 'Your report is saved on this device and will send automatically as soon as you are back online. You can close this page.'
-              : 'Emergency coordinators have it. It is being classified and ranked now.'}
+              ? 'Your report is saved on this device and is waiting to send. Keep this page open, or reopen CRIS on this device when you are online so it can retry.'
+              : 'Your report has been received for triage and coordinator review.'}
           </p>
 
           {photoDropped ? (
@@ -370,7 +447,15 @@ export function ReportForm() {
             </p>
           ) : null}
 
-          <Button variant="secondary" size="md" onClick={() => setOutcome(null)} className="mt-2">
+          <Button
+            variant="secondary"
+            size="lg"
+            onClick={() => {
+              setStep(0);
+              setOutcome(null);
+            }}
+            className="mt-2"
+          >
             Submit another report
           </Button>
         </div>
@@ -384,274 +469,468 @@ export function ReportForm() {
   return (
     <>
       <OfflineQueueBanner />
-      <form className="space-y-8" aria-label="Emergency report" onSubmit={handleSubmit} noValidate>
-        <FormSection title="What is happening">
-          <div className="space-y-1.5">
-            <Label htmlFor="report-text">
-              Describe the situation <RequiredMark />
-            </Label>
-            <Textarea
-              id="report-text"
-              ref={textRef}
-              // The form is `noValidate` (shared logic owns the gate), so the
-              // required state must be conveyed to assistive tech explicitly.
-              aria-required="true"
-              aria-describedby="report-text-count"
-              rows={5}
-              maxLength={REPORT_TEXT_MAX_LENGTH}
-              value={draft.text}
-              onChange={(event) => setDraft((d) => ({ ...d, text: event.target.value }))}
-              placeholder="What has happened, who is affected, and what is needed."
-              className="text-base"
-            />
-            <p id="report-text-count" className="tabular text-right text-xs text-fg-subtle">
-              {draft.text.length} / {REPORT_TEXT_MAX_LENGTH}
-            </p>
-          </div>
-
-          <fieldset ref={categoryRef} className="space-y-2">
-            <legend className="mb-2 text-sm font-medium text-fg">
-              Type of emergency <RequiredMark />
-            </legend>
-            <div className="flex flex-wrap gap-2">
-              {CATEGORY_OPTIONS.map((category) => {
-                const selected = draft.category === category;
-                const { label, icon: Icon } = categoryMeta(category);
-                return (
-                  <Chip
-                    key={category}
-                    selected={selected}
-                    onClick={() => setDraft((d) => ({ ...d, category: selected ? '' : category }))}
-                  >
-                    <Icon aria-hidden="true" className="size-4 shrink-0" />
-                    {label}
-                  </Chip>
-                );
-              })}
+      <form className="space-y-5" aria-label="Emergency report" onSubmit={handleSubmit} noValidate>
+        <nav aria-label="Report progress" className="grid grid-cols-4 gap-2">
+          {REPORT_STEPS.map((label, index) => (
+            <button
+              key={label}
+              type="button"
+              aria-label={`Go to ${label}`}
+              aria-current={step === index ? 'step' : undefined}
+              onClick={() => {
+                if (!submitting) {
+                  setError(null);
+                  setStep(index);
+                }
+              }}
+              className={cn(
+                'flex min-h-16 flex-col items-center justify-center gap-2 rounded-xl border px-1 py-3 text-xs font-medium transition-colors sm:flex-row',
+                step === index
+                  ? 'border-accent-border bg-accent-subtle text-accent-subtle-fg'
+                  : 'border-border bg-surface text-fg-muted hover:bg-surface-hover',
+              )}
+            >
+              <span
+                className={cn(
+                  'flex size-6 items-center justify-center rounded-full text-[11px]',
+                  step === index ? 'bg-accent text-fg-on-solid' : 'bg-surface-sunken',
+                )}
+              >
+                {index + 1}
+              </span>
+              {label}
+            </button>
+          ))}
+        </nav>
+        <div className="flex items-center justify-between gap-3">
+          <h2 ref={stepHeadingRef} tabIndex={-1} className="text-sm font-medium text-fg-muted">
+            Step {step + 1} of 4 · {REPORT_STEPS[step]}
+          </h2>
+          <span className="flex items-center gap-1.5 text-xs text-fg-muted">
+            <ShieldCheck className="size-3.5" aria-hidden="true" />
+            No account needed
+          </span>
+        </div>
+        <div hidden={step !== 0}>
+          <FormSection
+            title="What is happening"
+            description="Start with these three required details. Location, photos, and contact details are optional."
+          >
+            <div className="space-y-1.5">
+              <Label htmlFor="report-text">
+                Describe the situation <RequiredMark />
+              </Label>
+              <Textarea
+                id="report-text"
+                ref={textRef}
+                // The form is `noValidate` (shared logic owns the gate), so the
+                // required state must be conveyed to assistive tech explicitly.
+                aria-required="true"
+                aria-describedby="report-text-hint report-text-count"
+                rows={5}
+                maxLength={REPORT_TEXT_MAX_LENGTH}
+                value={draft.text}
+                onChange={(event) => setDraft((d) => ({ ...d, text: event.target.value }))}
+                placeholder="What has happened, who is affected, and what is needed."
+                className="rounded-lg text-base leading-relaxed"
+              />
+              <div className="flex items-start justify-between gap-4 text-xs leading-relaxed text-fg-muted">
+                <p id="report-text-hint">Describe the incident without names or contact details.</p>
+                <p id="report-text-count" className="tabular shrink-0">
+                  {draft.text.length} / {REPORT_TEXT_MAX_LENGTH}
+                </p>
+              </div>
             </div>
-          </fieldset>
 
-          <fieldset ref={urgencyRef} className="space-y-2">
-            <legend className="mb-2 text-sm font-medium text-fg">
-              How urgent is it <RequiredMark />
-            </legend>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {URGENCY_OPTIONS.map((urgency) => (
-                <Chip
-                  key={urgency}
-                  selected={draft.urgency === urgency}
-                  onClick={() => setDraft((d) => ({ ...d, urgency }))}
-                  className="justify-center"
-                >
-                  {urgencyLabel(urgency)}
-                </Chip>
-              ))}
-            </div>
-          </fieldset>
-        </FormSection>
+            <fieldset ref={categoryRef} className="space-y-2">
+              <legend className="mb-2 text-sm font-medium text-fg">
+                Type of emergency <RequiredMark />
+              </legend>
+              <div className="grid grid-cols-2 gap-2">
+                {CATEGORY_OPTIONS.map((category) => {
+                  const selected = draft.category === category;
+                  const { label, icon: Icon } = categoryMeta(category);
+                  return (
+                    <Chip
+                      key={category}
+                      selected={selected}
+                      onClick={() =>
+                        setDraft((d) => ({ ...d, category: selected ? '' : category }))
+                      }
+                    >
+                      <Icon aria-hidden="true" className="size-4 shrink-0" />
+                      <span className="min-w-0 break-words text-left">{label}</span>
+                    </Chip>
+                  );
+                })}
+              </div>
+            </fieldset>
 
-        <FormSection
-          title="Where"
-          optional
-          description="Anything here helps responders find you faster, but none of it is required."
-        >
-          {/* A fieldset/legend, matching the chip groups: the picker is a group
+            <fieldset ref={urgencyRef} className="space-y-2">
+              <legend className="mb-2 text-sm font-medium text-fg">
+                How urgent is it <RequiredMark />
+              </legend>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {URGENCY_OPTIONS.map((urgency) => {
+                  return (
+                    <Chip
+                      key={urgency}
+                      selected={draft.urgency === urgency}
+                      onClick={() => setDraft((d) => ({ ...d, urgency }))}
+                      className="justify-between font-semibold"
+                    >
+                      {urgencyLabel(urgency)}
+                    </Chip>
+                  );
+                })}
+              </div>
+            </fieldset>
+          </FormSection>
+        </div>
+        <div hidden={step !== 1}>
+          <FormSection
+            title="Where is help needed?"
+            optional
+            description="Add the incident location or a nearby landmark if you know it."
+          >
+            {/* A fieldset/legend, matching the chip groups: the picker is a group
               of controls, so its heading must name the group programmatically
               rather than sit beside it as loose text (CRIS-27). */}
-          <fieldset className="space-y-2">
-            <legend className="mb-2 text-sm font-medium text-fg">Location</legend>
-            <LocationPicker
-              value={draft.location}
-              onChange={(location) => setDraft((d) => ({ ...d, location }))}
-            />
-          </fieldset>
+            <fieldset className="space-y-2">
+              <legend className="mb-2 text-sm font-medium text-fg">Location</legend>
+              {step === 1 ? (
+                <LocationPicker
+                  value={draft.location}
+                  onChange={(location) => setDraft((d) => ({ ...d, location }))}
+                />
+              ) : null}
+            </fieldset>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="report-location-hint">Landmark or detail</Label>
-            <Input
-              id="report-location-hint"
-              ref={locationHintRef}
-              maxLength={LOCATION_HINT_MAX_LENGTH}
-              value={draft.locationHint}
-              onChange={(event) => setDraft((d) => ({ ...d, locationHint: event.target.value }))}
-              placeholder="Near the blue bridge, second floor"
-            />
-          </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="report-location-hint">Landmark or detail</Label>
+              <Input
+                id="report-location-hint"
+                className="h-12 rounded-lg text-base"
+                ref={locationHintRef}
+                maxLength={LOCATION_HINT_MAX_LENGTH}
+                value={draft.locationHint}
+                onChange={(event) => setDraft((d) => ({ ...d, locationHint: event.target.value }))}
+                placeholder="Near the blue bridge, second floor"
+              />
+            </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="report-subcategory">What is needed</Label>
-            <Input
-              id="report-subcategory"
-              value={draft.subcategory}
-              onChange={(event) => setDraft((d) => ({ ...d, subcategory: event.target.value }))}
-              placeholder="Water, food, medical supplies"
-            />
-          </div>
-        </FormSection>
-
-        <FormSection title="Photo" optional>
-          <button
-            type="button"
-            // The visible copy spans several elements, which concatenates into a
-            // noisy name. State it once, and reflect the current selection so
-            // the control is not just "button" (CRIS-27). Because this label
-            // overrides the element's content it must also carry the upload
-            // outcome — otherwise the only mention of a failure is text the
-            // label hides (see the live region below).
-            aria-label={photoLabel}
-            // `aria-disabled`/`aria-busy` rather than `disabled` (ADR-0037): a
-            // disabled button is blurred to the document body the instant the
-            // upload starts, dropping the user out of the form mid-interaction.
-            // The gate is the re-entry guard in the handler instead.
-            aria-disabled={photoBusy}
-            aria-busy={photoUploading}
-            onClick={() => {
-              if (photoBusy) return;
-              fileInputRef.current?.click();
-            }}
-            className={cn(
-              'flex w-full flex-col items-center gap-1.5 rounded-lg border-2 border-dashed px-4 py-8 text-center transition-colors',
-              photoBusy && 'opacity-70',
-              mediaKey
-                ? 'border-success-border bg-success-subtle'
-                : photoError
-                  ? 'border-danger-border bg-danger-subtle'
-                  : 'border-border-strong bg-surface hover:bg-surface-hover',
-            )}
+            <div className="space-y-1.5">
+              <Label htmlFor="report-subcategory">What is needed</Label>
+              <Input
+                id="report-subcategory"
+                className="h-12 rounded-lg text-base"
+                value={draft.subcategory}
+                onChange={(event) => setDraft((d) => ({ ...d, subcategory: event.target.value }))}
+                placeholder="Water, food, medical supplies"
+              />
+            </div>
+          </FormSection>
+        </div>
+        <div hidden={step !== 2} className="space-y-5">
+          <FormSection
+            title="Photo"
+            optional
+            description="Add an image to help explain the situation."
           >
-            {photoUploading ? (
-              <Loader2 aria-hidden="true" className="size-6 animate-spin text-fg-muted" />
-            ) : mediaKey ? (
-              <Check aria-hidden="true" className="size-6 text-success" />
-            ) : photoError ? (
-              <TriangleAlert aria-hidden="true" className="size-6 text-danger" />
-            ) : (
-              <Camera aria-hidden="true" className="size-6 text-fg-subtle" />
-            )}
+            <button
+              type="button"
+              // The visible copy spans several elements, which concatenates into a
+              // noisy name. State it once, and reflect the current selection so
+              // the control is not just "button" (CRIS-27). Because this label
+              // overrides the element's content it must also carry the upload
+              // outcome — otherwise the only mention of a failure is text the
+              // label hides (see the live region below).
+              aria-label={photoLabel}
+              // `aria-disabled`/`aria-busy` rather than `disabled` (ADR-0037): a
+              // disabled button is blurred to the document body the instant the
+              // upload starts, dropping the user out of the form mid-interaction.
+              // The gate is the re-entry guard in the handler instead.
+              aria-disabled={photoBusy}
+              aria-busy={photoUploading}
+              onClick={() => {
+                if (photoBusy) return;
+                fileInputRef.current?.click();
+              }}
+              className={cn(
+                'flex w-full flex-col items-center gap-2 rounded-xl border border-dashed px-4 py-6 text-center transition-colors',
+                photoBusy && 'opacity-70',
+                mediaKey
+                  ? 'border-success-border bg-success-subtle shadow-2xs'
+                  : photoError
+                    ? 'border-danger-border bg-danger-subtle shadow-2xs'
+                    : 'border-border-strong/70 bg-surface hover:bg-surface-hover hover:border-accent/60 shadow-2xs',
+              )}
+            >
+              {photoUploading ? (
+                <Loader2 aria-hidden="true" className="size-7 animate-spin text-accent" />
+              ) : mediaKey ? (
+                <div className="flex size-10 items-center justify-center rounded-full bg-success/15 text-success ring-1 ring-success/30">
+                  <Check aria-hidden="true" className="size-6" />
+                </div>
+              ) : photoError ? (
+                <div className="flex size-10 items-center justify-center rounded-full bg-danger/15 text-danger ring-1 ring-danger/30">
+                  <TriangleAlert aria-hidden="true" className="size-6" />
+                </div>
+              ) : (
+                <div className="flex size-10 items-center justify-center rounded-full bg-accent/10 text-accent ring-1 ring-accent/20">
+                  <Camera aria-hidden="true" className="size-5" />
+                </div>
+              )}
 
-            {photoName ? (
-              <>
-                <span
-                  className={cn(
-                    'max-w-full truncate text-sm font-medium',
-                    mediaKey ? 'text-success' : 'text-fg',
-                  )}
-                >
-                  {photoName}
-                </span>
-                {/* A failure must not look identical to the muted "tap to
+              {photoName ? (
+                <>
+                  <span
+                    className={cn(
+                      'max-w-full truncate text-sm font-semibold',
+                      mediaKey ? 'text-success' : 'text-fg',
+                    )}
+                  >
+                    {photoName}
+                  </span>
+                  {/* A failure must not look identical to the muted "tap to
                     change" hint — mobile already colours this; web was the odd
                     one out. */}
-                <span
-                  className={cn(
-                    'text-xs',
-                    photoError ? 'font-medium text-danger' : 'text-fg-subtle',
-                  )}
-                >
-                  {photoUploading ? 'Uploading…' : photoError ? photoError : 'Tap to change photo'}
-                </span>
-              </>
-            ) : (
-              <>
-                <span className="text-sm font-medium text-fg">Add a photo</span>
-                <span className="text-xs text-fg-subtle">
-                  Images help responders understand the situation
-                </span>
-              </>
-            )}
-          </button>
+                  <span
+                    className={cn(
+                      'text-xs',
+                      photoError ? 'font-semibold text-danger' : 'text-fg-subtle',
+                    )}
+                  >
+                    {photoUploading
+                      ? 'Uploading…'
+                      : photoError
+                        ? photoError
+                        : 'Tap to change photo'}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="text-sm font-semibold text-fg">Add a photo</span>
+                  <span className="text-xs text-fg-muted">JPEG, PNG, or WebP</span>
+                </>
+              )}
+            </button>
 
-          {/* Persistently mounted, never conditionally rendered (ADR-0037): a
+            {/* Persistently mounted, never conditionally rendered (ADR-0037): a
               live region that appears at the same moment as its text is
               frequently missed. All upload state is announced here because the
               button's `aria-label` hides its own content from assistive tech.
               Named because the form carries more than one live region — the name
               is what lets a user, and a test, tell them apart. */}
-          <span role="status" aria-label="Photo upload status" className="sr-only">
-            {photoStatus}
-          </span>
+            <span role="status" aria-label="Photo upload status" className="sr-only">
+              {photoStatus}
+            </span>
 
-          <input
-            ref={fileInputRef}
-            type="file"
-            // Narrower than `image/*`: the presigned policy accepts only these
-            // three, so offering HEIC or GIF invites a rejection after the fact.
-            accept={ALLOWED_MEDIA_CONTENT_TYPES.join(',')}
-            className="hidden"
-            onChange={pickPhoto}
-          />
-        </FormSection>
-
-        <FormSection title="About you" optional>
-          <div className="flex items-center justify-between gap-4 rounded-lg border border-border bg-surface-sunken px-4 py-3">
-            <div className="min-w-0">
-              <Label htmlFor="report-anonymous">Report anonymously</Label>
-              <FieldHint className="mt-0.5">
-                Your identity is hidden from responders and never appears on the map.
-              </FieldHint>
-            </div>
-            <Switch
-              id="report-anonymous"
-              checked={draft.anonymous}
-              onCheckedChange={(anonymous) => setDraft((d) => ({ ...d, anonymous }))}
+            <input
+              ref={fileInputRef}
+              type="file"
+              // Narrower than `image/*`: the presigned policy accepts only these
+              // three, so offering HEIC or GIF invites a rejection after the fact.
+              accept={ALLOWED_MEDIA_CONTENT_TYPES.join(',')}
+              className="hidden"
+              onChange={pickPhoto}
             />
-          </div>
+          </FormSection>
 
-          {!draft.anonymous ? (
-            <div className="space-y-1.5">
-              <Label htmlFor="report-contact">Contact details</Label>
-              <Input
-                id="report-contact"
-                autoCapitalize="none"
-                inputMode="email"
-                value={draft.contact}
-                onChange={(event) => setDraft((d) => ({ ...d, contact: event.target.value }))}
-                placeholder="Phone or email"
-                aria-describedby="report-contact-hint"
+          <FormSection title="About you" optional>
+            <div className="flex items-center justify-between gap-4 rounded-xl bg-surface-sunken px-4 py-4">
+              <div className="min-w-0">
+                <Label htmlFor="report-anonymous" className="font-semibold text-fg">
+                  Report anonymously
+                </Label>
+                <FieldHint className="mt-0.5 text-xs text-fg-muted">
+                  Your identity is hidden from responders and never appears on the map.
+                </FieldHint>
+              </div>
+              <Switch
+                id="report-anonymous"
+                checked={draft.anonymous}
+                onCheckedChange={(anonymous) => setDraft((d) => ({ ...d, anonymous }))}
               />
-              <FieldHint id="report-contact-hint">
-                Used only if a responder needs to reach you. Never shown publicly and never sent to
-                the classification model.
-              </FieldHint>
             </div>
-          ) : null}
-        </FormSection>
 
-        {error ? (
-          <div
-            role="alert"
-            className="rounded-lg border border-danger-border bg-danger-subtle px-4 py-3 text-sm text-danger"
+            {!draft.anonymous ? (
+              <div className="space-y-1.5 pt-1">
+                <Label htmlFor="report-contact" className="font-medium">
+                  Contact details
+                </Label>
+                <Input
+                  id="report-contact"
+                  autoCapitalize="none"
+                  inputMode="email"
+                  value={draft.contact}
+                  onChange={(event) => setDraft((d) => ({ ...d, contact: event.target.value }))}
+                  placeholder="Phone or email"
+                  aria-describedby="report-contact-hint"
+                  className="h-12 rounded-lg text-base"
+                />
+                <FieldHint id="report-contact-hint" className="text-xs text-fg-muted">
+                  Used only if a responder needs to reach you. Never shown publicly and never sent
+                  to the classification model.
+                </FieldHint>
+              </div>
+            ) : null}
+          </FormSection>
+        </div>
+        <div hidden={step !== 3}>
+          <section
+            className="rounded-2xl border border-border bg-surface p-5 shadow-xs sm:p-6"
+            aria-labelledby="review-title"
           >
-            {error}
+            <h2 id="review-title" className="text-xl font-semibold tracking-tight">
+              Ready to send?
+            </h2>
+            <p className="mt-2 text-sm text-fg-muted">
+              Check your report. You can return to any step to make changes.
+            </p>
+            <dl className="mt-6 divide-y divide-border text-sm">
+              {[
+                ['Situation', draft.text || 'Description still needed', 0],
+                [
+                  'Category',
+                  draft.category ? categoryMeta(draft.category).label : 'Choose a category',
+                  0,
+                ],
+                ['Urgency', draft.urgency ? urgencyLabel(draft.urgency) : 'Choose an urgency', 0],
+                [
+                  'Location',
+                  [
+                    draft.location
+                      ? `${draft.location.lat.toFixed(4)}, ${draft.location.lng.toFixed(4)}`
+                      : '',
+                    draft.locationHint,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ') || 'Not provided',
+                  1,
+                ],
+                ['Help needed', draft.subcategory || 'Not specified', 1],
+                [
+                  'Photo',
+                  photoUploading
+                    ? 'Uploading…'
+                    : mediaKey
+                      ? photoName
+                      : photoName
+                        ? 'Upload failed — photo will not be included'
+                        : 'Not attached',
+                  2,
+                ],
+                [
+                  'Contact',
+                  draft.anonymous
+                    ? 'Anonymous report'
+                    : draft.contact || 'No contact details provided',
+                  2,
+                ],
+              ].map(([label, value, target]) => (
+                <div key={String(label)} className="flex items-start justify-between gap-4 py-4">
+                  <div className="min-w-0">
+                    <dt className="text-xs text-fg-muted">{label}</dt>
+                    <dd className="mt-1.5 whitespace-pre-wrap break-words font-medium leading-relaxed">
+                      {value}
+                    </dd>
+                  </div>
+                  <button
+                    type="button"
+                    className="shrink-0 rounded px-2 py-1 text-xs font-medium text-accent hover:bg-accent-subtle"
+                    aria-label={`Edit ${label}`}
+                    onClick={() => {
+                      if (!submitting) setStep(Number(target));
+                    }}
+                  >
+                    Edit
+                  </button>
+                </div>
+              ))}
+            </dl>
+            <p className="mt-3 rounded-xl bg-accent-subtle p-4 text-xs leading-relaxed text-accent-subtle-fg">
+              Your report will be sent for triage and coordinator review. If you are offline, we
+              will try to save it on this device for retry.
+            </p>
+          </section>
+        </div>
+        <div
+          role="alert"
+          className={
+            error
+              ? 'rounded-xl border border-danger-border bg-danger-subtle px-4 py-3 text-sm font-medium text-danger'
+              : 'sr-only'
+          }
+        >
+          {error ?? ''}
+        </div>
+
+        <div className="sticky bottom-0 z-10 space-y-3 border-t border-border bg-bg/95 py-4 backdrop-blur-md">
+          <div className="flex items-center gap-3">
+            {step > 0 ? (
+              <Button
+                type="button"
+                variant="secondary"
+                size="lg"
+                aria-disabled={submitting}
+                onClick={() => {
+                  if (!submitting) {
+                    setError(null);
+                    setStep((current) => current - 1);
+                  }
+                }}
+              >
+                <ArrowLeft aria-hidden="true" />
+                Back
+              </Button>
+            ) : null}
+            {step < 3 ? (
+              <Button
+                type="button"
+                size="lg"
+                className="ml-auto h-12 px-7"
+                aria-disabled={Boolean(continueReason)}
+                aria-describedby={continueReason ? 'report-continue-requirements' : undefined}
+                onClick={nextStep}
+              >
+                {step === 2 ? 'Review report' : 'Continue'}
+                <ArrowRight aria-hidden="true" />
+              </Button>
+            ) : (
+              <Button
+                type="submit"
+                variant="primary"
+                size="xl"
+                className="ml-auto h-12 flex-1 rounded-xl text-base font-semibold"
+                // `aria-disabled` rather than `disabled`: a disabled button leaves
+                // the tab order, so the reason hanging off `aria-describedby` could
+                // never be reached by the keyboard user who most needs it
+                // (ADR-0037). The gate itself lives in `handleSubmit`.
+                aria-disabled={!canSubmit}
+                // Keyed to the blocking reason, not to `canSubmit` — while
+                // submitting there is nothing outstanding to explain, and pointing
+                // at an empty element would give the button a description that says
+                // nothing.
+                aria-describedby={blockedReason ? 'report-submit-requirements' : undefined}
+              >
+                {submitting ? <Loader2 aria-hidden="true" className="animate-spin size-5" /> : null}
+                {submitting ? 'Sending…' : 'Send report'}
+              </Button>
+            )}
           </div>
-        ) : null}
-
-        <div className="space-y-3">
-          <Button
-            type="submit"
-            variant="primary"
-            size="xl"
-            // `aria-disabled` rather than `disabled`: a disabled button leaves
-            // the tab order, so the reason hanging off `aria-describedby` could
-            // never be reached by the keyboard user who most needs it
-            // (ADR-0037). The gate itself lives in `handleSubmit`.
-            aria-disabled={!canSubmit}
-            // Keyed to the blocking reason, not to `canSubmit` — while
-            // submitting there is nothing outstanding to explain, and pointing
-            // at an empty element would give the button a description that says
-            // nothing.
-            aria-describedby={blockedReason ? 'report-submit-requirements' : undefined}
-          >
-            {submitting ? <Loader2 aria-hidden="true" className="animate-spin" /> : null}
-            {submitting ? 'Sending…' : 'Send report'}
-          </Button>
+          {continueReason ? (
+            <span id="report-continue-requirements" className="sr-only">
+              {continueReason}
+            </span>
+          ) : null}
           {blockedReason ? (
             <span id="report-submit-requirements" className="sr-only">
               {blockedReason}
             </span>
           ) : null}
 
-          <p className="text-center text-xs text-fg-subtle">
+          <p className="text-center text-xs text-fg-muted">
             Reports are encrypted in transit and at rest.
           </p>
         </div>
