@@ -1,4 +1,4 @@
-import type { AppSyncIdentityCognito, AppSyncResolverEvent } from 'aws-lambda';
+import type { AppSyncIdentityCognito } from 'aws-lambda';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import {
   DynamoDBDocumentClient,
@@ -25,6 +25,7 @@ import {
   type ReportWorkView,
 } from '@crisismap/shared';
 import { buildWorkUpdate, type WorkActor, type WorkRecord } from './core';
+import type { FunctionResolverEvent } from '../appsync-event';
 import {
   hasExpectedErrorCode,
   withResolverErrorMetrics,
@@ -48,7 +49,7 @@ interface Args {
   note?: string | null;
   targetUsername?: string | null;
 }
-function actorOf(event: AppSyncResolverEvent<Args>): WorkActor {
+function actorOf(event: FunctionResolverEvent<Args>): WorkActor {
   const identity = event.identity as AppSyncIdentityCognito | undefined;
   const role = highestRole(identity?.groups ?? []);
   if (!identity?.sub || !role || role === UserRole.CITIZEN)
@@ -109,10 +110,10 @@ async function targetPerson(username: string) {
     throw error;
   }
 }
-async function resolve(event: AppSyncResolverEvent<Args>): Promise<ReportWorkView | string[]> {
+async function resolve(event: FunctionResolverEvent<Args>): Promise<ReportWorkView | string[]> {
   const actor = actorOf(event);
   const workTable = env('REPORT_WORK_TABLE_NAME');
-  if (event.info.fieldName === 'listMyReportWork') {
+  if (event.fieldName === 'listMyReportWork') {
     const ids: string[] = [];
     let key: Record<string, unknown> | undefined;
     // Bounded MVP read, explicit failure instead of silently incomplete "my tasks".
@@ -166,9 +167,8 @@ async function resolve(event: AppSyncResolverEvent<Args>): Promise<ReportWorkVie
       } as WorkRecord)
     : { id: reportId, version: 0, updates: [], createdAt: now, updatedAt: now };
   const status = report.status as ReportStatus;
-  if (event.info.fieldName === 'getReportWork') return view(current, status, actor);
-  if (event.info.fieldName !== 'updateReportWork')
-    throw new Error('VALIDATION: Unknown operation.');
+  if (event.fieldName === 'getReportWork') return view(current, status, actor);
+  if (event.fieldName !== 'updateReportWork') throw new Error('VALIDATION: Unknown operation.');
   const action = event.arguments.action as WorkAction;
   if (action === WorkAction.ASSIGN && !canCoordinateWork(actor.role))
     throw new Error('FORBIDDEN: Only coordinators can assign a person.');

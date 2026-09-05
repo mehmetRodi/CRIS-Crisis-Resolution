@@ -1,8 +1,8 @@
-import type { AppSyncResolverHandler } from 'aws-lambda';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import type { PublicReport } from '@crisismap/shared';
 
+import type { FunctionResolverHandler } from '../appsync-event';
 import { PUBLIC_REPORT_READ_LIMIT, createPublicReportReader } from './store';
 
 /**
@@ -19,7 +19,7 @@ const reader = createPublicReportReader(
   }),
 );
 
-export const handler: AppSyncResolverHandler<{ limit?: number | null }, PublicReport[]> = async (
+export const handler: FunctionResolverHandler<{ limit?: number | null }, PublicReport[]> = async (
   event,
 ) => reader.list(event.arguments?.limit ?? PUBLIC_REPORT_READ_LIMIT);
 

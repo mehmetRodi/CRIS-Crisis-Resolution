@@ -15,11 +15,7 @@
  * authority matrix to check here — AppSync rejects any other caller before
  * this handler ever runs.
  */
-import type {
-  AppSyncIdentityCognito,
-  AppSyncResolverEvent,
-  AppSyncResolverHandler,
-} from 'aws-lambda';
+import type { AppSyncIdentityCognito } from 'aws-lambda';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
 import { ulid } from 'ulid';
@@ -31,6 +27,7 @@ import {
   VersionConflictError,
   type CurrentReport,
 } from './core';
+import type { FunctionResolverEvent, FunctionResolverHandler } from '../appsync-event';
 import { publishAssignmentUpdate } from './publish';
 import {
   ResolverOperation,
@@ -55,7 +52,7 @@ interface AssignTeamArgs {
 }
 
 async function resolveTeamAssignment(
-  event: AppSyncResolverEvent<AssignTeamArgs>,
+  event: FunctionResolverEvent<AssignTeamArgs>,
 ): Promise<Record<string, unknown>> {
   const identity = event.identity as AppSyncIdentityCognito | undefined;
   const actorRole: TransitionActor | null = highestRole(identity?.groups ?? undefined);
@@ -165,7 +162,7 @@ async function resolveTeamAssignment(
   return updated;
 }
 
-export const handler: AppSyncResolverHandler<
+export const handler: FunctionResolverHandler<
   AssignTeamArgs,
   Record<string, unknown>
 > = withResolverErrorMetrics(

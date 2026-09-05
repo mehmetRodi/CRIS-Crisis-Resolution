@@ -14,7 +14,6 @@
  * shape. Because the GraphQL argument type contains only public fields, reporter
  * identity/contact/notes and raw report text cannot travel this channel (§5.6).
  */
-import type { AppSyncResolverHandler } from 'aws-lambda';
 import type {
   Category,
   PriorityBand,
@@ -22,6 +21,8 @@ import type {
   ReportStatus,
   Urgency,
 } from '@crisismap/shared';
+
+import type { FunctionResolverHandler } from '../appsync-event';
 
 type PublishArgs = {
   reportId: string;
@@ -40,7 +41,7 @@ type PublishArgs = {
   updatedAt?: string | null;
 };
 
-export const handler: AppSyncResolverHandler<PublishArgs, PublicReport> = async (event) => {
+export const handler: FunctionResolverHandler<PublishArgs, PublicReport> = async (event) => {
   const a = event.arguments;
   return {
     reportId: a.reportId,

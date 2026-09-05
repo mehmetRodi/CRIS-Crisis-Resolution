@@ -70,6 +70,11 @@ rationale in ADR-0011):
 - **Put resolver+table functions in the data stack.** If a `defineFunction` is both a schema
   resolver and granted table access in `backend.ts`, set `resourceGroupName: 'data'` to avoid
   a nested-stack circular dependency.
+- **Type the event as `FunctionResolverEvent`, not `AppSyncResolverEvent`.** Amplify's
+  function directive invokes the Lambda with `{ typeName, fieldName, arguments, identity,
+source, request, prev }` and no `info` block. A handler serving several fields branches on
+  the top-level `event.fieldName`; `event.info.fieldName` is `undefined` at runtime and no
+  longer type-checks (`functions/appsync-event.ts`, ADR-0065).
 - **Custom subscriptions need a `.handler()`**, not just an auth rule (an AppSync JS resolver
   that sets the filter). With the currently pinned Amplify schema processor,
   `a.handler.custom` does not support Identity Pool guest/authenticated rules; decide and document

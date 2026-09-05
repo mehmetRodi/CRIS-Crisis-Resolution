@@ -1,17 +1,14 @@
 /**
- * Builders for AppSync resolver events (ADR-0046).
+ * Builders for AppSync resolver events (ADR-0046, ADR-0065).
  *
  * Handler integration tests exercise the real `handler.ts` modules, so they
- * need structurally-complete `AppSyncResolverEvent`s and Cognito identities —
- * the parts of the wire contract the unit-tested `core.ts` layer never sees.
+ * need structurally-complete events and Cognito identities — the parts of the
+ * wire contract the unit-tested `core.ts` layer never sees. The event mirrors
+ * the function-directive payload (`typeName`/`fieldName` at the top level, no
+ * `info`); see `../appsync-event.ts`.
  */
-import type {
-  AppSyncIdentity,
-  AppSyncIdentityCognito,
-  AppSyncResolverEvent,
-  AppSyncResolverHandler,
-  Context,
-} from 'aws-lambda';
+import type { AppSyncIdentity, AppSyncIdentityCognito, Context } from 'aws-lambda';
+import type { FunctionResolverEvent, FunctionResolverHandler } from '../appsync-event';
 
 /**
  * A userPool caller as AppSync presents it. `groups` stays `null` unless given —
@@ -36,28 +33,24 @@ export function cognitoIdentity(
 export function appSyncEvent<TArgs>(
   args: TArgs,
   identity: AppSyncIdentity | null = null,
-): AppSyncResolverEvent<TArgs> {
+  field: { typeName?: string; fieldName?: string } = {},
+): FunctionResolverEvent<TArgs> {
   return {
+    typeName: field.typeName ?? 'Mutation',
+    fieldName: field.fieldName ?? 'testField',
     arguments: args,
     identity: identity ?? undefined,
     source: null,
     request: { headers: {}, domainName: null },
-    info: {
-      selectionSetList: [],
-      selectionSetGraphQL: '',
-      parentTypeName: 'Mutation',
-      fieldName: 'testField',
-      variables: {},
-    },
     prev: null,
     stash: {},
-  } as AppSyncResolverEvent<TArgs>;
+  } as FunctionResolverEvent<TArgs>;
 }
 
 /** Invoke a resolver handler the way Lambda does, returning its resolved value. */
 export async function invokeHandler<TArgs, TResult>(
-  handler: AppSyncResolverHandler<TArgs, TResult>,
-  event: AppSyncResolverEvent<TArgs>,
+  handler: FunctionResolverHandler<TArgs, TResult>,
+  event: FunctionResolverEvent<TArgs>,
 ): Promise<TResult> {
   const result = await handler(event, {} as Context, () => undefined);
   return result as TResult;

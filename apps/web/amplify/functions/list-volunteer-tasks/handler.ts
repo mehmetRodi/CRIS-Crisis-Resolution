@@ -1,7 +1,7 @@
-import type { AppSyncResolverHandler } from 'aws-lambda';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
 import type { VolunteerTask } from '@crisismap/shared';
+import type { FunctionResolverHandler } from '../appsync-event';
 import { createVolunteerTaskReader } from './store';
 
 const reader = createVolunteerTaskReader(
@@ -16,7 +16,7 @@ const reader = createVolunteerTaskReader(
 );
 
 /** AppSync authorizes the caller's Cognito group before invoking this resolver. */
-export const handler: AppSyncResolverHandler<Record<string, never>, VolunteerTask[]> = async () =>
+export const handler: FunctionResolverHandler<Record<string, never>, VolunteerTask[]> = async () =>
   reader.list();
 
 function requireEnv(name: string): string {

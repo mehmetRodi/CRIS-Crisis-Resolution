@@ -11,11 +11,7 @@
  * AWS adapter. Table names are injected as env vars by `backend.ts`.
  */
 import { randomUUID } from 'node:crypto';
-import type {
-  AppSyncIdentityCognito,
-  AppSyncResolverEvent,
-  AppSyncResolverHandler,
-} from 'aws-lambda';
+import type { AppSyncIdentityCognito } from 'aws-lambda';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
 import { ulid } from 'ulid';
@@ -26,6 +22,7 @@ import {
   type ReportRecord,
   type SubmitReportInput,
 } from './core';
+import type { FunctionResolverEvent, FunctionResolverHandler } from '../appsync-event';
 import { ResolverOperation, withResolverErrorMetrics } from '../resolver-metrics';
 
 const REPORT_TABLE = requireEnv('REPORT_TABLE_NAME');
@@ -40,7 +37,7 @@ const docClient = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
 type SubmitReportArgs = Omit<SubmitReportInput, 'reporterId'>;
 
 async function resolveSubmitReport(
-  event: AppSyncResolverEvent<SubmitReportArgs>,
+  event: FunctionResolverEvent<SubmitReportArgs>,
 ): Promise<ReportRecord> {
   const reporterId = cognitoSub(event.identity);
   const input: SubmitReportInput = { ...event.arguments, reporterId };
@@ -91,7 +88,7 @@ async function resolveSubmitReport(
   }
 }
 
-export const handler: AppSyncResolverHandler<SubmitReportArgs, ReportRecord> =
+export const handler: FunctionResolverHandler<SubmitReportArgs, ReportRecord> =
   withResolverErrorMetrics(
     ResolverOperation.SUBMIT_REPORT,
     (error) => error instanceof SubmitValidationError,

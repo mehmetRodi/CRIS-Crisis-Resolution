@@ -18,7 +18,6 @@
  * file is the thin AWS adapter. Bucket name and the presign role's ARN are
  * injected as env vars by `backend.ts`.
  */
-import type { AppSyncResolverEvent, AppSyncResolverHandler } from 'aws-lambda';
 import { S3Client } from '@aws-sdk/client-s3';
 import { AssumeRoleCommand, STSClient } from '@aws-sdk/client-sts';
 import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
@@ -27,6 +26,7 @@ import {
   MediaUploadValidationError,
   type CreateMediaUploadUrlInput,
 } from './core';
+import type { FunctionResolverEvent, FunctionResolverHandler } from '../appsync-event';
 import { ResolverOperation, withResolverErrorMetrics } from '../resolver-metrics';
 
 const BUCKET_NAME = requireEnv('MEDIA_BUCKET_NAME');
@@ -70,7 +70,7 @@ async function getPresignS3Client(): Promise<S3Client> {
 }
 
 async function resolveMediaUploadUrl(
-  event: AppSyncResolverEvent<CreateMediaUploadUrlInput>,
+  event: FunctionResolverEvent<CreateMediaUploadUrlInput>,
 ): Promise<CreateMediaUploadUrlResult> {
   const plan = buildMediaUploadPlan(event.arguments);
   const s3Client = await getPresignS3Client();
@@ -91,7 +91,7 @@ async function resolveMediaUploadUrl(
   return { url, fields, key: plan.key };
 }
 
-export const handler: AppSyncResolverHandler<
+export const handler: FunctionResolverHandler<
   CreateMediaUploadUrlInput,
   CreateMediaUploadUrlResult
 > = withResolverErrorMetrics(

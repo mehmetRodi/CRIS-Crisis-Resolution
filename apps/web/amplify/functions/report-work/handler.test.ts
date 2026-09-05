@@ -27,12 +27,11 @@ function event(
   action: string = WorkAction.CLAIM,
   role: UserRole = UserRole.VOLUNTEER,
 ) {
-  const result = appSyncEvent(
+  return appSyncEvent(
     { reportId: 'r1', expectedVersion: 0, action, targetUsername: 'responder@example.test' },
     cognitoIdentity({ sub: 'actor', groups: [role] }),
+    { typeName: fieldName === 'updateReportWork' ? 'Mutation' : 'Query', fieldName },
   );
-  result.info.fieldName = fieldName;
-  return result;
 }
 const report = { id: 'r1', status: 'VERIFIED', version: 4 };
 function queueReads(work?: Record<string, unknown>) {
@@ -140,6 +139,15 @@ describe('Work resolver integration', () => {
     fakeDynamo.queue('GetCommand', {});
     await expect(handler(event())).rejects.toThrow('NOT_FOUND');
     expect(fakeDynamo.sentOf('TransactWriteCommand')).toHaveLength(0);
+  });
+  it('routes on the top-level fieldName Amplify sends, not a resolver info block', async () => {
+    // The function directive invokes with { typeName, fieldName, arguments, … };
+    // reading `info.fieldName` threw on every real call (ADR-0065).
+    expect(event('getReportWork')).not.toHaveProperty('info');
+    queueReads();
+    await expect(handler(event('getReportWork'))).resolves.toMatchObject({ reportId: 'r1' });
+    queueReads();
+    await expect(handler(event('deleteReportWork'))).rejects.toThrow('VALIDATION');
   });
   it('filters My tasks by authenticated identity in the server read', async () => {
     fakeDynamo.queue('ScanCommand', { Items: [{ id: 'r1' }] });
